@@ -31,9 +31,9 @@ MANIFEST
 *.pt
 *.pth
 
-# PDB files (except examples)
+# PDB files (except example directory)
 *.pdb
-!examples/*.pdb
+!example/*.pdb
 
 # Temporary files
 *.tmp
