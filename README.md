@@ -11,7 +11,9 @@ pip install git+https://github.com/eightmm/plfeature.git
 
 ## 🚀 Quick Start
 
-### Molecule Features
+<details open>
+<summary><b>Molecule Features</b></summary>
+
 ```python
 from plfeature import MoleculeFeaturizer
 from rdkit import Chem
@@ -27,23 +29,12 @@ for mol in suppl:
 featurizer = MoleculeFeaturizer("CC(=O)Oc1ccccc1C(=O)O")
 features = featurizer.get_feature()  # All descriptors and fingerprints
 node, edge, adj = featurizer.get_graph()  # Graph representation
-
-# With custom SMARTS patterns
-custom_patterns = {
-    'aromatic_nitrogen': 'n',
-    'carboxyl': 'C(=O)O',
-    'hydroxyl': '[OH]'
-}
-featurizer = MoleculeFeaturizer("c1ccncc1CCO", custom_smarts=custom_patterns)
-node, edge, adj = featurizer.get_graph()
-# node['node_feats'] now has 157 + 3 dimensions (base features + custom patterns)
-
-# Without hydrogens
-featurizer = MoleculeFeaturizer("c1ccncc1CCO", hydrogen=False)
-features = featurizer.get_feature()  # Features without H atoms
 ```
+</details>
 
-### Protein Features
+<details>
+<summary><b>Protein Features</b></summary>
+
 ```python
 from plfeature import ProteinFeaturizer
 
@@ -58,8 +49,11 @@ atom_node, atom_edge = featurizer.get_atom_graph(distance_cutoff=4.0)
 # Residue-level features (node/edge format)
 res_node, res_edge = featurizer.get_features(distance_cutoff=8.0)
 ```
+</details>
 
-### Hierarchical Features with ESM Embeddings
+<details>
+<summary><b>Hierarchical Features with ESM Embeddings</b></summary>
+
 ```python
 from plfeature.protein_featurizer import HierarchicalFeaturizer
 
@@ -92,8 +86,11 @@ atom_to_residue = data.atom_to_residue  # [N_atom]
 # Select subset of residues (e.g., binding pocket)
 pocket = data.select_residues([10, 11, 12, 45, 46])
 ```
+</details>
 
-### Interaction Features (PLI)
+<details>
+<summary><b>Interaction Features (PLI)</b></summary>
+
 ```python
 from plfeature import PLInteractionFeaturizer
 from rdkit import Chem
@@ -128,8 +125,11 @@ protein_pharm, ligand_pharm = featurizer.get_atom_pharmacophore_features()
 # Get summary of detected interactions
 print(featurizer.get_interaction_summary())
 ```
+</details>
 
-### PDB Standardization
+<details>
+<summary><b>PDB Standardization</b></summary>
+
 ```python
 from plfeature import PDBStandardizer
 
@@ -162,6 +162,7 @@ standardize_pdb("messy.pdb", "clean.pdb", ptm_handling='base_aa')
 # - Renumbers residues sequentially (insertion codes removed)
 # - Removes hydrogens (optional)
 ```
+</details>
 
 ## 📊 Feature Overview
 
@@ -185,12 +186,12 @@ standardize_pdb("messy.pdb", "clean.pdb", ptm_handling='base_aa')
   - ESM embeddings: ESMC (1152-dim) + ESM3 (1536-dim) with BOS/EOS tokens
 - **Graph Representations**: Both atom and residue-level networks
 - **Standardization**: Flexible PTM handling with 3 modes (base_aa, preserve, remove)
-  - Supports 15+ PTM types: phosphorylation (SEP, TPO, PTR), selenomethionine (MSE), methylation (MLY, M3L), acetylation (ALY), hydroxylation (HYP), and more
-  - Compatible with ESM models, protein-ligand modeling, and MD simulations
 
 ## 🔧 Advanced Examples
 
-### Custom SMARTS Patterns for Molecules
+<details>
+<summary><b>Custom SMARTS Patterns for Molecules</b></summary>
+
 ```python
 from plfeature import MoleculeFeaturizer
 
@@ -213,8 +214,11 @@ node, edge, adj = featurizer.get_graph()
 custom_feats = featurizer.get_custom_smarts_features()
 # Returns: {'features': tensor, 'names': [...], 'patterns': {...}}
 ```
+</details>
 
-### PTM (Post-Translational Modification) Handling
+<details>
+<summary><b>PTM (Post-Translational Modification) Handling</b></summary>
+
 ```python
 from plfeature import PDBStandardizer
 
@@ -250,29 +254,12 @@ standardizer.standardize("protein.pdb", "protein_standard.pdb")
 # - Hydroxylation: HYP
 # - Cysteine modifications: CSO, CSS, CME, OCS
 # - Others: MEN, FME
-
-# Batch processing with different modes
-import glob
-import os
-
-os.makedirs("esm_ready", exist_ok=True)
-os.makedirs("ligand_ready", exist_ok=True)
-
-for pdb_file in glob.glob("pdbs/*.pdb"):
-    basename = os.path.basename(pdb_file)
-
-    # For ESM: base_aa mode
-    esm_standardizer = PDBStandardizer(ptm_handling='base_aa')
-    esm_standardizer.standardize(pdb_file, f"esm_ready/{basename}")
-
-    # For protein-ligand: preserve mode
-    pl_standardizer = PDBStandardizer(ptm_handling='preserve')
-    pl_standardizer.standardize(pdb_file, f"ligand_ready/{basename}")
-
-    print(f"✓ Processed: {pdb_file}")
 ```
+</details>
 
-### Protein Sequence Extraction
+<details>
+<summary><b>Protein Sequence Extraction</b></summary>
+
 ```python
 from plfeature import ProteinFeaturizer
 
@@ -291,8 +278,11 @@ print(f"Full sequence: {full_sequence}")
 # Chain A: ACDEFGHIKLMNPQRSTVWY (length: 20)
 # Chain B: GHIKLMNPQR (length: 10)
 ```
+</details>
 
-### Contact Maps with Different Thresholds
+<details>
+<summary><b>Contact Maps with Different Thresholds</b></summary>
+
 ```python
 from plfeature import ProteinFeaturizer
 
@@ -308,8 +298,11 @@ edges = standard_contacts['edges']
 distances = standard_contacts['distances']
 adjacency = standard_contacts['adjacency_matrix']
 ```
+</details>
 
-### Batch Processing (Python)
+<details>
+<summary><b>Batch Processing (Python)</b></summary>
+
 ```python
 from plfeature import MoleculeFeaturizer
 import torch
@@ -324,8 +317,10 @@ for smiles in smiles_list:
 
 descriptors = torch.stack(all_features)
 ```
+</details>
 
-### Batch Processing (CLI Scripts)
+<details>
+<summary><b>Batch Processing (CLI Scripts)</b></summary>
 
 For large-scale feature extraction, use the provided CLI scripts in the `scripts/` directory.
 
@@ -347,12 +342,6 @@ python scripts/batch_protein_featurize.py \
     --input_dir /data/proteins \
     --output_dir /data/protein-features \
     --resume
-
-# Limit number of files (for testing)
-python scripts/batch_protein_featurize.py \
-    --input_dir /data/proteins \
-    --output_dir /data/protein-features \
-    --limit 100
 ```
 
 **Output features (`.pt` files):**
@@ -388,12 +377,6 @@ python scripts/batch_ligand_featurize.py \
     --output_dir /data/ligand-features \
     --num_workers 4
 
-# Without adding hydrogens
-python scripts/batch_ligand_featurize.py \
-    --input_dir /data/ligands \
-    --output_dir /data/ligand-features \
-    --no_hydrogens
-
 # Resume interrupted processing
 python scripts/batch_ligand_featurize.py \
     --input_dir /data/ligands \
@@ -402,7 +385,6 @@ python scripts/batch_ligand_featurize.py \
 ```
 
 **Supported file formats:** SDF, MOL2, MOL, PDB (priority order)
-- If same ligand exists in multiple formats, tries each until one loads successfully
 
 **Output features (`.pt` files):**
 | Feature | Shape | Description |
@@ -414,6 +396,8 @@ python scripts/batch_ligand_featurize.py \
 | `descriptor` | `[40]` | Molecular descriptors (not with `--graph_only`) |
 | `morgan` | `[2048]` | Morgan fingerprint (not with `--graph_only`) |
 | `maccs` | `[167]` | MACCS fingerprint (not with `--graph_only`) |
+
+</details>
 
 
 ## 🧪 Examples
@@ -452,4 +436,3 @@ MIT License - see [LICENSE](LICENSE) file
   url = {https://github.com/eightmm/plfeature}
 }
 ```
-
