@@ -71,7 +71,7 @@ class ESMFeaturizer:
         try:
             if self.model_type == "esm3":
                 from esm.models.esm3 import ESM3
-                logger.info(f"Loading ESM3 model: {self.model_name}")
+                logger.debug(f"Loading ESM3 model: {self.model_name}")
 
                 try:
                     self.model = ESM3.from_pretrained(self.model_name)
@@ -88,7 +88,7 @@ class ESMFeaturizer:
 
             elif self.model_type == "esmc":
                 from esm.models.esmc import ESMC
-                logger.info(f"Loading ESMC model: {self.model_name}")
+                logger.debug(f"Loading ESMC model: {self.model_name}")
 
                 try:
                     self.model = ESMC.from_pretrained(self.model_name).to(self.device)
@@ -101,7 +101,7 @@ class ESMFeaturizer:
             else:
                 raise ValueError(f"Unknown model_type: {self.model_type}")
 
-            logger.info(f"Model loaded on {self.device}")
+            logger.debug(f"Model loaded on {self.device}")
 
         except ImportError as e:
             raise ImportError(
@@ -212,7 +212,7 @@ class ESMFeaturizer:
         results = {}
 
         for chain_id, sequence in sequences.items():
-            logger.info(f"Extracting embeddings for chain {chain_id}: {len(sequence)} residues")
+            logger.debug(f"Extracting embeddings for chain {chain_id}: {len(sequence)} residues")
             results[chain_id] = self.extract(sequence)
 
         return results
@@ -264,14 +264,14 @@ class DualESMFeaturizer:
             esm3_model: ESM3 model variant
             device: "cuda" or "cpu"
         """
-        logger.info("Initializing ESMC extractor...")
+        logger.debug("Initializing ESMC extractor...")
         self.esmc = ESMFeaturizer(
             model_type="esmc",
             model_name=esmc_model,
             device=device
         )
 
-        logger.info("Initializing ESM3 extractor...")
+        logger.debug("Initializing ESM3 extractor...")
         self.esm3 = ESMFeaturizer(
             model_type="esm3",
             model_name=esm3_model,
@@ -355,7 +355,7 @@ class DualESMFeaturizer:
             if not sequence:
                 continue
 
-            logger.info(f"Extracting embeddings for chain {chain_id}: {len(sequence)} residues")
+            logger.debug(f"Extracting embeddings for chain {chain_id}: {len(sequence)} residues")
 
             # Extract from both models
             esmc_result = self.esmc.extract(sequence)
