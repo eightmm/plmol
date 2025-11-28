@@ -30,6 +30,9 @@ class PDBStandardizer:
     - Handling post-translational modifications (PTMs) based on use case
     """
 
+    # Backbone atoms to keep for UNK residues
+    BACKBONE_ATOMS = ['N', 'CA', 'C', 'O', 'CB']
+
     def __init__(self, remove_hydrogens: bool = True, ptm_handling: str = 'base_aa'):
         """
         Initialize the PDB standardizer.
@@ -39,7 +42,12 @@ class PDBStandardizer:
             ptm_handling: How to handle post-translational modifications (PTMs)
                 - 'base_aa': Convert PTMs to their base amino acids (default)
                              SEP→SER, PTR→TYR, MSE→MET, etc.
-                             Use for: ESM models, MD simulations with standard force fields
+                             Note: May lose atoms if atom names don't match parent
+                             Use for: Legacy compatibility
+                - 'unk': Convert PTMs to UNK and keep only backbone atoms (recommended)
+                         MSE→UNK (N,CA,C,O,CB only), SEP→UNK, etc.
+                         Protonation variants (HID,CYX) still map to parent (HIS,CYS)
+                         Use for: ML models, ensures consistency across all levels
                 - 'preserve': Keep PTM residues and all their atoms intact
                               SEP stays as SEP with phosphate groups
                               Use for: Protein-ligand modeling, structural analysis
@@ -50,7 +58,7 @@ class PDBStandardizer:
         self.ptm_handling = ptm_handling
 
         # Validate ptm_handling parameter
-        valid_modes = ['base_aa', 'preserve', 'remove']
+        valid_modes = ['base_aa', 'unk', 'preserve', 'remove']
         if ptm_handling not in valid_modes:
             raise ValueError(
                 f"Invalid ptm_handling mode: '{ptm_handling}'. "
@@ -73,16 +81,23 @@ class PDBStandardizer:
         Returns:
             Normalized residue name based on ptm_handling mode:
             - 'base_aa': Maps to standard amino acid (e.g., 'HIS', 'MET', 'SER')
+            - 'unk': Maps PTMs to 'UNK', protonation variants to parent (HID→HIS)
             - 'preserve': Returns original name for PTMs (e.g., 'SEP', 'MSE')
             - 'remove': Returns original name (removal handled in _process_atom_line)
         """
         if self.ptm_handling == 'preserve':
             # Don't map PTM residues, keep original names
             # Still map protonation states to standard names (HID→HIS, CYX→CYS)
-            # PTMs are those that would map but have different chemical structure
             if res_name in self.ptm_residues:
                 return res_name  # Keep PTM name
             else:
+                return self.residue_name_mapping.get(res_name, res_name)
+        elif self.ptm_handling == 'unk':
+            # PTMs become UNK, protonation variants map to parent
+            if res_name in self.ptm_residues:
+                return 'UNK'  # PTMs → UNK
+            else:
+                # Protonation variants (HID, CYX, etc.) map to parent
                 return self.residue_name_mapping.get(res_name, res_name)
         else:
             # 'base_aa' or 'remove' mode: use normal mapping
@@ -130,19 +145,20 @@ class PDBStandardizer:
 
         for line in lines:
             if line.startswith('ATOM'):
-                self._process_atom_line(line, protein_residues, is_hetatm=False)
+                self._process_atom_line(line, protein_residues, hetatm_residues, is_hetatm=False)
             elif line.startswith('HETATM'):
-                self._process_atom_line(line, hetatm_residues, is_hetatm=True)
+                self._process_atom_line(line, protein_residues, hetatm_residues, is_hetatm=True)
 
         return protein_residues, hetatm_residues
 
-    def _process_atom_line(self, line: str, residue_dict: Dict, is_hetatm: bool = False):
+    def _process_atom_line(self, line: str, protein_dict: Dict, hetatm_dict: Dict, is_hetatm: bool = False):
         """
         Process a single ATOM or HETATM line from PDB file.
 
         Args:
             line: PDB line to process
-            residue_dict: Dictionary to store the residue information
+            protein_dict: Dictionary to store protein residue information
+            hetatm_dict: Dictionary to store HETATM residue information
             is_hetatm: Whether this is a HETATM line
         """
         atom_name = line[12:16].strip()
@@ -168,14 +184,37 @@ class PDBStandardizer:
             if res_name in self.ptm_residues:
                 return
 
+        # Handle PTM → UNK with backbone only
+        is_ptm_to_unk = False
+        if self.ptm_handling == 'unk':
+            if res_name in self.ptm_residues:
+                is_ptm_to_unk = True
+                # Only keep backbone atoms for PTMs
+                if atom_name not in self.BACKBONE_ATOMS:
+                    return
+
         # Normalize residue name to standard amino acid
         normalized_res_name = self._normalize_residue_name(res_name)
 
+        # Determine target dictionary:
+        # - PTMs converted to UNK should go to protein_dict (treated as ATOM)
+        # - Standard amino acids go to protein_dict
+        # - Other HETATM (ligands, etc.) go to hetatm_dict
+        if is_hetatm and not is_ptm_to_unk:
+            # Check if it's an amino acid variant (should be protein)
+            if normalized_res_name in self.standard_atoms and normalized_res_name != 'UNK':
+                target_dict = protein_dict
+            else:
+                target_dict = hetatm_dict
+        else:
+            # ATOM records or PTM→UNK always go to protein
+            target_dict = protein_dict
+
         # Store residue information with normalized name
         residue_key = (chain_id, res_num_str, normalized_res_name)
-        if residue_key not in residue_dict:
-            residue_dict[residue_key] = {}
-        residue_dict[residue_key][atom_name] = line
+        if residue_key not in target_dict:
+            target_dict[residue_key] = {}
+        target_dict[residue_key][atom_name] = line
 
     def _sort_residue_key(self, residue_key: Tuple) -> Tuple:
         """
@@ -340,7 +379,11 @@ def standardize_pdb(input_pdb_path: str, output_pdb_path: str,
         input_pdb_path: Path to input PDB file
         output_pdb_path: Path for output standardized PDB
         remove_hydrogens: Whether to remove hydrogen atoms
-        ptm_handling: How to handle PTMs ('base_aa', 'preserve', or 'remove')
+        ptm_handling: How to handle PTMs:
+            - 'base_aa': Convert PTMs to parent amino acids (legacy)
+            - 'unk': Convert PTMs to UNK with backbone only (recommended for ML)
+            - 'preserve': Keep PTMs intact
+            - 'remove': Remove PTM residues entirely
 
     Returns:
         Path to the standardized PDB file
