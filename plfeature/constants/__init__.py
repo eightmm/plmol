@@ -81,6 +81,7 @@ from .amino_acids import (
     RESIDUE_NAME_MAPPING,
     PTM_RESIDUES,
     NUCLEIC_ACID_RESIDUES,
+    METAL_RESIDUES,
 )
 
 # =============================================================================
@@ -210,6 +211,7 @@ __all__ = [
     'RESIDUE_NAME_MAPPING',
     'PTM_RESIDUES',
     'NUCLEIC_ACID_RESIDUES',
+    'METAL_RESIDUES',
 
     # SMARTS patterns
     'PHARMACOPHORE_SMARTS',

@@ -350,3 +350,22 @@ NUCLEIC_ACID_RESIDUES = {
     'ADE', 'THY', 'GUA', 'CYT', 'URA',
     '1MA', '2MG', '4SU', '5MC', '5MU', 'PSU', 'H2U', 'M2G', 'OMC', 'OMG',
 }
+
+# =============================================================================
+# Metal Ion Residue Names
+# =============================================================================
+
+# Common metal ion residue names in PDB files
+# These should be excluded from amino acid sequence/residue counts
+METAL_RESIDUES = {
+    'ZN',   # Zinc - structural (zinc fingers), catalytic centers
+    'CA',   # Calcium - signaling, structural stabilization
+    'MG',   # Magnesium - ATP binding, enzymatic cofactor
+    'MN',   # Manganese - photosynthesis, oxidoreductases
+    'FE',   # Iron - electron transfer, oxygen binding (heme)
+    'CU',   # Copper - electron transfer, oxidases
+    'NI',   # Nickel - urease, hydrogenases
+    'CO',   # Cobalt - vitamin B12, some enzymes
+    'NA',   # Sodium - ion channels, osmotic balance
+    'K',    # Potassium - ion channels, protein stability
+}

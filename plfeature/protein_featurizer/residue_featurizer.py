@@ -40,6 +40,7 @@ from ..constants import (
     AMINO_ACID_3_TO_INT,
     MAX_ATOMS_PER_RESIDUE,
     NUM_RESIDUE_TYPES,
+    METAL_RESIDUES,
 )
 
 
@@ -126,8 +127,17 @@ class ResidueFeaturizer:
         hetero_data = {'coord': []}
 
         for atom in pdb_parser.protein_atoms:
+            # Skip metal ions - they are not amino acids
+            if atom.res_name in METAL_RESIDUES:
+                continue
+
             # Convert residue name to integer token (normalize first for consistency with PDBParser)
             norm_res = normalize_residue_name(atom.res_name, atom.atom_name)
+
+            # Double-check for metal ions via normalization (handles edge cases)
+            if norm_res == 'METAL':
+                continue
+
             res_type = AMINO_ACID_3_TO_INT.get(norm_res, 20)  # 20 is UNK/unknown
 
             # For unknown residues (PTMs), only keep backbone + CB atoms
@@ -189,8 +199,17 @@ class ResidueFeaturizer:
             if res_name == 'HOH':
                 continue
 
+            # Skip metal ions - they are not amino acids
+            if res_name in METAL_RESIDUES:
+                continue
+
             # Convert residue name to integer token (normalize first for consistency)
             norm_res = normalize_residue_name(res_name, atom_type)
+
+            # Double-check for metal ions via normalization (handles edge cases)
+            if norm_res == 'METAL':
+                continue
+
             res_type = AMINO_ACID_3_TO_INT.get(norm_res, 20)  # 20 is UNK/unknown
 
             # For unknown residues (PTMs), only keep backbone + CB atoms
@@ -221,14 +240,7 @@ class ResidueFeaturizer:
         Returns:
             List of (chain, residue_number, residue_type) tuples
         """
-        # Use (chain, num) as unique key to match PDBParser behavior
-        # This ensures residue count matches ESM sequence length
-        seen = {}
-        for chain, num, res, atom in self.protein_indices:
-            key = (chain, num)
-            if key not in seen:
-                seen[key] = res  # Keep first res_type seen
-        return sorted([(chain, num, res) for (chain, num), res in seen.items()])
+        return sorted(set([(chain, num, res) for chain, num, res, atom in self.protein_indices]))
 
     def get_sequence_by_chain(self) -> Dict[str, str]:
         """

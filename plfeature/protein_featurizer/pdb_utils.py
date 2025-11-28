@@ -33,6 +33,7 @@ from ..constants import (
     CYSTEINE_VARIANTS,
     AMINO_ACID_LETTERS,
     RESIDUE_NAME_MAPPING,
+    METAL_RESIDUES,
 )
 
 logger = logging.getLogger(__name__)
@@ -357,9 +358,13 @@ class PDBParser:
         Get list of residues as (chain, resnum, restype_int) tuples.
 
         Sorted by chain and residue number.
+        Excludes metal ions (ZN, CA, MG, etc.) which are not amino acids.
         """
         residue_list = []
         for (chain, resnum), residue in sorted(self._residues.items()):
+            # Skip metal ions (defined in constants.amino_acids.METAL_RESIDUES)
+            if residue.res_name in METAL_RESIDUES:
+                continue
             res_type = AMINO_ACID_3_TO_INT.get(
                 normalize_residue_name(residue.res_name),
                 20  # UNK
@@ -390,6 +395,9 @@ class PDBParser:
             seen_residues.add(key)
 
             norm_res = normalize_residue_name(atom.res_name, atom.atom_name)
+            # Skip metal ions - they are not amino acids
+            if norm_res == 'METAL':
+                continue
             aa = AMINO_ACID_3TO1.get(norm_res, 'X')
             sequence.append(aa)
 
@@ -417,6 +425,9 @@ class PDBParser:
             seen[chain].add(key)
 
             norm_res = normalize_residue_name(atom.res_name, atom.atom_name)
+            # Skip metal ions - they are not amino acids
+            if norm_res == 'METAL':
+                continue
             aa = AMINO_ACID_3TO1.get(norm_res, 'X')
             chains[chain].append(aa)
 
