@@ -27,7 +27,6 @@ except ImportError:
 # Import unified PDB parsing utilities from canonical location
 from .pdb_utils import (
     PDBParser,
-    is_atom_record, is_hetatm_record, is_hydrogen, parse_pdb_atom_line,
     calculate_sidechain_centroid,
     normalize_residue_name,
 )
@@ -40,7 +39,6 @@ from ..constants import (
     AMINO_ACID_3_TO_INT,
     MAX_ATOMS_PER_RESIDUE,
     NUM_RESIDUE_TYPES,
-    METAL_RESIDUES,
 )
 
 
@@ -84,6 +82,10 @@ class ResidueFeaturizer:
     - Solvent accessible surface area (SASA)
     - Residue-level and interaction features
     - Graph representations of protein structure
+
+    Note:
+        All preprocessing (metal ion exclusion, water removal, etc.) is handled
+        by PDBParser. This class focuses only on feature extraction.
     """
 
     def __init__(self, pdb_file: str):
@@ -92,16 +94,57 @@ class ResidueFeaturizer:
 
         Args:
             pdb_file: Path to the PDB file
+
+        Note:
+            Uses PDBParser internally for consistent preprocessing.
         """
         self.pdb_file = pdb_file
-        self.protein_indices, self.hetero_indices, self.protein_atom_info, self.hetero_atom_info = \
-            self._parse_pdb(pdb_file)
+
+        # Use PDBParser for consistent preprocessing (metal/water/hydrogen exclusion)
+        parser = PDBParser(pdb_file)
+        self._init_from_parser(parser)
+
+    def _init_from_parser(self, pdb_parser: 'PDBParser'):
+        """
+        Initialize internal data structures from PDBParser.
+
+        Args:
+            pdb_parser: Pre-initialized PDBParser instance
+        """
+        protein_index = []
+        protein_data = {'coord': []}
+        hetero_index = []
+        hetero_data = {'coord': []}
+
+        for atom in pdb_parser.protein_atoms:
+            # PDBParser already excludes metals, water, hydrogen - use data directly
+            norm_res = normalize_residue_name(atom.res_name, atom.atom_name)
+            res_type = AMINO_ACID_3_TO_INT.get(norm_res, 20)  # 20 is UNK/unknown
+
+            # For unknown residues (PTMs), only keep backbone + CB atoms
+            if res_type == 20:
+                if atom.atom_name not in ['N', 'CA', 'C', 'O', 'CB']:
+                    continue
+
+            protein_index.append((atom.chain_id, atom.res_num, res_type, atom.atom_name))
+            protein_data['coord'].append(atom.coords)
+
+        # Build MultiIndex and DataFrame
+        self.protein_indices = pd.MultiIndex.from_tuples(
+            protein_index, names=['chain', 'res_num', 'AA', 'atom']
+        )
+        self.hetero_indices = pd.MultiIndex.from_tuples(
+            hetero_index, names=['chain', 'res_num', 'AA', 'atom']
+        )
+        self.protein_atom_info = pd.DataFrame(protein_data, index=self.protein_indices)
+        self.hetero_atom_info = pd.DataFrame(hetero_data, index=self.hetero_indices)
 
         # Pre-build coordinate cache using groupby (faster than xs lookup)
         self._coord_cache = {}
-        grouped = self.protein_atom_info.groupby(level=[0, 1, 2])
-        for residue_key, group in grouped:
-            self._coord_cache[residue_key] = np.vstack(group['coord'].values).astype(np.float32)
+        if len(self.protein_atom_info) > 0:
+            grouped = self.protein_atom_info.groupby(level=[0, 1, 2])
+            for residue_key, group in grouped:
+                self._coord_cache[residue_key] = np.vstack(group['coord'].values).astype(np.float32)
 
     @classmethod
     def from_parser(cls, pdb_parser: 'PDBParser', pdb_file: str = None) -> 'ResidueFeaturizer':
@@ -116,122 +159,14 @@ class ResidueFeaturizer:
 
         Returns:
             ResidueFeaturizer instance with cached data
+
+        Note:
+            PDBParser handles all preprocessing (metal/water/hydrogen exclusion).
         """
         instance = cls.__new__(cls)
         instance.pdb_file = pdb_file or pdb_parser.pdb_path
-
-        # Build dataframes from PDBParser data
-        protein_index = []
-        protein_data = {'coord': []}
-        hetero_index = []
-        hetero_data = {'coord': []}
-
-        for atom in pdb_parser.protein_atoms:
-            # Skip metal ions - they are not amino acids
-            if atom.res_name in METAL_RESIDUES:
-                continue
-
-            # Convert residue name to integer token (normalize first for consistency with PDBParser)
-            norm_res = normalize_residue_name(atom.res_name, atom.atom_name)
-
-            # Double-check for metal ions via normalization (handles edge cases)
-            if norm_res == 'METAL':
-                continue
-
-            res_type = AMINO_ACID_3_TO_INT.get(norm_res, 20)  # 20 is UNK/unknown
-
-            # For unknown residues (PTMs), only keep backbone + CB atoms
-            if res_type == 20:
-                if atom.atom_name not in ['N', 'CA', 'C', 'O', 'CB']:
-                    continue
-
-            protein_index.append((atom.chain_id, atom.res_num, res_type, atom.atom_name))
-            protein_data['coord'].append(atom.coords)
-
-        # Build MultiIndex and DataFrame
-        instance.protein_indices = pd.MultiIndex.from_tuples(
-            protein_index, names=['chain', 'res_num', 'AA', 'atom']
-        )
-        instance.hetero_indices = pd.MultiIndex.from_tuples(
-            hetero_index, names=['chain', 'res_num', 'AA', 'atom']
-        )
-        instance.protein_atom_info = pd.DataFrame(protein_data, index=instance.protein_indices)
-        instance.hetero_atom_info = pd.DataFrame(hetero_data, index=instance.hetero_indices)
-
-        # Pre-build coordinate cache
-        instance._coord_cache = {}
-        if len(instance.protein_atom_info) > 0:
-            grouped = instance.protein_atom_info.groupby(level=[0, 1, 2])
-            for residue_key, group in grouped:
-                instance._coord_cache[residue_key] = np.vstack(group['coord'].values).astype(np.float32)
-
+        instance._init_from_parser(pdb_parser)
         return instance
-
-    def _parse_pdb(self, pdb_file: str) -> Tuple[pd.MultiIndex, pd.MultiIndex, pd.DataFrame, pd.DataFrame]:
-        """
-        Parse PDB file and extract atom information using unified parsing logic.
-
-        Args:
-            pdb_file: Path to PDB file
-
-        Returns:
-            Tuple of (protein_indices, hetero_indices, protein_atom_info, hetero_atom_info)
-        """
-        with open(pdb_file, 'r') as f:
-            lines = f.read().split('\n')
-
-        protein_index, hetero_index = [], []
-        protein_data, hetero_data = {'coord': []}, {'coord': []}
-
-        for line in lines:
-            # Use unified parsing functions
-            if not (is_atom_record(line) or is_hetatm_record(line)):
-                continue
-
-            # Skip hydrogens
-            if is_hydrogen(line):
-                continue
-
-            # Parse line components using unified function (now includes element)
-            record_type, atom_type, res_name, res_num, chain_id, xyz, element = parse_pdb_atom_line(line)
-
-            # Skip water molecules
-            if res_name == 'HOH':
-                continue
-
-            # Skip metal ions - they are not amino acids
-            if res_name in METAL_RESIDUES:
-                continue
-
-            # Convert residue name to integer token (normalize first for consistency)
-            norm_res = normalize_residue_name(res_name, atom_type)
-
-            # Double-check for metal ions via normalization (handles edge cases)
-            if norm_res == 'METAL':
-                continue
-
-            res_type = AMINO_ACID_3_TO_INT.get(norm_res, 20)  # 20 is UNK/unknown
-
-            # For unknown residues (PTMs), only keep backbone + CB atoms
-            if res_type == 20:  # UNK
-                if atom_type not in ['N', 'CA', 'C', 'O', 'CB']:
-                    continue
-
-            # Store data based on record type
-            if record_type == 'ATOM':
-                protein_index.append((chain_id, res_num, res_type, atom_type))
-                protein_data['coord'].append(xyz)
-            elif record_type == 'HETATM':
-                hetero_index.append(('HETERO', res_num, res_type, atom_type))
-                hetero_data['coord'].append(xyz)
-
-        protein_index = pd.MultiIndex.from_tuples(protein_index, names=['chain', 'res_num', 'AA', 'atom'])
-        hetero_index = pd.MultiIndex.from_tuples(hetero_index, names=['chain', 'res_num', 'AA', 'atom'])
-
-        protein_atom_info = pd.DataFrame(protein_data, index=protein_index)
-        hetero_atom_info = pd.DataFrame(hetero_data, index=hetero_index)
-
-        return protein_index, hetero_index, protein_atom_info, hetero_atom_info
 
     def get_residues(self) -> List[Tuple]:
         """

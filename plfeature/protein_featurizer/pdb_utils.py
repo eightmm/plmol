@@ -310,7 +310,12 @@ class PDBParser:
             logger.warning(f"No protein atoms found in {self.pdb_path}")
 
     def _is_protein_atom(self, atom: ParsedAtom, line: str) -> bool:
-        """Check if atom should be included as protein atom."""
+        """
+        Check if atom should be included as protein atom.
+
+        Preprocessing is done here - downstream featurizers receive clean data.
+        Excludes: hydrogens, water, metal ions, ligands, terminal oxygens.
+        """
         # Skip hydrogens
         if is_hydrogen(line):
             return False
@@ -319,17 +324,22 @@ class PDBParser:
         if atom.res_name == 'HOH':
             return False
 
-        # Skip terminal oxygen and specific residues
+        # Skip metal ions (centralized constant)
+        if atom.res_name in METAL_RESIDUES:
+            return False
+
+        # Skip terminal oxygen and specific modified residues
         if atom.atom_name == 'OXT':
             return False
 
         if atom.res_name in ['LLP', 'PTR']:
             return False
 
-        # For HETATM, only include known amino acids or metals
+        # For HETATM, only include known amino acids (no metals, no ligands)
         if atom.record_type == 'HETATM':
             norm_res = normalize_residue_name(atom.res_name, atom.atom_name)
-            if norm_res not in AMINO_ACID_LETTERS and norm_res != 'METAL':
+            # Must be a standard amino acid (including variants like HID, CYX, etc.)
+            if norm_res not in AMINO_ACID_LETTERS:
                 return False
 
         return True
@@ -345,7 +355,7 @@ class PDBParser:
 
     @property
     def protein_atoms(self) -> List[ParsedAtom]:
-        """Get protein atoms only (no water, hydrogen, ligands)."""
+        """Get protein atoms only (no water, hydrogen, metal ions, ligands)."""
         return self._protein_atoms
 
     @property
@@ -358,13 +368,10 @@ class PDBParser:
         Get list of residues as (chain, resnum, restype_int) tuples.
 
         Sorted by chain and residue number.
-        Excludes metal ions (ZN, CA, MG, etc.) which are not amino acids.
+        Metal ions are already excluded during parsing (see _is_protein_atom).
         """
         residue_list = []
         for (chain, resnum), residue in sorted(self._residues.items()):
-            # Skip metal ions (defined in constants.amino_acids.METAL_RESIDUES)
-            if residue.res_name in METAL_RESIDUES:
-                continue
             res_type = AMINO_ACID_3_TO_INT.get(
                 normalize_residue_name(residue.res_name),
                 20  # UNK
@@ -381,6 +388,9 @@ class PDBParser:
 
         Returns:
             One-letter amino acid sequence
+
+        Note:
+            Metal ions are already excluded during parsing (see _is_protein_atom).
         """
         sequence = []
         seen_residues = set()
@@ -395,9 +405,6 @@ class PDBParser:
             seen_residues.add(key)
 
             norm_res = normalize_residue_name(atom.res_name, atom.atom_name)
-            # Skip metal ions - they are not amino acids
-            if norm_res == 'METAL':
-                continue
             aa = AMINO_ACID_3TO1.get(norm_res, 'X')
             sequence.append(aa)
 
@@ -409,6 +416,9 @@ class PDBParser:
 
         Returns:
             Dictionary mapping chain_id -> one-letter sequence
+
+        Note:
+            Metal ions are already excluded during parsing (see _is_protein_atom).
         """
         chains: Dict[str, List[str]] = {}
         seen: Dict[str, set] = {}
@@ -425,9 +435,6 @@ class PDBParser:
             seen[chain].add(key)
 
             norm_res = normalize_residue_name(atom.res_name, atom.atom_name)
-            # Skip metal ions - they are not amino acids
-            if norm_res == 'METAL':
-                continue
             aa = AMINO_ACID_3TO1.get(norm_res, 'X')
             chains[chain].append(aa)
 
