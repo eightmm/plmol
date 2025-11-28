@@ -1,13 +1,30 @@
 # Protein Residue-Level Features
 
+## Overview
+
+Residue-level feature extraction from protein structures, providing structural features suitable for graph neural networks.
+
+## ResidueFeaturizer Class
+
+### Initialization
+
+```python
+from plfeature.protein_featurizer import ResidueFeaturizer
+
+# From PDB file
+featurizer = ResidueFeaturizer("protein.pdb")
+
+# From pre-parsed PDBParser (more efficient when PDBParser already available)
+from plfeature.protein_featurizer.pdb_utils import PDBParser
+parser = PDBParser("protein.pdb")
+featurizer = ResidueFeaturizer.from_parser(parser, "protein.pdb")
+```
+
 ## Main Method: `get_features()`
 
 Returns node and edge features for graph neural networks.
 
 ```python
-from plfeature import ProteinFeaturizer
-
-featurizer = ProteinFeaturizer("protein.pdb")
 node, edge = featurizer.get_features(distance_cutoff=8.0)  # Default: 8.0 Å
 ```
 
@@ -57,9 +74,35 @@ edge['edge_vector_features']      # [n_edges, n_vector, 3] Vector edge features
 - SC-SC direction vectors
 - Cross-direction vectors
 
+## Alternative Constructors
+
+### from_parser() - Recommended for Pipelines
+
+When working with multiple featurizers on the same PDB:
+
+```python
+from plfeature.protein_featurizer import ResidueFeaturizer, AtomFeaturizer
+from plfeature.protein_featurizer.pdb_utils import PDBParser
+
+# Parse PDB once
+parser = PDBParser("protein.pdb")
+
+# ResidueFeaturizer from parser (avoids re-parsing)
+res_featurizer = ResidueFeaturizer.from_parser(parser, "protein.pdb")
+
+# Same parser with AtomFeaturizer
+atom_featurizer = AtomFeaturizer()
+token, coord = atom_featurizer.get_protein_atom_features_from_parser(parser)
+
+# Get residue features
+residues = res_featurizer.get_residues()
+node, edge = res_featurizer.get_features()
+```
+
 ## Individual Feature Methods
 
 ### 1. Sequence Features
+
 ```python
 seq_features = featurizer.get_sequence_features()
 # Returns:
@@ -71,6 +114,7 @@ seq_features = featurizer.get_sequence_features()
 ```
 
 ### 2. Geometric Features
+
 ```python
 geo_features = featurizer.get_geometric_features()
 # Returns:
@@ -92,6 +136,7 @@ geo_features = featurizer.get_geometric_features()
 - Chi angles (χ1-χ4): Sidechain rotamers
 
 ### 3. SASA Features
+
 ```python
 sasa = featurizer.get_sasa_features()  # [n_residues, 10]
 ```
@@ -109,6 +154,7 @@ sasa = featurizer.get_sasa_features()  # [n_residues, 10]
 10. Relative sidechain SASA
 
 ### 4. Contact Map
+
 ```python
 contacts = featurizer.get_contact_map(cutoff=8.0)
 # Returns:
@@ -127,12 +173,14 @@ contacts = featurizer.get_contact_map(cutoff=8.0)
 - 12.0 Å: Long-range interactions
 
 ### 5. Relative Position Encoding
+
 ```python
 rel_pos = featurizer.get_relative_position(cutoff=32)
 # Returns one-hot encoded relative positions
 ```
 
 ### 6. Terminal Flags
+
 ```python
 terminals = featurizer.get_terminal_flags()
 # Returns:
@@ -143,6 +191,7 @@ terminals = featurizer.get_terminal_flags()
 ```
 
 ### 7. All Features Combined
+
 ```python
 all_features = featurizer.get_all_features()
 # Returns:
@@ -159,6 +208,7 @@ all_features = featurizer.get_all_features()
 ## Usage Examples
 
 ### PyTorch Geometric Integration
+
 ```python
 from torch_geometric.data import Data
 
@@ -173,9 +223,10 @@ data = Data(
 ```
 
 ### Efficient Multi-Feature Extraction
+
 ```python
 # Parse PDB once
-featurizer = ProteinFeaturizer("protein.pdb")
+featurizer = ResidueFeaturizer("protein.pdb")
 
 # All subsequent calls use cached structure
 seq = featurizer.get_sequence_features()
@@ -184,16 +235,38 @@ sasa = featurizer.get_sasa_features()
 contacts = featurizer.get_contact_map(8.0)
 ```
 
+### Efficient Pipeline with Shared Parser
+
+```python
+from plfeature.protein_featurizer import ResidueFeaturizer, AtomFeaturizer
+from plfeature.protein_featurizer.pdb_utils import PDBParser
+from plfeature.protein_featurizer.esm_featurizer import DualESMFeaturizer
+
+# Single PDBParser for entire pipeline
+parser = PDBParser("protein.pdb")
+
+# Residue features
+res_featurizer = ResidueFeaturizer.from_parser(parser, "protein.pdb")
+node, edge = res_featurizer.get_features()
+
+# Atom features
+atom_featurizer = AtomFeaturizer()
+token, coord = atom_featurizer.get_protein_atom_features_from_parser(parser)
+
+# ESM embeddings (uses parser's sequence extraction)
+esm_featurizer = DualESMFeaturizer()
+esm_result = esm_featurizer.extract_from_parser(parser)
+```
+
 ### PDB Standardization Options
+
 ```python
 # With standardization (default)
-featurizer = ProteinFeaturizer("protein.pdb", standardize=True)
+featurizer = ResidueFeaturizer("protein.pdb")  # standardize=True by default
 
-# Skip standardization
-featurizer = ProteinFeaturizer("clean.pdb", standardize=False)
-
-# Keep hydrogens
-featurizer = ProteinFeaturizer("protein.pdb", keep_hydrogens=True)
+# From parser (parser handles preprocessing)
+parser = PDBParser("protein.pdb")
+featurizer = ResidueFeaturizer.from_parser(parser, "protein.pdb")
 ```
 
 ## Method Aliases
@@ -204,3 +277,30 @@ For clarity, all methods have descriptive aliases:
 - `get_geometric_features()` → `get_residue_geometry()`, `get_residue_dihedrals()`
 - `get_sasa_features()` → `get_residue_sasa()`, `get_residue_level_sasa()`
 - `get_contact_map()` → `get_residue_contacts()`, `get_residue_contact_map()`
+
+## API Reference
+
+### Constructor Methods
+
+| Method | Description |
+|--------|-------------|
+| `__init__(pdb_file)` | Create from PDB file path |
+| `from_parser(parser, pdb_file)` | Create from pre-parsed PDBParser |
+
+### Feature Methods
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `get_features(cutoff)` | Node and edge graph features | `(node_dict, edge_dict)` |
+| `get_residues()` | List of residue indices | `List[Tuple]` |
+| `get_sequence_features()` | Sequence encoding | `Dict` |
+| `get_geometric_features()` | Geometric features | `Dict` |
+| `get_sasa_features()` | SASA features | `Tensor [n_res, 10]` |
+| `get_contact_map(cutoff)` | Contact map | `Dict` |
+| `get_terminal_flags()` | N/C terminal flags | `Dict` |
+| `get_all_features()` | All features combined | `Dict` |
+
+## See Also
+
+- [Protein Atom Features](protein_atom_feature.md) - Atom-level features
+- [Hierarchical Featurizer](hierarchical_featurizer.md) - Combined atom/residue/ESM features

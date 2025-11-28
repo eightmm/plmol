@@ -14,14 +14,21 @@ Usage:
     featurizer = HierarchicalFeaturizer()
     data = featurizer.featurize("protein.pdb")
 
-    # Access features
-    atom_tokens = data.atom_tokens           # [num_atoms] - token IDs (187 classes)
+    # Access features (integer indices for embedding lookup)
+    atom_tokens = data.atom_tokens           # [num_atoms] - token indices (0-186)
+    atom_elements = data.atom_elements       # [num_atoms] - element indices (0-7)
+    atom_residue_types = data.atom_residue_types  # [num_atoms] - residue indices (0-21)
+
+    # Residue features
     residue_features = data.residue_features # [num_residues, 76]
     esmc_embeddings = data.esmc_embeddings   # [num_residues, 1152]
     esm3_embeddings = data.esm3_embeddings   # [num_residues, 1536]
 
     # For pooling: atom → residue
-    atom_to_residue = data.atom_to_residue  # [num_atoms] index
+    atom_to_residue = data.atom_to_residue   # [num_atoms] index
+
+    # Convert to one-hot in model if needed:
+    # atom_tokens_onehot = F.one_hot(data.atom_tokens, num_classes=187)
 """
 
 from dataclasses import dataclass
@@ -65,12 +72,12 @@ class HierarchicalProteinData:
     """
     Hierarchical protein data for atom-residue attention models.
 
-    Atom-level tensors (one-hot encoded):
-        atom_tokens: [num_atoms, 187] - Atom token one-hot (187 classes)
+    Atom-level tensors (integer indices for embedding lookup):
+        atom_tokens: [num_atoms] - Atom token indices (0-186, 187 classes)
         atom_coords: [num_atoms, 3] - 3D coordinates (raw, not normalized)
         atom_sasa: [num_atoms] - SASA values (normalized by /100)
-        atom_elements: [num_atoms, 8] - Element type one-hot (8 classes)
-        atom_residue_types: [num_atoms, 22] - Residue type one-hot (22 classes)
+        atom_elements: [num_atoms] - Element type indices (0-7, 8 classes)
+        atom_residue_types: [num_atoms] - Residue type indices (0-21, 22 classes)
         atom_names: List[str] - PDB atom names (CA, CB, etc.)
 
     Residue-level tensors:
@@ -93,13 +100,16 @@ class HierarchicalProteinData:
         esm3_embeddings: [num_residues, 1536] - ESM3 per-residue embeddings
         esm3_bos: [1536] - ESM3 BOS token
         esm3_eos: [1536] - ESM3 EOS token
+
+    Note:
+        Use torch.nn.Embedding or F.one_hot() in your model to convert indices to vectors.
     """
-    # Atom-level (one-hot encoded)
-    atom_tokens: torch.Tensor           # [N_atom, 187] one-hot
+    # Atom-level (integer indices for embedding lookup)
+    atom_tokens: torch.Tensor           # [N_atom] token indices (0-186)
     atom_coords: torch.Tensor           # [N_atom, 3] raw coordinates
     atom_sasa: torch.Tensor             # [N_atom] normalized SASA
-    atom_elements: torch.Tensor         # [N_atom, 8] one-hot
-    atom_residue_types: torch.Tensor    # [N_atom, 22] one-hot
+    atom_elements: torch.Tensor         # [N_atom] element indices (0-7)
+    atom_residue_types: torch.Tensor    # [N_atom] residue type indices (0-21)
     atom_names: List[str]               # atom names (CA, CB, etc.)
 
     # Residue-level
@@ -146,15 +156,15 @@ class HierarchicalProteinData:
 
     @property
     def num_atom_classes(self) -> int:
-        return self.atom_tokens.shape[1]  # 187
+        return NUM_ATOM_TOKENS  # 187
 
     @property
     def num_element_classes(self) -> int:
-        return self.atom_elements.shape[1]  # 8
+        return NUM_ELEMENT_TYPES  # 8
 
     @property
     def num_residue_classes(self) -> int:
-        return self.atom_residue_types.shape[1]  # 22
+        return 22  # 21 amino acids + UNK
 
     @property
     def esmc_dim(self) -> Optional[int]:
@@ -340,12 +350,12 @@ class HierarchicalFeaturizer:
         esm_device: Device for ESM models ("cuda" or "cpu")
 
     Feature dimensions:
-        Atom features (one-hot encoded):
-            - atom_tokens: [N_atom, 187] - Atom token one-hot
+        Atom features (integer indices for nn.Embedding):
+            - atom_tokens: [N_atom] - Atom token indices (0-186, 187 classes)
             - atom_coords: [N_atom, 3] - 3D coordinates
             - atom_sasa: [N_atom] - SASA values (normalized /100)
-            - atom_elements: [N_atom, 8] - Element type one-hot
-            - atom_residue_types: [N_atom, 22] - Residue type one-hot
+            - atom_elements: [N_atom] - Element type indices (0-7, 8 classes)
+            - atom_residue_types: [N_atom] - Residue type indices (0-21, 22 classes)
 
         Residue features (from ResidueFeaturizer):
             - residue_features: [N_res, 76] scalar features
@@ -386,13 +396,13 @@ class HierarchicalFeaturizer:
         Returns:
             HierarchicalProteinData with all features and mappings
         """
-        # Step 0: Parse PDB once using PDBParser (cached for reuse)
+        # Step 0: Parse PDB once using PDBParser (single source of truth)
         pdb_parser = PDBParser(pdb_path)
 
-        # Step 1: Get atom features from AtomFeaturizer
-        atom_tokens, atom_coords = self._atom_featurizer.get_protein_atom_features(pdb_path)
+        # Step 1: Get atom features from AtomFeaturizer (using pre-parsed data)
+        atom_tokens, atom_coords = self._atom_featurizer.get_protein_atom_features_from_parser(pdb_parser)
 
-        # Step 2: Get SASA from AtomFeaturizer (requires file for FreeSASA)
+        # Step 2: Get SASA from AtomFeaturizer (requires file path for FreeSASA)
         atom_sasa, _ = self._atom_featurizer.get_atom_sasa(pdb_path)
 
         # Ensure same length (SASA might have different atom count due to different parsing)
@@ -420,8 +430,8 @@ class HierarchicalFeaturizer:
         # Step 4: Normalize SASA (typical range 0-150 Å²)
         atom_sasa = atom_sasa / 100.0
 
-        # Step 5: Get residue features from ResidueFeaturizer
-        residue_featurizer = ResidueFeaturizer(pdb_path)
+        # Step 5: Get residue features from ResidueFeaturizer (using pre-parsed data)
+        residue_featurizer = ResidueFeaturizer.from_parser(pdb_parser, pdb_path)
         residues = residue_featurizer.get_residues()
 
         # Build residue coordinate tensor
@@ -485,19 +495,11 @@ class HierarchicalFeaturizer:
             local_frames,     # [N_res, 3, 3]
         ], dim=1)
 
-        # Step 7: Convert categorical features to one-hot encoding
-        num_atoms = len(atom_tokens)
-        atom_tokens_onehot = torch.zeros(num_atoms, NUM_ATOM_TOKENS, dtype=torch.float32)
-        atom_tokens_onehot.scatter_(1, atom_tokens.unsqueeze(1), 1.0)
+        # Step 7: Keep categorical features as integer indices (more efficient)
+        # Models can use nn.Embedding or F.one_hot() as needed
 
-        atom_elements_onehot = torch.zeros(num_atoms, NUM_ELEMENT_TYPES, dtype=torch.float32)
-        atom_elements_onehot.scatter_(1, atom_elements.unsqueeze(1), 1.0)
-
-        atom_residue_types_onehot = torch.zeros(num_atoms, 22, dtype=torch.float32)
-        atom_residue_types_onehot.scatter_(1, atom_residue_types.unsqueeze(1), 1.0)
-
-        # Step 8: Extract dual ESM embeddings (ESMC + ESM3) - 6 tensors total
-        esm_result = self._esm_featurizer.extract_from_pdb(pdb_path)
+        # Step 8: Extract dual ESM embeddings (ESMC + ESM3) using pre-parsed data
+        esm_result = self._esm_featurizer.extract_from_parser(pdb_parser)
 
         # ESMC: embeddings [N_res, 1152], bos [1152], eos [1152]
         esmc_embeddings = esm_result['esmc_embeddings']
@@ -526,11 +528,11 @@ class HierarchicalFeaturizer:
         esm3_embeddings = _adjust_length(esm3_embeddings, num_residues, "ESM3")
 
         return HierarchicalProteinData(
-            atom_tokens=atom_tokens_onehot,
+            atom_tokens=atom_tokens,
             atom_coords=atom_coords,
             atom_sasa=atom_sasa,
-            atom_elements=atom_elements_onehot,
-            atom_residue_types=atom_residue_types_onehot,
+            atom_elements=atom_elements,
+            atom_residue_types=atom_residue_types,
             atom_names=atom_names,
             residue_features=residue_features,
             residue_ca_coords=residue_ca_coords,
@@ -704,12 +706,13 @@ def extract_hierarchical_features(
 
     Returns:
         HierarchicalProteinData with all features including:
-            - Atom-level features (one-hot encoded)
+            - Atom-level features (integer indices for nn.Embedding)
             - Residue-level features (scalar + vector)
             - ESM embeddings (ESMC + ESM3, 6 tensors total)
 
     Note:
-        Residue vector features are always included (31x3 per residue).
+        Categorical features are stored as integer indices.
+        Use F.one_hot() or nn.Embedding in your model as needed.
     """
     featurizer = HierarchicalFeaturizer(
         esmc_model=esmc_model,

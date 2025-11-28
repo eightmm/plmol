@@ -39,6 +39,52 @@ class AtomFeaturizer:
         self.res_token = RESIDUE_TOKEN
         self.aa_letter = AMINO_ACID_LETTERS
 
+    def get_protein_atom_features_from_parser(
+        self,
+        pdb_parser: 'PDBParser',
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Extract atom-level features from pre-parsed PDB data.
+
+        Args:
+            pdb_parser: Pre-initialized PDBParser instance
+
+        Returns:
+            Tuple of (token, coord):
+                - token: torch.Tensor of shape [n_atoms] with atom type tokens
+                - coord: torch.Tensor of shape [n_atoms, 3] with 3D coordinates
+        """
+        token, coord = [], []
+
+        for atom in pdb_parser.protein_atoms:
+            # Skip terminal oxygen and modified residues
+            if atom.atom_name == 'OXT' or atom.res_name in ['LLP', 'PTR']:
+                continue
+
+            # Normalize residue name
+            res_type_norm = normalize_residue_name(atom.res_name, atom.atom_name)
+
+            # Handle unknown residues
+            if res_type_norm == 'UNK':
+                res_type = 'XXX'
+                atom_type = atom.atom_name
+                if atom_type not in ['N', 'CA', 'C', 'O', 'CB', 'P', 'S', 'SE']:
+                    atom_type = atom_type[0] if atom_type else 'C'
+            else:
+                res_type = res_type_norm
+                atom_type = atom.atom_name
+
+            # Get token ID
+            tok = self.res_atm_token.get((res_type, atom_type), UNK_TOKEN)
+
+            token.append(tok)
+            coord.append(atom.coords)
+
+        token = torch.tensor(token, dtype=torch.long)
+        coord = torch.tensor(coord, dtype=torch.float32)
+
+        return token, coord
+
     def get_protein_atom_features(self, pdb_file: str) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Extract atom-level features from PDB file.

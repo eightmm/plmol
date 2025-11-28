@@ -1,16 +1,18 @@
 # Protein Atom-Level Features
 
 ## Overview
-Atom-level feature extraction from protein structures with 175 unique token types and atomic SASA calculation.
+
+Atom-level feature extraction from protein structures with 187 unique token types and atomic SASA calculation.
 
 ## Atom Tokenization System
 
 ### Token Mapping
-The atom featurizer encodes each atom based on its residue type and atom name, creating 175 unique tokens.
+
+The atom featurizer encodes each atom based on its residue type and atom name, creating 187 unique tokens.
 
 **Token Range:**
-- 0-173: Standard residue-atom combinations
-- 174: Unknown/non-standard atoms
+- 0-185: Standard residue-atom combinations
+- 186: Unknown/non-standard atoms (UNK_TOKEN)
 
 **Example Tokens:**
 ```python
@@ -22,87 +24,97 @@ The atom featurizer encodes each atom based on its residue type and atom name, c
 ('ALA', 'CB'): 4    # Alanine beta carbon
 ('CYS', 'SG'): 21   # Cysteine sulfur
 ('TRP', 'CZ2'): 163 # Tryptophan ring carbon
+('XXX', 'N'): 180   # Unknown residue backbone N
+('XXX', 'CA'): 181  # Unknown residue alpha carbon
 ```
 
 ## Feature Extraction Methods
 
-### Method Naming Convention
-All atom-level methods have clear naming to distinguish from residue-level:
-- `get_atom_features(distance_cutoff)` → Returns (node, edge) graph format
-- `get_atom_graph(distance_cutoff)` → Alias for get_atom_features()
-- `get_atom_tokens_and_coords()` → Returns (token, coord) tuple
-- `get_atom_features_with_sasa()` → Aliases: `get_atom_sasa()`, `get_atom_level_sasa()`
-- `get_atom_coordinates()` → Get only 3D coordinates
-- `get_atom_tokens_only()` → Get only token IDs
+### AtomFeaturizer Class
 
-### 1. Atom Graph Features (`get_atom_features()` / `get_atom_graph()`)
-
-Get atom-level graph representation with node and edge features, similar to residue-level format.
+The main class for atom-level protein feature extraction.
 
 ```python
-from plfeature import ProteinFeaturizer
+from plfeature.protein_featurizer import AtomFeaturizer
 
-featurizer = ProteinFeaturizer("protein.pdb")
+featurizer = AtomFeaturizer()
 
-# Get atom graph with customizable distance cutoff
-node, edge = featurizer.get_atom_features(distance_cutoff=4.0)  # Default: 4.0 Å
-# Or use explicit alias
-node, edge = featurizer.get_atom_graph(distance_cutoff=4.0)
+# From PDB file
+token, coord = featurizer.get_protein_atom_features("protein.pdb")
 
-# Node dictionary contains (SASA is automatically calculated and included):
-# - 'coord': 3D coordinates [n_atoms, 3]
-# - 'node_features': Atom tokens [n_atoms]
-# - 'atom_tokens': Same as node_features
-# - 'sasa': Solvent accessible surface area per atom [n_atoms] - INCLUDED BY DEFAULT
-# - 'residue_token': Residue type for each atom [n_atoms]
-# - 'atom_element': Element type for each atom (list)
-
-# Edge dictionary contains:
-# - 'edges': (src, dst) tuple of edge indices
-# - 'edge_distances': Distances between connected atoms
-# - 'distance_cutoff': The cutoff used
+# From pre-parsed PDBParser (more efficient when PDBParser already available)
+from plfeature.protein_featurizer.pdb_utils import PDBParser
+parser = PDBParser("protein.pdb")
+token, coord = featurizer.get_protein_atom_features_from_parser(parser)
 ```
 
-### 2. Basic Token and Coordinates (`get_atom_tokens_and_coords()`)
+### Method Reference
 
-Get just tokens and coordinates without graph structure.
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `get_protein_atom_features(pdb_file)` | Extract tokens and coords from PDB file | `(token, coord)` tensors |
+| `get_protein_atom_features_from_parser(parser)` | Extract from pre-parsed PDBParser | `(token, coord)` tensors |
+| `get_atom_sasa(pdb_file)` | Calculate SASA using FreeSASA | `(sasa, atom_info)` |
+| `get_all_atom_features(pdb_file)` | Get all features including SASA | Dictionary |
+| `get_residue_aggregated_features(pdb_file)` | Aggregate atom features to residues | Dictionary |
+
+### 1. Basic Token and Coordinates
 
 ```python
-token, coord = featurizer.get_atom_tokens_and_coords()
-# Or use alias
-token, coord = featurizer.get_atom_tokens()
+from plfeature.protein_featurizer import AtomFeaturizer
+
+featurizer = AtomFeaturizer()
+token, coord = featurizer.get_protein_atom_features("protein.pdb")
 
 # Returns:
-# token: torch.Tensor [n_atoms] - Atom type tokens (0-174)
+# token: torch.Tensor [n_atoms] - Atom type tokens (0-186)
 # coord: torch.Tensor [n_atoms, 3] - 3D coordinates
 ```
 
-### 3. Atom Features with SASA (`get_atom_features_with_sasa()`)
+### 2. From Pre-parsed PDBParser (Recommended for pipelines)
 
-Atom features including solvent accessible surface area.
+When multiple featurizers need the same PDB data, use a shared PDBParser:
 
 ```python
-features = featurizer.get_atom_features_with_sasa()  # or get_atom_sasa()
+from plfeature.protein_featurizer import AtomFeaturizer
+from plfeature.protein_featurizer.pdb_utils import PDBParser
+
+# Parse once
+parser = PDBParser("protein.pdb")
+
+# Use with AtomFeaturizer
+featurizer = AtomFeaturizer()
+token, coord = featurizer.get_protein_atom_features_from_parser(parser)
+
+# Same parser can be used with other featurizers
+from plfeature.protein_featurizer import ResidueFeaturizer
+res_featurizer = ResidueFeaturizer.from_parser(parser, "protein.pdb")
+```
+
+### 3. All Atom Features with SASA
+
+```python
+features = featurizer.get_all_atom_features("protein.pdb")
 
 # Returns dictionary:
 {
     'token': torch.Tensor,         # [n_atoms] Atom type tokens
     'coord': torch.Tensor,         # [n_atoms, 3] 3D coordinates
-    'sasa': torch.Tensor,          # [n_atoms] SASA per atom (Ų)
-    'residue_token': torch.Tensor, # [n_atoms] Residue type (0-20)
-    'atom_element': list,          # Element symbols ['C', 'N', 'O', ...]
+    'sasa': torch.Tensor,          # [n_atoms] SASA per atom (Å²)
+    'residue_token': torch.Tensor, # [n_atoms] Residue type (0-21)
+    'atom_element': torch.Tensor,  # [n_atoms] Element type (0-7)
     'radius': torch.Tensor,        # [n_atoms] Atomic radii
     'metadata': {
         'n_atoms': int,
-        'n_residues': int,
-        'pdb_file': str
+        'residue_names': list,
+        'residue_numbers': tensor,
+        'atom_names': list,
+        'chain_labels': list
     }
 }
 ```
 
 ### 4. Standalone Function Usage
-
-Can also be used without class instantiation:
 
 ```python
 from plfeature.protein_featurizer import get_protein_atom_features
@@ -111,8 +123,8 @@ from plfeature.protein_featurizer import get_protein_atom_features
 token, coord = get_protein_atom_features("protein.pdb")
 
 # With SASA
-from plfeature.protein_featurizer import get_protein_atom_features_with_sasa
-features = get_protein_atom_features_with_sasa("protein.pdb")
+from plfeature.protein_featurizer import get_atom_features_with_sasa
+features = get_atom_features_with_sasa("protein.pdb")
 ```
 
 ## SASA Calculation
@@ -126,104 +138,101 @@ Uses FreeSASA library for solvent accessible surface area calculation.
 
 **SASA Values:**
 ```python
-features = featurizer.get_atom_features_with_sasa()  # or get_atom_sasa()
-sasa_per_atom = features['sasa']  # Ų per atom
+atom_sasa, atom_info = featurizer.get_atom_sasa("protein.pdb")
+
+# atom_sasa: torch.Tensor [n_atoms] - SASA in Å² per atom
+# atom_info: Dictionary with atom metadata
 
 # Statistics
-total_sasa = sasa_per_atom.sum()
-buried_atoms = (sasa_per_atom < 0.01).sum()
-exposed_atoms = (sasa_per_atom > 20.0).sum()
+total_sasa = atom_sasa.sum()
+buried_atoms = (atom_sasa < 0.01).sum()
+exposed_atoms = (atom_sasa > 20.0).sum()
 ```
 
 ## Token Distribution
 
 ### Residue-Specific Tokens
+
 Each amino acid has specific atom tokens:
 
 ```python
-# Glycine (smallest): 5 tokens
-GLY_tokens = [('GLY', atom) for atom in ['N', 'CA', 'C', 'O', 'H']]
+# Glycine (smallest): 4 heavy atoms
+GLY_tokens = [('GLY', atom) for atom in ['N', 'CA', 'C', 'O']]
 
-# Tryptophan (largest): 24 tokens
+# Tryptophan (largest): 14 heavy atoms
 TRP_tokens = [('TRP', atom) for atom in [
     'N', 'CA', 'C', 'O', 'CB', 'CG', 'CD1', 'CD2',
-    'NE1', 'CE2', 'CE3', 'CZ2', 'CZ3', 'CH2', ...
+    'NE1', 'CE2', 'CE3', 'CZ2', 'CZ3', 'CH2'
 ]]
+
+# Unknown residues (XXX): backbone + common atoms
+XXX_tokens = [('XXX', atom) for atom in ['N', 'CA', 'C', 'O', 'CB', 'P', 'S', 'SE']]
 ```
 
 ### Token Categories
+
 - **Backbone atoms** (N, CA, C, O): Present in all residues
 - **Beta carbon** (CB): Present in all except glycine
 - **Sidechain atoms**: Residue-specific
-- **Hydrogen atoms**: Included when present in PDB
+- **Unknown token** (186): For non-standard residue-atom combinations
 
 ## Usage Examples
 
 ### Basic Atom-Level Analysis
+
 ```python
-from plfeature import ProteinFeaturizer
+from plfeature.protein_featurizer import AtomFeaturizer
 import torch
 
-featurizer = ProteinFeaturizer("protein.pdb")
+featurizer = AtomFeaturizer()
+token, coord = featurizer.get_protein_atom_features("protein.pdb")
 
-# Get atom graph with SASA included
-node, edge = featurizer.get_atom_features(distance_cutoff=4.0)
-
-# Access all atom-level data from node dictionary
-coords = node['coord']
-tokens = node['atom_tokens']
-sasa = node['sasa']  # SASA is automatically included!
-elements = node['atom_element']
-
-print(f"Number of atoms: {len(tokens)}")
-print(f"Unique atom types: {torch.unique(tokens).shape[0]}")
-print(f"Total SASA: {sasa.sum():.2f} Ų")
-print(f"Number of edges: {edge['edges'][0].shape[0]}")
+print(f"Number of atoms: {len(token)}")
+print(f"Unique atom types: {torch.unique(token).shape[0]}")
+print(f"Token range: {token.min()} - {token.max()}")
 ```
 
 ### SASA-Based Analysis
-```python
-# SASA is already included in get_atom_features!
-node, edge = featurizer.get_atom_features(distance_cutoff=4.0)
 
-# Access SASA directly from node dictionary
-sasa = node['sasa']
-tokens = node['atom_tokens']
-residue_tokens = node['residue_token']
+```python
+features = featurizer.get_all_atom_features("protein.pdb")
+
+sasa = features['sasa']
+tokens = features['token']
+residue_tokens = features['residue_token']
 
 # Find exposed atoms
-exposed_mask = sasa > 20.0  # Ų threshold
+exposed_mask = sasa > 20.0  # Å² threshold
 exposed_tokens = tokens[exposed_mask]
 
 print(f"Exposed atoms: {exposed_mask.sum()}/{len(tokens)}")
-print(f"Total SASA: {sasa.sum():.2f} Ų")
+print(f"Total SASA: {sasa.sum():.2f} Å²")
 
 # Per-residue SASA
 for res_type in torch.unique(residue_tokens):
     mask = residue_tokens == res_type
     res_sasa = sasa[mask].sum()
-    print(f"Residue type {res_type}: {res_sasa:.2f} Ų")
+    print(f"Residue type {res_type}: {res_sasa:.2f} Å²")
 ```
 
-### Atom-Level Graph Construction
+### Efficient Pipeline with Shared Parser
+
 ```python
-import torch
-from scipy.spatial import distance_matrix
+from plfeature.protein_featurizer import AtomFeaturizer, ResidueFeaturizer
+from plfeature.protein_featurizer.pdb_utils import PDBParser
 
-features = featurizer.get_atom_features_with_sasa()  # or get_atom_sasa()
+# Parse PDB once
+parser = PDBParser("protein.pdb")
 
-# Build atom-level contact graph
-coords = features['coord'].numpy()
-dist_matrix = distance_matrix(coords, coords)
+# Use with multiple featurizers
+atom_featurizer = AtomFeaturizer()
+token, coord = atom_featurizer.get_protein_atom_features_from_parser(parser)
 
-# Define contacts (e.g., < 5 Å)
-contact_threshold = 5.0
-contacts = dist_matrix < contact_threshold
+res_featurizer = ResidueFeaturizer.from_parser(parser, "protein.pdb")
+residues = res_featurizer.get_residues()
 
-# Create edge list
-edges = torch.tensor(contacts).nonzero().T
-
-print(f"Atom-level edges: {edges.shape[1]}")
+# Get sequences for ESM
+sequences = parser.get_sequence_by_chain()
 ```
 
 ### Integration with Deep Learning
@@ -233,7 +242,7 @@ import torch
 import torch.nn as nn
 
 class AtomLevelModel(nn.Module):
-    def __init__(self, n_tokens=175, hidden_dim=128):
+    def __init__(self, n_tokens=187, hidden_dim=128):
         super().__init__()
         self.embedding = nn.Embedding(n_tokens, hidden_dim)
         self.sasa_proj = nn.Linear(1, hidden_dim)
@@ -249,8 +258,8 @@ class AtomLevelModel(nn.Module):
         return atom_features
 
 # Use with extracted features
-featurizer = ProteinFeaturizer("protein.pdb")
-features = featurizer.get_atom_features_with_sasa()  # or get_atom_sasa()
+featurizer = AtomFeaturizer()
+features = featurizer.get_all_atom_features("protein.pdb")
 
 model = AtomLevelModel()
 atom_features = model(
@@ -261,39 +270,43 @@ atom_features = model(
 ```
 
 ### Batch Processing
+
 ```python
 import glob
+from plfeature.protein_featurizer import AtomFeaturizer
 
+featurizer = AtomFeaturizer()
 pdb_files = glob.glob("pdbs/*.pdb")
-all_atom_features = []
 
+all_features = []
 for pdb_file in pdb_files:
-    featurizer = ProteinFeaturizer(pdb_file)
-    features = featurizer.get_atom_features_with_sasa()  # or get_atom_sasa()
-    all_atom_features.append(features)
+    features = featurizer.get_all_atom_features(pdb_file)
+    all_features.append(features)
 
 # Statistics
-total_atoms = sum(f['token'].shape[0] for f in all_atom_features)
-avg_sasa = sum(f['sasa'].mean() for f in all_atom_features) / len(all_atom_features)
+total_atoms = sum(f['token'].shape[0] for f in all_features)
+avg_sasa = sum(f['sasa'].mean() for f in all_features) / len(all_features)
 
 print(f"Total atoms: {total_atoms}")
-print(f"Average SASA per atom: {avg_sasa:.2f} Ų")
+print(f"Average SASA per atom: {avg_sasa:.2f} Å²")
 ```
 
 ## Atom Selection and Filtering
 
 ### By Element Type
+
 ```python
-features = featurizer.get_atom_features_with_sasa()  # or get_atom_sasa()
+features = featurizer.get_all_atom_features("protein.pdb")
 elements = features['atom_element']
 
-# Select only carbon atoms
-carbon_mask = torch.tensor([e == 'C' for e in elements])
+# Element type indices: C=0, N=1, O=2, S=3, P=4, Se=5, Metal=6, UNK=7
+carbon_mask = elements == 0
 carbon_tokens = features['token'][carbon_mask]
 carbon_coords = features['coord'][carbon_mask]
 ```
 
 ### By Residue Type
+
 ```python
 # Select atoms from aromatic residues
 aromatic_residues = [5, 19, 9]  # PHE, TYR, TRP
@@ -304,6 +317,7 @@ aromatic_atoms = features['token'][aromatic_mask]
 ```
 
 ### By SASA Exposure
+
 ```python
 # Categorize by exposure
 sasa = features['sasa']
@@ -316,7 +330,6 @@ print(f"Buried: {buried.sum()}")
 print(f"Partially exposed: {partially_exposed.sum()}")
 print(f"Exposed: {exposed.sum()}")
 ```
-
 
 ## Token Reference Table
 
@@ -334,3 +347,12 @@ for (res, atom), token in sorted(token_dict.items(), key=lambda x: x[1]):
     print(f"{res:3s} {atom:4s} -> {token:3d}")
 ```
 
+## Constants
+
+```python
+from plfeature.constants import (
+    RESIDUE_ATOM_TOKEN,  # Dict[(res, atom)] -> int
+    UNK_TOKEN,           # 186 - unknown token
+    NUM_ATOM_TOKENS,     # 187 - total token classes
+)
+```

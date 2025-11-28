@@ -288,7 +288,7 @@ class DualESMFeaturizer:
 
     def extract(self, sequence: str) -> Dict[str, torch.Tensor]:
         """
-        Extract embeddings from both models.
+        Extract embeddings from both models for a single sequence.
 
         Returns:
             Dictionary with:
@@ -311,10 +311,115 @@ class DualESMFeaturizer:
             'esm3_eos_token': esm3_result['eos_token'],
         }
 
+    def extract_by_chain(
+        self,
+        sequences_by_chain: Dict[str, str],
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Extract embeddings per chain and concatenate.
+
+        Each chain is processed separately through ESM models,
+        preserving proper BOS/EOS token handling per chain.
+
+        Args:
+            sequences_by_chain: Dict mapping chain_id -> sequence
+
+        Returns:
+            Dictionary with:
+                - esmc_embeddings: [total_residues, D1] concatenated
+                - esmc_bos_token: [D1] from first chain
+                - esmc_eos_token: [D1] from last chain
+                - esm3_embeddings: [total_residues, D2] concatenated
+                - esm3_bos_token: [D2] from first chain
+                - esm3_eos_token: [D2] from last chain
+                - chain_boundaries: List of (start, end) indices per chain
+        """
+        if not sequences_by_chain:
+            raise ValueError("No sequences provided")
+
+        # Sort chains for consistent ordering
+        sorted_chains = sorted(sequences_by_chain.keys())
+
+        esmc_embeddings_list = []
+        esm3_embeddings_list = []
+        chain_boundaries = []
+        current_idx = 0
+
+        esmc_bos = None
+        esmc_eos = None
+        esm3_bos = None
+        esm3_eos = None
+
+        for i, chain_id in enumerate(sorted_chains):
+            sequence = sequences_by_chain[chain_id]
+            if not sequence:
+                continue
+
+            logger.info(f"Extracting embeddings for chain {chain_id}: {len(sequence)} residues")
+
+            # Extract from both models
+            esmc_result = self.esmc.extract(sequence)
+            esm3_result = self.esm3.extract(sequence)
+
+            # Store embeddings
+            esmc_embeddings_list.append(esmc_result['embeddings'])
+            esm3_embeddings_list.append(esm3_result['embeddings'])
+
+            # Track chain boundaries
+            seq_len = len(sequence)
+            chain_boundaries.append((current_idx, current_idx + seq_len))
+            current_idx += seq_len
+
+            # Keep BOS from first chain, EOS from last chain
+            if i == 0:
+                esmc_bos = esmc_result['bos_token']
+                esm3_bos = esm3_result['bos_token']
+            if i == len(sorted_chains) - 1:
+                esmc_eos = esmc_result['eos_token']
+                esm3_eos = esm3_result['eos_token']
+
+        # Concatenate all chain embeddings
+        esmc_embeddings = torch.cat(esmc_embeddings_list, dim=0)
+        esm3_embeddings = torch.cat(esm3_embeddings_list, dim=0)
+
+        return {
+            'esmc_embeddings': esmc_embeddings,
+            'esmc_bos_token': esmc_bos,
+            'esmc_eos_token': esmc_eos,
+            'esm3_embeddings': esm3_embeddings,
+            'esm3_bos_token': esm3_bos,
+            'esm3_eos_token': esm3_eos,
+            'chain_boundaries': chain_boundaries,
+        }
+
     def extract_from_pdb(
         self,
         pdb_path: Union[str, Path],
     ) -> Dict[str, torch.Tensor]:
-        """Extract embeddings from PDB file using both models."""
-        sequence = self.esmc._get_sequence_from_pdb(pdb_path)
-        return self.extract(sequence)
+        """
+        Extract embeddings from PDB file using both models.
+
+        Extracts each chain separately for proper ESM processing.
+        """
+        from .pdb_utils import PDBParser
+
+        parser = PDBParser(str(pdb_path))
+        sequences_by_chain = parser.get_sequence_by_chain()
+
+        return self.extract_by_chain(sequences_by_chain)
+
+    def extract_from_parser(
+        self,
+        pdb_parser: 'PDBParser',
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Extract embeddings using pre-parsed PDB data.
+
+        Args:
+            pdb_parser: Pre-initialized PDBParser instance
+
+        Returns:
+            Dictionary with embeddings from both models
+        """
+        sequences_by_chain = pdb_parser.get_sequence_by_chain()
+        return self.extract_by_chain(sequences_by_chain)

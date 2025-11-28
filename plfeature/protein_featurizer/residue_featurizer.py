@@ -26,6 +26,7 @@ except ImportError:
 
 # Import unified PDB parsing utilities from canonical location
 from .pdb_utils import (
+    PDBParser,
     is_atom_record, is_hetatm_record, is_hydrogen, parse_pdb_atom_line,
     calculate_sidechain_centroid,
 )
@@ -99,6 +100,60 @@ class ResidueFeaturizer:
         grouped = self.protein_atom_info.groupby(level=[0, 1, 2])
         for residue_key, group in grouped:
             self._coord_cache[residue_key] = np.vstack(group['coord'].values).astype(np.float32)
+
+    @classmethod
+    def from_parser(cls, pdb_parser: 'PDBParser', pdb_file: str = None) -> 'ResidueFeaturizer':
+        """
+        Create ResidueFeaturizer from pre-parsed PDBParser data.
+
+        Avoids re-parsing the PDB file when PDBParser is already available.
+
+        Args:
+            pdb_parser: Pre-initialized PDBParser instance
+            pdb_file: Optional path to PDB file (for SASA calculation)
+
+        Returns:
+            ResidueFeaturizer instance with cached data
+        """
+        instance = cls.__new__(cls)
+        instance.pdb_file = pdb_file or pdb_parser.pdb_path
+
+        # Build dataframes from PDBParser data
+        protein_index = []
+        protein_data = {'coord': []}
+        hetero_index = []
+        hetero_data = {'coord': []}
+
+        for atom in pdb_parser.protein_atoms:
+            # Convert residue name to integer token
+            res_type = AMINO_ACID_3_TO_INT.get(atom.res_name, 20)  # 20 is UNK/unknown
+
+            # For unknown residues (PTMs), only keep backbone + CB atoms
+            if res_type == 20:
+                if atom.atom_name not in ['N', 'CA', 'C', 'O', 'CB']:
+                    continue
+
+            protein_index.append((atom.chain_id, atom.res_num, res_type, atom.atom_name))
+            protein_data['coord'].append(atom.coords)
+
+        # Build MultiIndex and DataFrame
+        instance.protein_indices = pd.MultiIndex.from_tuples(
+            protein_index, names=['chain', 'res_num', 'AA', 'atom']
+        )
+        instance.hetero_indices = pd.MultiIndex.from_tuples(
+            hetero_index, names=['chain', 'res_num', 'AA', 'atom']
+        )
+        instance.protein_atom_info = pd.DataFrame(protein_data, index=instance.protein_indices)
+        instance.hetero_atom_info = pd.DataFrame(hetero_data, index=instance.hetero_indices)
+
+        # Pre-build coordinate cache
+        instance._coord_cache = {}
+        if len(instance.protein_atom_info) > 0:
+            grouped = instance.protein_atom_info.groupby(level=[0, 1, 2])
+            for residue_key, group in grouped:
+                instance._coord_cache[residue_key] = np.vstack(group['coord'].values).astype(np.float32)
+
+        return instance
 
     def _parse_pdb(self, pdb_file: str) -> Tuple[pd.MultiIndex, pd.MultiIndex, pd.DataFrame, pd.DataFrame]:
         """

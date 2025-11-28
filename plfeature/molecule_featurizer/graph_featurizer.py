@@ -808,7 +808,7 @@ class MoleculeGraphFeaturizer:
             smarts_feat,    # SMARTS patterns (5)
             stereo_feat,    # Stereochemistry (8)
             charge_feat,    # Partial charges (2)
-            ext_neighbor,   # Extended neighborhood (6)
+            ext_neighbor,   # Extended neighborhood: 1-hop & 2-hop stats (16)
             physical_feat,  # Physical properties (6)
             crippen_feat,   # Crippen logP/MR (2)
             tpsa_feat,      # TPSA (1)
