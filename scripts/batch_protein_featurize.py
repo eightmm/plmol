@@ -3,9 +3,10 @@
 Batch feature extraction for protein PDB files.
 
 Usage:
-    python scripts/batch_featurize.py --input_dir /mnt/data/PLI/P-L --output_dir /mnt/data/PLI/P-L-features
-    python scripts/batch_featurize.py --input_dir /mnt/data/PLI/P-L --output_dir /mnt/data/PLI/P-L-features --num_workers 4
-    python scripts/batch_featurize.py --input_dir /mnt/data/PLI/P-L --output_dir /mnt/data/PLI/P-L-features --resume
+    python scripts/batch_protein_featurize.py --input_dir /data/proteins --output_dir /data/features
+    python scripts/batch_protein_featurize.py --input_dir /data/proteins --output_dir /data/features --num_workers 4
+    python scripts/batch_protein_featurize.py --input_dir /data/proteins --output_dir /data/features --standardize
+    python scripts/batch_protein_featurize.py --input_dir /data/proteins --output_dir /data/features --standardize --ptm_handling preserve
 """
 
 import argparse
@@ -13,10 +14,11 @@ import logging
 import os
 import sys
 import time
+import tempfile
+import uuid
 from pathlib import Path
 from typing import List, Optional, Tuple
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import asdict
 
 import torch
 from tqdm import tqdm
@@ -25,6 +27,7 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from plfeature.protein_featurizer import HierarchicalFeaturizer
+from plfeature import PDBStandardizer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,15 +51,41 @@ def get_output_path(pdb_path: Path, input_dir: str, output_dir: str) -> Path:
     return output_path
 
 
-def process_single_file(args: Tuple[Path, str, str]) -> Tuple[str, bool, str]:
+def standardize_pdb_to_tmp(
+    pdb_path: Path,
+    ptm_handling: str = 'base_aa',
+    remove_hydrogens: bool = True
+) -> str:
     """
-    Process a single PDB file.
+    Standardize PDB file and save to /tmp.
+
+    Returns:
+        Path to standardized PDB file in /tmp
+    """
+    # Create unique temp file path
+    tmp_filename = f"plfeature_{uuid.uuid4().hex}_{pdb_path.stem}.pdb"
+    tmp_path = os.path.join(tempfile.gettempdir(), tmp_filename)
+
+    # Standardize
+    standardizer = PDBStandardizer(
+        remove_hydrogens=remove_hydrogens,
+        ptm_handling=ptm_handling
+    )
+    standardizer.standardize(str(pdb_path), tmp_path)
+
+    return tmp_path
+
+
+def process_single_file(args: Tuple) -> Tuple[str, bool, str]:
+    """
+    Process a single PDB file (for multi-process mode).
 
     Returns:
         Tuple of (pdb_id, success, message)
     """
-    pdb_path, input_dir, output_dir = args
+    pdb_path, input_dir, output_dir, standardize, ptm_handling = args
     pdb_id = pdb_path.stem.replace('_protein', '')
+    tmp_pdb_path = None
 
     try:
         output_path = get_output_path(pdb_path, input_dir, output_dir)
@@ -68,11 +97,18 @@ def process_single_file(args: Tuple[Path, str, str]) -> Tuple[str, bool, str]:
         # Create output directory
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Standardize if requested
+        if standardize:
+            tmp_pdb_path = standardize_pdb_to_tmp(pdb_path, ptm_handling)
+            pdb_to_process = tmp_pdb_path
+        else:
+            pdb_to_process = str(pdb_path)
+
         # Initialize featurizer (per-process)
         featurizer = HierarchicalFeaturizer()
 
         # Extract features
-        data = featurizer.featurize(str(pdb_path))
+        data = featurizer.featurize(pdb_to_process)
 
         # Convert to dict for saving
         save_dict = {
@@ -113,6 +149,8 @@ def process_single_file(args: Tuple[Path, str, str]) -> Tuple[str, bool, str]:
             'num_residues': data.num_residues,
             'pdb_id': pdb_id,
             'source_path': str(pdb_path),
+            'standardized': standardize,
+            'ptm_handling': ptm_handling if standardize else None,
         }
 
         # Save
@@ -123,17 +161,26 @@ def process_single_file(args: Tuple[Path, str, str]) -> Tuple[str, bool, str]:
     except Exception as e:
         return (pdb_id, False, str(e))
 
+    finally:
+        # Clean up temp file
+        if tmp_pdb_path and os.path.exists(tmp_pdb_path):
+            os.remove(tmp_pdb_path)
+
 
 def process_single_file_shared_featurizer(
     pdb_path: Path,
     input_dir: str,
     output_dir: str,
-    featurizer: HierarchicalFeaturizer
+    featurizer: HierarchicalFeaturizer,
+    standardize: bool = False,
+    ptm_handling: str = 'base_aa',
+    standardizer: Optional[PDBStandardizer] = None
 ) -> Tuple[str, bool, str]:
     """
     Process a single PDB file with shared featurizer (for single-process mode).
     """
     pdb_id = pdb_path.stem.replace('_protein', '')
+    tmp_pdb_path = None
 
     try:
         output_path = get_output_path(pdb_path, input_dir, output_dir)
@@ -145,8 +192,15 @@ def process_single_file_shared_featurizer(
         # Create output directory
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Standardize if requested
+        if standardize and standardizer:
+            tmp_pdb_path = standardize_pdb_to_tmp(pdb_path, ptm_handling)
+            pdb_to_process = tmp_pdb_path
+        else:
+            pdb_to_process = str(pdb_path)
+
         # Extract features
-        data = featurizer.featurize(str(pdb_path))
+        data = featurizer.featurize(pdb_to_process)
 
         # Convert to dict for saving
         save_dict = {
@@ -187,6 +241,8 @@ def process_single_file_shared_featurizer(
             'num_residues': data.num_residues,
             'pdb_id': pdb_id,
             'source_path': str(pdb_path),
+            'standardized': standardize,
+            'ptm_handling': ptm_handling if standardize else None,
         }
 
         # Save
@@ -196,6 +252,11 @@ def process_single_file_shared_featurizer(
 
     except Exception as e:
         return (pdb_id, False, str(e))
+
+    finally:
+        # Clean up temp file
+        if tmp_pdb_path and os.path.exists(tmp_pdb_path):
+            os.remove(tmp_pdb_path)
 
 
 def main():
@@ -208,12 +269,19 @@ def main():
     parser.add_argument('--esmc_model', type=str, default='esmc_600m', help='ESMC model name')
     parser.add_argument('--esm3_model', type=str, default='esm3-open', help='ESM3 model name')
     parser.add_argument('--device', type=str, default='cuda', help='Device for ESM models')
+    parser.add_argument('--standardize', action='store_true', help='Standardize PDB files before featurization')
+    parser.add_argument('--ptm_handling', type=str, default='base_aa',
+                        choices=['base_aa', 'preserve', 'remove'],
+                        help='PTM handling mode (default: base_aa)')
     args = parser.parse_args()
 
     # Find all protein files
     logger.info(f"Scanning {args.input_dir} for protein.pdb files...")
     pdb_files = find_protein_files(args.input_dir)
     logger.info(f"Found {len(pdb_files)} protein files")
+
+    if args.standardize:
+        logger.info(f"Standardization enabled (ptm_handling: {args.ptm_handling})")
 
     if args.limit:
         pdb_files = pdb_files[:args.limit]
@@ -253,10 +321,14 @@ def main():
         )
         logger.info("Featurizer ready")
 
+        # Create standardizer if needed
+        standardizer = PDBStandardizer(ptm_handling=args.ptm_handling) if args.standardize else None
+
         with tqdm(pdb_files, desc="Processing", unit="file") as pbar:
             for pdb_path in pbar:
                 pdb_id, success, msg = process_single_file_shared_featurizer(
-                    pdb_path, args.input_dir, args.output_dir, featurizer
+                    pdb_path, args.input_dir, args.output_dir, featurizer,
+                    args.standardize, args.ptm_handling, standardizer
                 )
 
                 if success:
@@ -270,7 +342,10 @@ def main():
         # Multi-process mode
         logger.info(f"Using {args.num_workers} workers")
 
-        tasks = [(f, args.input_dir, args.output_dir) for f in pdb_files]
+        tasks = [
+            (f, args.input_dir, args.output_dir, args.standardize, args.ptm_handling)
+            for f in pdb_files
+        ]
 
         with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
             futures = {executor.submit(process_single_file, task): task[0] for task in tasks}
@@ -297,7 +372,8 @@ def main():
     logger.info(f"Success: {success_count}")
     logger.info(f"Failed: {fail_count}")
     logger.info(f"Time: {elapsed:.1f}s ({elapsed/60:.1f} min)")
-    logger.info(f"Speed: {(success_count + fail_count) / elapsed:.2f} files/sec")
+    if elapsed > 0:
+        logger.info(f"Speed: {(success_count + fail_count) / elapsed:.2f} files/sec")
 
     if failed_files:
         logger.info("\nFailed files:")
