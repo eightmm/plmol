@@ -303,4 +303,4 @@ For clarity, all methods have descriptive aliases:
 ## See Also
 
 - [Protein Atom Features](protein_atom_feature.md) - Atom-level features
-- [Hierarchical Featurizer](hierarchical_featurizer.md) - Combined atom/residue/ESM features
+- [Hierarchical Featurizer](protein_hierarchical_featurizer.md) - Combined atom/residue/ESM features
