@@ -126,7 +126,8 @@ def process_single_ligand(
     file_paths: List[Path],
     input_dir: str,
     output_dir: str,
-    add_hydrogens: bool = True,
+    add_hydrogens: bool = False,
+    canonicalize: bool = True,
     graph_only: bool = False,
 ) -> Tuple[str, bool, str]:
     """
@@ -137,7 +138,8 @@ def process_single_ligand(
         file_paths: List of file paths to try loading from
         input_dir: Input directory root
         output_dir: Output directory root
-        add_hydrogens: Whether to add hydrogens
+        add_hydrogens: Whether to add hydrogens (default: False, heavy atoms only)
+        canonicalize: Whether to canonicalize atom order (default: True)
         graph_only: If True, only extract graph features (no descriptors/fingerprints)
 
     Returns:
@@ -167,7 +169,11 @@ def process_single_ligand(
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Initialize featurizer with molecule
-        featurizer = MoleculeFeaturizer(mol, hydrogen=add_hydrogens)
+        featurizer = MoleculeFeaturizer(
+            mol,
+            hydrogen=add_hydrogens,
+            canonicalize=canonicalize
+        )
 
         # Extract graph features
         node, edge, adj = featurizer.get_graph()
@@ -176,9 +182,10 @@ def process_single_ligand(
         save_dict = {
             # Graph features
             'node_feats': node['node_feats'],               # [N_atoms, 157]
+            'coords': node['coords'],                       # [N_atoms, 3]
             'edge_feats': edge['edge_feats'],               # [N_edges, 66]
-            'edge_index': edge['edge_index'],               # [2, N_edges]
-            'adjacency': adj,                               # [N_atoms, N_atoms]
+            'edge_index': edge['edges'],                    # [2, N_edges]
+            'adjacency': adj,                               # [N_atoms, N_atoms, 66]
 
             # Metadata
             'num_atoms': featurizer.num_atoms,
@@ -190,21 +197,22 @@ def process_single_ligand(
             'source_path': str(loaded_from),
             'source_format': loaded_from.suffix,
             'graph_only': graph_only,
+            'canonicalized': canonicalize,
         }
 
         # Add molecular descriptors and fingerprints if not graph_only
         if not graph_only:
             features = featurizer.get_feature()
             save_dict.update({
-                'descriptor': features['descriptor'],           # [40]
-                'maccs': features['maccs'],                     # [167]
-                'morgan': features['morgan'],                   # [2048]
-                'morgan_counts': features['morgan_counts'],     # [2048]
-                'rdkit_fp': features['rdkit_fp'],               # [2048]
-                'atom_pair': features['atom_pair'],             # [2048]
+                'descriptor': features['descriptor'],               # [40]
+                'maccs': features['maccs'],                         # [167]
+                'morgan': features['morgan'],                       # [2048]
+                'morgan_count': features['morgan_count'],           # [2048]
+                'feature_morgan': features['feature_morgan'],       # [2048]
+                'rdkit': features['rdkit'],                         # [2048]
+                'atom_pair': features['atom_pair'],                 # [2048]
                 'topological_torsion': features['topological_torsion'],  # [2048]
-                'pattern': features['pattern'],                 # [2048]
-                'layered': features['layered'],                 # [2048]
+                'pharmacophore2d': features['pharmacophore2d'],     # [1024]
             })
 
         # Save
@@ -219,7 +227,11 @@ def process_single_ligand(
 
 def process_wrapper(args: Tuple) -> Tuple[str, bool, str]:
     """Wrapper for multiprocessing."""
-    return process_single_ligand(*args)
+    ligand_id, file_paths, input_dir, output_dir, add_hydrogens, canonicalize, graph_only = args
+    return process_single_ligand(
+        ligand_id, file_paths, input_dir, output_dir,
+        add_hydrogens, canonicalize, graph_only
+    )
 
 
 def main():
@@ -247,8 +259,12 @@ def main():
         help='Limit number of ligands to process'
     )
     parser.add_argument(
-        '--no_hydrogens', action='store_true',
-        help='Do not add hydrogens to molecules'
+        '--add_hydrogens', action='store_true',
+        help='Add explicit hydrogens to molecules (default: heavy atoms only)'
+    )
+    parser.add_argument(
+        '--no_canonicalize', action='store_true',
+        help='Do not canonicalize atom order (default: canonicalize for ML consistency)'
     )
     parser.add_argument(
         '--graph_only', action='store_true',
@@ -256,11 +272,12 @@ def main():
     )
     args = parser.parse_args()
 
-    add_hydrogens = not args.no_hydrogens
+    add_hydrogens = args.add_hydrogens
+    canonicalize = not args.no_canonicalize
     graph_only = args.graph_only
 
-    if graph_only:
-        logger.info("Mode: graph_only (skipping descriptors and fingerprints)")
+    # Log options
+    logger.info(f"Options: hydrogen={add_hydrogens}, canonicalize={canonicalize}, graph_only={graph_only}")
 
     # Find all ligand files
     logger.info(f"Scanning {args.input_dir} for ligand files...")
@@ -311,7 +328,7 @@ def main():
             for ligand_id, file_paths in pbar:
                 lid, success, msg = process_single_ligand(
                     ligand_id, file_paths, args.input_dir, args.output_dir,
-                    add_hydrogens, graph_only
+                    add_hydrogens, canonicalize, graph_only
                 )
 
                 if success:
@@ -326,7 +343,7 @@ def main():
         logger.info(f"Using {args.num_workers} workers")
 
         tasks = [
-            (lid, files, args.input_dir, args.output_dir, add_hydrogens, graph_only)
+            (lid, files, args.input_dir, args.output_dir, add_hydrogens, canonicalize, graph_only)
             for lid, files in ligand_list
         ]
 
