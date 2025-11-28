@@ -29,6 +29,7 @@ from .pdb_utils import (
     PDBParser,
     is_atom_record, is_hetatm_record, is_hydrogen, parse_pdb_atom_line,
     calculate_sidechain_centroid,
+    normalize_residue_name,
 )
 
 # Import amino acid constants from centralized module
@@ -125,8 +126,9 @@ class ResidueFeaturizer:
         hetero_data = {'coord': []}
 
         for atom in pdb_parser.protein_atoms:
-            # Convert residue name to integer token
-            res_type = AMINO_ACID_3_TO_INT.get(atom.res_name, 20)  # 20 is UNK/unknown
+            # Convert residue name to integer token (normalize first for consistency with PDBParser)
+            norm_res = normalize_residue_name(atom.res_name, atom.atom_name)
+            res_type = AMINO_ACID_3_TO_INT.get(norm_res, 20)  # 20 is UNK/unknown
 
             # For unknown residues (PTMs), only keep backbone + CB atoms
             if res_type == 20:
@@ -187,8 +189,9 @@ class ResidueFeaturizer:
             if res_name == 'HOH':
                 continue
 
-            # Convert residue name to integer token
-            res_type = AMINO_ACID_3_TO_INT.get(res_name, 20)  # 20 is UNK/unknown
+            # Convert residue name to integer token (normalize first for consistency)
+            norm_res = normalize_residue_name(res_name, atom_type)
+            res_type = AMINO_ACID_3_TO_INT.get(norm_res, 20)  # 20 is UNK/unknown
 
             # For unknown residues (PTMs), only keep backbone + CB atoms
             if res_type == 20:  # UNK
