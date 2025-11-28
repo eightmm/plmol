@@ -61,6 +61,7 @@ class MoleculeFeaturizer:
         self,
         mol_or_smiles: Optional[Union[str, Chem.Mol]] = None,
         hydrogen: bool = True,
+        canonicalize: bool = True,
         custom_smarts: Optional[Dict[str, str]] = None,
     ):
         """
@@ -71,6 +72,9 @@ class MoleculeFeaturizer:
                           If provided, enables object-oriented usage with caching.
                           If None, use functional API by passing molecule to methods.
             hydrogen: Whether to add hydrogens to molecules (default: True)
+            canonicalize: Whether to reorder atoms to canonical order (default: True)
+                         Ensures same molecule always produces same features regardless
+                         of input atom ordering. Recommended for ML consistency.
             custom_smarts: Optional dictionary of custom SMARTS patterns
                           e.g., {'aromatic_nitrogen': 'n', 'carboxyl': 'C(=O)O'}
 
@@ -79,6 +83,7 @@ class MoleculeFeaturizer:
         """
         self._graph_featurizer = MoleculeGraphFeaturizer()
         self.hydrogen = hydrogen
+        self.canonicalize = canonicalize
         self.custom_smarts = custom_smarts or {}
         self._cache: Dict[str, Any] = {}
 
@@ -106,8 +111,8 @@ class MoleculeFeaturizer:
             self.input_mol = mol_or_smiles
             self.input_smiles = Chem.MolToSmiles(mol_or_smiles) if mol_or_smiles else None
 
-        # Prepare molecule (add hydrogens if requested)
-        self._mol = self._prepare_mol(self.input_mol, self.hydrogen)
+        # Prepare molecule (canonicalize and add hydrogens if requested)
+        self._mol = self._prepare_mol(self.input_mol, self.hydrogen, self.canonicalize)
         if self._mol is None:
             raise ValueError(f"Failed to prepare molecule: {mol_or_smiles}")
 
@@ -122,7 +127,35 @@ class MoleculeFeaturizer:
     # =========================================================================
 
     @staticmethod
-    def _prepare_mol(mol_or_smiles: Union[str, Chem.Mol], add_hs: bool = True) -> Chem.Mol:
+    def _canonicalize_mol(mol: Chem.Mol) -> Chem.Mol:
+        """
+        Reorder atoms to canonical order.
+
+        This ensures the same molecule always produces the same atom ordering
+        regardless of the input order. Coordinates are also reordered.
+
+        Args:
+            mol: RDKit mol object
+
+        Returns:
+            RDKit mol object with atoms in canonical order
+        """
+        # Get canonical ranking for each atom
+        ranks = list(Chem.CanonicalRankAtoms(mol, breakTies=True))
+        # Convert ranks to new atom order: newOrder[new_idx] = old_idx
+        # ranks[old_idx] = new_idx, so we need inverse
+        new_order = [0] * len(ranks)
+        for old_idx, new_idx in enumerate(ranks):
+            new_order[new_idx] = old_idx
+        # Renumber atoms (this also reorders coordinates if present)
+        return Chem.RenumberAtoms(mol, new_order)
+
+    @staticmethod
+    def _prepare_mol(
+        mol_or_smiles: Union[str, Chem.Mol],
+        add_hs: bool = True,
+        canonicalize: bool = True
+    ) -> Chem.Mol:
         """
         Prepare molecule from SMILES string or RDKit mol object.
 
@@ -131,9 +164,10 @@ class MoleculeFeaturizer:
         Args:
             mol_or_smiles: RDKit mol object or SMILES string
             add_hs: Whether to add hydrogens
+            canonicalize: Whether to reorder atoms to canonical order
 
         Returns:
-            RDKit mol object with optional hydrogens
+            RDKit mol object with optional hydrogens in canonical order
 
         Raises:
             ValueError: If SMILES string is invalid
@@ -144,6 +178,10 @@ class MoleculeFeaturizer:
                 raise ValueError(f"Invalid SMILES: {mol_or_smiles}")
         else:
             mol = mol_or_smiles
+
+        # Canonicalize BEFORE adding hydrogens for consistent ordering
+        if canonicalize and mol is not None:
+            mol = MoleculeFeaturizer._canonicalize_mol(mol)
 
         if add_hs and mol is not None:
             has_3d_coords = mol.GetNumConformers() > 0
@@ -438,7 +476,7 @@ class MoleculeFeaturizer:
             return self._cache['features']
 
         # Functional mode (no caching)
-        mol = self._prepare_mol(mol_or_smiles, add_hs)
+        mol = self._prepare_mol(mol_or_smiles, add_hs, self.canonicalize)
         return self._compute_features(mol)
 
     def _compute_features(self, mol: Chem.Mol) -> Dict:
@@ -522,7 +560,7 @@ class MoleculeFeaturizer:
             return self._cache[cache_key]
 
         # Functional mode (no caching)
-        mol = self._prepare_mol(mol_or_smiles, add_hs)
+        mol = self._prepare_mol(mol_or_smiles, add_hs, self.canonicalize)
         return self._compute_graph(mol, distance_cutoff, include_custom_smarts)
 
     def _compute_graph(
