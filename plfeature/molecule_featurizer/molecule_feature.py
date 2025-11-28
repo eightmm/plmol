@@ -60,7 +60,7 @@ class MoleculeFeaturizer:
     def __init__(
         self,
         mol_or_smiles: Optional[Union[str, Chem.Mol]] = None,
-        hydrogen: bool = True,
+        hydrogen: bool = False,
         canonicalize: bool = True,
         custom_smarts: Optional[Dict[str, str]] = None,
     ):
@@ -71,7 +71,9 @@ class MoleculeFeaturizer:
             mol_or_smiles: Optional molecule (RDKit mol or SMILES string).
                           If provided, enables object-oriented usage with caching.
                           If None, use functional API by passing molecule to methods.
-            hydrogen: Whether to add hydrogens to molecules (default: True)
+            hydrogen: Whether to add explicit hydrogens to molecules (default: False)
+                     Heavy atoms only is recommended for GNN models since H count
+                     is already encoded in node features (total_hs).
             canonicalize: Whether to reorder atoms to canonical order (default: True)
                          Ensures same molecule always produces same features regardless
                          of input atom ordering. Recommended for ML consistency.
@@ -445,7 +447,7 @@ class MoleculeFeaturizer:
     # =========================================================================
 
     def get_feature(
-        self, mol_or_smiles: Optional[Union[str, Chem.Mol]] = None, add_hs: bool = True
+        self, mol_or_smiles: Optional[Union[str, Chem.Mol]] = None, add_hs: bool = False
     ) -> Dict:
         """
         Extract all molecular-level features including descriptors and fingerprints.
@@ -453,7 +455,7 @@ class MoleculeFeaturizer:
         Args:
             mol_or_smiles: RDKit mol object or SMILES string.
                           If None, uses the molecule set during initialization.
-            add_hs: Whether to add hydrogens (ignored if using cached molecule)
+            add_hs: Whether to add hydrogens (ignored if using cached molecule, default: False)
 
         Returns:
             Dictionary containing:
@@ -526,7 +528,7 @@ class MoleculeFeaturizer:
     def get_graph(
         self,
         mol_or_smiles: Optional[Union[str, Chem.Mol]] = None,
-        add_hs: bool = True,
+        add_hs: bool = False,
         distance_cutoff: Optional[float] = None,
         include_custom_smarts: bool = True,
     ) -> Tuple[Dict, Dict, torch.Tensor]:
@@ -536,7 +538,7 @@ class MoleculeFeaturizer:
         Args:
             mol_or_smiles: RDKit mol object or SMILES string.
                           If None, uses the molecule set during initialization.
-            add_hs: Whether to add hydrogens (ignored if using cached molecule)
+            add_hs: Whether to add hydrogens (ignored if using cached molecule, default: False)
             distance_cutoff: Optional distance cutoff for edges (if 3D available)
                            If None, uses bond connectivity
             include_custom_smarts: Whether to include custom SMARTS features in node features
