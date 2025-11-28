@@ -221,7 +221,14 @@ class ResidueFeaturizer:
         Returns:
             List of (chain, residue_number, residue_type) tuples
         """
-        return sorted(set(list([(chain, num, res) for chain, num, res, atom in self.protein_indices])))
+        # Use (chain, num) as unique key to match PDBParser behavior
+        # This ensures residue count matches ESM sequence length
+        seen = {}
+        for chain, num, res, atom in self.protein_indices:
+            key = (chain, num)
+            if key not in seen:
+                seen[key] = res  # Keep first res_type seen
+        return sorted([(chain, num, res) for (chain, num), res in seen.items()])
 
     def get_sequence_by_chain(self) -> Dict[str, str]:
         """
