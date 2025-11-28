@@ -76,18 +76,18 @@ def process_single_file(args: Tuple[Path, str, str]) -> Tuple[str, bool, str]:
 
         # Convert to dict for saving
         save_dict = {
-            # Atom-level (one-hot encoded)
-            'atom_tokens': data.atom_tokens,           # [N_atom, 187]
+            # Atom-level (integer indices for nn.Embedding lookup)
+            'atom_tokens': data.atom_tokens,           # [N_atom] - indices 0-186 (187 classes)
             'atom_coords': data.atom_coords,           # [N_atom, 3]
             'atom_sasa': data.atom_sasa,               # [N_atom]
-            'atom_elements': data.atom_elements,       # [N_atom, 8]
-            'atom_residue_types': data.atom_residue_types,  # [N_atom, 22]
+            'atom_elements': data.atom_elements,       # [N_atom] - indices 0-7 (8 classes)
+            'atom_residue_types': data.atom_residue_types,  # [N_atom] - indices 0-21 (22 classes)
             'atom_names': data.atom_names,
 
             # Residue-level
             'residue_features': data.residue_features,  # [N_res, 76]
-            'residue_ca_coords': data.residue_ca_coords,
-            'residue_sc_coords': data.residue_sc_coords,
+            'residue_ca_coords': data.residue_ca_coords,  # [N_res, 3]
+            'residue_sc_coords': data.residue_sc_coords,  # [N_res, 3]
             'residue_names': data.residue_names,
             'residue_ids': data.residue_ids,
 
@@ -103,7 +103,7 @@ def process_single_file(args: Tuple[Path, str, str]) -> Tuple[str, bool, str]:
             'residue_vector_features': data.residue_vector_features,  # [N_res, 31, 3]
 
             # Mapping
-            'atom_to_residue': data.atom_to_residue,
+            'atom_to_residue': data.atom_to_residue,   # [N_atom]
             'residue_atom_indices': data.residue_atom_indices,
             'residue_atom_mask': data.residue_atom_mask,
             'num_atoms_per_residue': data.num_atoms_per_residue,
@@ -150,18 +150,18 @@ def process_single_file_shared_featurizer(
 
         # Convert to dict for saving
         save_dict = {
-            # Atom-level (one-hot encoded)
-            'atom_tokens': data.atom_tokens,           # [N_atom, 187]
+            # Atom-level (integer indices for nn.Embedding lookup)
+            'atom_tokens': data.atom_tokens,           # [N_atom] - indices 0-186 (187 classes)
             'atom_coords': data.atom_coords,           # [N_atom, 3]
             'atom_sasa': data.atom_sasa,               # [N_atom]
-            'atom_elements': data.atom_elements,       # [N_atom, 8]
-            'atom_residue_types': data.atom_residue_types,  # [N_atom, 22]
+            'atom_elements': data.atom_elements,       # [N_atom] - indices 0-7 (8 classes)
+            'atom_residue_types': data.atom_residue_types,  # [N_atom] - indices 0-21 (22 classes)
             'atom_names': data.atom_names,
 
             # Residue-level
             'residue_features': data.residue_features,  # [N_res, 76]
-            'residue_ca_coords': data.residue_ca_coords,
-            'residue_sc_coords': data.residue_sc_coords,
+            'residue_ca_coords': data.residue_ca_coords,  # [N_res, 3]
+            'residue_sc_coords': data.residue_sc_coords,  # [N_res, 3]
             'residue_names': data.residue_names,
             'residue_ids': data.residue_ids,
 
@@ -177,7 +177,7 @@ def process_single_file_shared_featurizer(
             'residue_vector_features': data.residue_vector_features,  # [N_res, 31, 3]
 
             # Mapping
-            'atom_to_residue': data.atom_to_residue,
+            'atom_to_residue': data.atom_to_residue,   # [N_atom]
             'residue_atom_indices': data.residue_atom_indices,
             'residue_atom_mask': data.residue_atom_mask,
             'num_atoms_per_residue': data.num_atoms_per_residue,
