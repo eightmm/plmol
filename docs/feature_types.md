@@ -42,8 +42,8 @@ contacts = featurizer.get_contact_map(cutoff=8.0)
 
 ## Documentation
 
-- [Molecular Descriptors & Fingerprints](molecule_feature.md)
+- [Molecule Features (Descriptors & Fingerprints)](molecule_feature.md)
 - [Molecule Graph Representations](molecule_graph.md)
-- [Molecular Descriptors Reference](molecule_descriptors.md)
 - [Protein Residue Features](protein_residue_feature.md)
 - [Protein Atom Features](protein_atom_feature.md)
+- [Protein Hierarchical Features](protein_hierarchical_featurizer.md)
