@@ -547,8 +547,11 @@ class MoleculeFeaturizer:
             mol_or_smiles: RDKit mol object or SMILES string.
                           If None, uses the molecule set during initialization.
             add_hs: Whether to add hydrogens (ignored if using cached molecule, default: False)
-            distance_cutoff: Optional distance cutoff for edges (if 3D available)
-                           If None, uses bond connectivity
+            distance_cutoff: Optional distance cutoff for edges (if 3D available).
+                           If None, uses bond connectivity.
+                           Note: When using distance_cutoff, edge_feats remain bond-based
+                           features. Only the edge indices are filtered by distance.
+                           For distance-based edge features, consider using coords directly.
             include_custom_smarts: Whether to include custom SMARTS features in node features
 
         Returns:
@@ -625,14 +628,25 @@ class MoleculeFeaturizer:
         Get Morgan fingerprint (requires molecule initialization).
 
         Args:
-            radius: Radius for Morgan fingerprint (currently uses default 2)
-            n_bits: Number of bits (currently uses default 2048)
+            radius: Radius for Morgan fingerprint (default: 2)
+            n_bits: Number of bits (default: 2048)
 
         Returns:
-            torch.Tensor: Morgan fingerprint
+            torch.Tensor: Morgan fingerprint of shape [n_bits]
         """
-        features = self.get_feature()
-        return features['morgan']
+        if self._mol is None:
+            raise ValueError("No molecule set. Initialize with a molecule first.")
+
+        # Use cached value for default parameters
+        if radius == 2 and n_bits == 2048:
+            features = self.get_feature()
+            return features['morgan']
+
+        # Generate custom fingerprint
+        morgan_gen = rdFingerprintGenerator.GetMorganGenerator(
+            radius=radius, fpSize=n_bits, countSimulation=True, includeChirality=True
+        )
+        return torch.from_numpy(morgan_gen.GetFingerprintAsNumPy(self._mol)).float()
 
     def get_custom_smarts_features(self) -> Optional[Dict[str, Any]]:
         """

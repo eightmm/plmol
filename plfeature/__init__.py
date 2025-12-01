@@ -6,7 +6,7 @@ for machine learning applications and protein-ligand modeling.
 """
 
 # Import molecule featurizer components
-from .molecule_featurizer import MoleculeFeaturizer
+from .molecule_featurizer import MoleculeFeaturizer, MoleculeGraphFeaturizer
 
 # Import protein featurizer components
 from .protein_featurizer import (
@@ -38,11 +38,11 @@ from . import constants
 
 __version__ = "0.1.0"
 __author__ = "Jaemin Sim"
-__email__ = "your.email@example.com"
 
 __all__ = [
     # Molecule features
     "MoleculeFeaturizer",
+    "MoleculeGraphFeaturizer",
     # Protein features
     "ProteinFeaturizer",
     "PDBStandardizer",
@@ -61,19 +61,22 @@ __all__ = [
 ]
 
 # Convenience functions for quick access
-def extract_molecule_features(mol_or_smiles, add_hs=True):
+def extract_molecule_features(mol_or_smiles, add_hs=False, canonicalize=True):
     """
     Convenience function to extract molecule features.
 
     Args:
         mol_or_smiles: RDKit mol object or SMILES string
-        add_hs: Whether to add hydrogens (default: True)
+        add_hs: Whether to add hydrogens (default: False, heavy atoms only)
+        canonicalize: Whether to canonicalize atom order (default: True)
 
     Returns:
         Dictionary containing molecule features
     """
-    featurizer = MoleculeFeaturizer()
-    return featurizer.get_feature(mol_or_smiles)
+    featurizer = MoleculeFeaturizer(
+        mol_or_smiles, hydrogen=add_hs, canonicalize=canonicalize
+    )
+    return featurizer.get_feature()
 
 def extract_protein_features(pdb_file, standardize=True, save_to=None):
     """
