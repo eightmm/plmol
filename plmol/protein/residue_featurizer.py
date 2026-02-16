@@ -455,14 +455,17 @@ class ResidueFeaturizer:
 
         return (forward_vector, forward_distance), (reverse_vector, reverse_distance)
 
-    def _calculate_interaction_features(self, coords: torch.Tensor, cutoff: float = 8) -> \
+    def _calculate_interaction_features(self, coords: torch.Tensor, distance_cutoff: float = 8,
+                                        knn_cutoff: Optional[int] = None) -> \
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Calculate inter-residue interaction features.
 
         Args:
             coords: Residue coordinates
-            cutoff: Distance cutoff for interactions
+            distance_cutoff: Distance cutoff for interactions
+            knn_cutoff: Optional k-nearest neighbors cutoff. If given, union
+                distance-based and kNN-based adjacency for connectivity.
 
         Returns:
             Tuple of (distances, adjacency_matrix, interaction_vectors)
@@ -476,12 +479,23 @@ class ResidueFeaturizer:
         dm_CA_SC = torch.cdist(coord_CA, coord_SC)[0]
         dm_SC_CA = torch.cdist(coord_SC, coord_CA)[0]
 
-        adj_CA_CA = (dm_CA_CA < cutoff) * mask
-        adj_SC_SC = (dm_SC_SC < cutoff) * mask
-        adj_CA_SC = (dm_CA_SC < cutoff) * mask
-        adj_SC_CA = (dm_SC_CA < cutoff) * mask
+        adj_CA_CA = (dm_CA_CA < distance_cutoff) * mask
+        adj_SC_SC = (dm_SC_SC < distance_cutoff) * mask
+        adj_CA_SC = (dm_CA_SC < distance_cutoff) * mask
+        adj_SC_CA = (dm_SC_CA < distance_cutoff) * mask
 
         adj = adj_CA_CA | adj_SC_SC | adj_CA_SC | adj_SC_CA
+
+        if knn_cutoff is not None and coords.shape[0] > 1:
+            min_dm = torch.minimum(torch.minimum(dm_CA_CA, dm_SC_SC),
+                                   torch.minimum(dm_CA_SC, dm_SC_CA))
+            min_dm.fill_diagonal_(float('inf'))
+            k = min(knn_cutoff, min_dm.size(0) - 1)
+            _, topk_idx = torch.topk(min_dm, k, dim=1, largest=False)
+            knn_adj = torch.zeros_like(adj)
+            knn_adj.scatter_(1, topk_idx, 1)
+            knn_adj = (knn_adj * mask).int()
+            adj = adj | knn_adj
 
         dm_all = torch.stack((dm_CA_CA, dm_SC_SC, dm_CA_SC, dm_SC_CA), dim=-1)
         dm_select = dm_all * adj[:, :, None]
@@ -570,7 +584,8 @@ class ResidueFeaturizer:
         return scalar_features, vector_features
 
     def _extract_interaction_features(self, coords: torch.Tensor, distance_cutoff: float = 8,
-                                     relative_position_cutoff: int = 32) -> \
+                                     relative_position_cutoff: int = 32,
+                                     knn_cutoff: Optional[int] = None) -> \
             Tuple[Tuple[torch.Tensor, torch.Tensor], Tuple, Tuple]:
         """
         Extract interaction features between residues.
@@ -579,12 +594,15 @@ class ResidueFeaturizer:
             coords: Residue coordinates
             distance_cutoff: Distance cutoff for interactions
             relative_position_cutoff: Cutoff for relative position encoding
+            knn_cutoff: Optional k-nearest neighbors cutoff
 
         Returns:
             Tuple of (edges, scalar_features, vector_features)
         """
         relative_position = self.get_relative_position(cutoff=relative_position_cutoff, onehot=True)
-        distance_adj, adj, interaction_vectors = self._calculate_interaction_features(coords, cutoff=distance_cutoff)
+        distance_adj, adj, interaction_vectors = self._calculate_interaction_features(
+            coords, distance_cutoff=distance_cutoff, knn_cutoff=knn_cutoff
+        )
 
         # Convert to sparse format
         sparse = distance_adj.to_sparse(sparse_dim=2)
@@ -634,7 +652,7 @@ class ResidueFeaturizer:
 
         # Package features
         node = {
-            'coord': coord,
+            'coords': coord,
             'node_scalar_features': node_scalar_features,
             'node_vector_features': node_vector_features
         }

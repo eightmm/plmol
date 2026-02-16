@@ -44,8 +44,8 @@ BaseMolecule (base.py) — abstract: sequence, graph, coords, surface
 | `graph` (level=residue) | `ResidueFeaturizer` → `get_features()` | Scalar/vector node+edge tuples |
 | `graph` (level=atom) | `AtomFeaturizer` → `get_atom_graph()` | Token-based node dict + edge dict |
 | `backbone` | `backbone_featurizer` → `compute_backbone_features()` | SE(3)-invariant kNN graph |
-| `surface` | `featurizers/surface.py` → `build_protein_surface()` | Mesh or point cloud with MaSIF features |
-| `voxel` | `featurizers/voxel.py` → `build_protein_voxel()` | 16-channel 3D grid |
+| `surface` | `surface/` → `build_protein_surface()` | Mesh or point cloud with MaSIF features |
+| `voxel` | `voxel/` → `build_protein_voxel()` | 16-channel 3D grid |
 | `sequence` | Direct from parser | Amino acid string |
 
 Key internal flow: PDB file → `PDBStandardizer` → `PDBParser` (utils.py, cached) → featurizers.
@@ -54,7 +54,7 @@ Key internal flow: PDB file → `PDBStandardizer` → `PDBParser` (utils.py, cac
 
 `Ligand.featurize(mode=...)` delegates to `LigandFeaturizer` which wraps two core classes:
 
-- **`MoleculeFeaturizer`** (ligand/base.py): Descriptors (62-dim) and fingerprints (ECFP4/6, MACCS, RDKit, ERG, + optional VSA/MQN)
+- **`MoleculeFeaturizer`** (ligand/descriptors.py): Descriptors (62-dim) and fingerprints (ECFP4/6, MACCS, RDKit, ERG, + optional VSA/MQN)
 - **`MoleculeGraphFeaturizer`** (ligand/graph.py): Dense adjacency `(N, N, 37)` with node features `(N, 78)`, coords, distance matrix
 
 The graph uses **dense adjacency** (not sparse edge_index). Channels [0:27] = bond features, [27:37] = 3D pair features.

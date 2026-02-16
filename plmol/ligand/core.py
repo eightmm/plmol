@@ -57,6 +57,8 @@ class Ligand(BaseMolecule):
         if not Chem:
             raise ImportError("RDKit is required to create a Ligand from SMILES.")
         mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            raise ValueError(f"Invalid SMILES string: '{smiles}'")
         if add_hs:
             mol = Chem.AddHs(mol)
         return cls(mol)
@@ -68,12 +70,14 @@ class Ligand(BaseMolecule):
             raise ImportError("RDKit is required to load a Ligand from SDF.")
         suppl = Chem.SDMolSupplier(path)
         mol = next(suppl)
+        if mol is None:
+            raise ValueError(f"Failed to parse molecule from SDF: '{path}'")
         return cls(mol)
 
     def generate_conformer(self):
         """Generate 3D conformer using canonical method if missing."""
         if self._rdmol:
-            from .base import MoleculeFeaturizer
+            from .descriptors import MoleculeFeaturizer
             mol_3d = MoleculeFeaturizer._ensure_3d_conformer(self._rdmol)
             if mol_3d is not None and mol_3d.GetNumConformers() > 0:
                 self._rdmol.RemoveAllConformers()

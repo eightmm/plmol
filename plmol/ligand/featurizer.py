@@ -18,9 +18,9 @@ except ImportError:  # pragma: no cover - optional dependency
     Chem = None
     AllChem = None
 
-from .base import MoleculeFeaturizer
-from ..featurizers.surface import build_ligand_surface
-from ..featurizers.voxel import build_ligand_voxel
+from .descriptors import MoleculeFeaturizer
+from ..surface import build_ligand_surface
+from ..voxel import build_ligand_voxel
 from ..constants import (
     VDW_RADIUS,
     DEFAULT_VDW_RADIUS,
@@ -55,18 +55,18 @@ class LigandFeaturizer:
     def __init__(
         self,
         mol_or_smiles: Optional[Union[str, "Chem.Mol"]] = None,
-        hydrogen: bool = False,
+        add_hs: bool = False,
         canonicalize: bool = True,
         custom_smarts: Optional[Dict[str, str]] = None,
     ):
         if Chem is None:
             raise ImportError("RDKit is required for LigandFeaturizer.")
 
-        self._hydrogen = hydrogen
+        self._add_hs = add_hs
         self._canonicalize = canonicalize
         self._ligand_base_featurizer = MoleculeFeaturizer(
             mol_or_smiles,
-            hydrogen=hydrogen,
+            add_hs=add_hs,
             canonicalize=canonicalize,
             custom_smarts=custom_smarts,
         )
@@ -81,7 +81,7 @@ class LigandFeaturizer:
         """Reset the ligand used for featurization."""
         self._ligand_base_featurizer = MoleculeFeaturizer(
             mol_or_smiles,
-            hydrogen=self._hydrogen,
+            add_hs=self._add_hs,
             canonicalize=self._canonicalize,
             custom_smarts=self._ligand_base_featurizer.custom_smarts,
         )
@@ -168,7 +168,7 @@ class LigandFeaturizer:
             return self._ligand_base_featurizer
         return MoleculeFeaturizer(
             mol_or_smiles,
-            hydrogen=self._hydrogen,
+            add_hs=self._add_hs,
             canonicalize=self._canonicalize,
             custom_smarts=self._ligand_base_featurizer.custom_smarts,
         )
@@ -180,6 +180,7 @@ class LigandFeaturizer:
         distance_cutoff: Optional[float] = None,
         include_custom_smarts: bool = True,
         standardized: bool = False,
+        knn_cutoff: Optional[int] = None,
     ) -> Union[Dict[str, Any], Tuple[Dict[str, Any], Dict[str, Any], Any]]:
         """
         Return standardized graph representation suitable for GNNs.
@@ -199,26 +200,11 @@ class LigandFeaturizer:
             add_hs=add_hs,
             distance_cutoff=distance_cutoff,
             include_custom_smarts=include_custom_smarts,
+            knn_cutoff=knn_cutoff,
         )
         if standardized:
             return self._standardize_graph(node, edge, adj)
         return node, edge, adj
-
-    def get_graph_standardized(
-        self,
-        mol_or_smiles: Optional[Union[str, "Chem.Mol"]] = None,
-        add_hs: bool = False,
-        distance_cutoff: Optional[float] = None,
-        include_custom_smarts: bool = True,
-    ) -> Dict[str, Any]:
-        """Return standardized graph dictionary with stable keys."""
-        return self.get_graph(
-            mol_or_smiles=mol_or_smiles,
-            add_hs=add_hs,
-            distance_cutoff=distance_cutoff,
-            include_custom_smarts=include_custom_smarts,
-            standardized=True,
-        )
 
     def get_feature(
         self,

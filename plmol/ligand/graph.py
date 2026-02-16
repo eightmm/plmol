@@ -756,7 +756,7 @@ class MoleculeGraphFeaturizer:
 
         # Generate coordinates on a copy to avoid modifying original
         try:
-            from .base import MoleculeFeaturizer
+            from .descriptors import MoleculeFeaturizer
             mol_3d = MoleculeFeaturizer._ensure_3d_conformer(mol)
             if mol_3d is not None and mol_3d.GetNumConformers() > 0:
                 conf = mol_3d.GetConformer(0)
@@ -1204,13 +1204,15 @@ class MoleculeGraphFeaturizer:
 
         return torch.from_numpy(np.stack([lower, upper], axis=-1))
 
-    def featurize(self, mol, distance_cutoff: Optional[float] = None) -> Tuple[Dict, Dict, torch.Tensor]:
+    def featurize(self, mol, distance_cutoff: Optional[float] = None,
+                  knn_cutoff: Optional[int] = None) -> Tuple[Dict, Dict, torch.Tensor]:
         """
         Extract complete graph representation with separate bond and distance edges.
 
         Args:
             mol: RDKit mol object
             distance_cutoff: Optional 3D distance cutoff for spatial edges.
+            knn_cutoff: Optional k-nearest neighbors cutoff for spatial edges.
 
         Returns:
             Tuple of (node_dict, edge_dict, adjacency_matrix):
@@ -1244,11 +1246,23 @@ class MoleculeGraphFeaturizer:
         distance_matrix = self.get_distance_matrix(mol, coords)
         distance_bounds = self.get_distance_bounds(mol, coords)
 
-        if distance_cutoff is not None and coords is not None:
-            # Compute pair-wise distances
+        has_spatial = (distance_cutoff is not None or knn_cutoff is not None) and coords is not None
+        if has_spatial:
             dist_matrix = torch.cdist(coords, coords)
-            # Mask self-loops and values above cutoff
-            mask = (dist_matrix <= distance_cutoff) & (~torch.eye(coords.size(0), dtype=torch.bool))
+            mask = torch.zeros(coords.size(0), coords.size(0), dtype=torch.bool)
+
+            if distance_cutoff is not None:
+                mask = mask | ((dist_matrix <= distance_cutoff) & (~torch.eye(coords.size(0), dtype=torch.bool)))
+
+            if knn_cutoff is not None and coords.size(0) > 1:
+                dm_knn = dist_matrix.clone()
+                dm_knn.fill_diagonal_(float('inf'))
+                k = min(knn_cutoff, dm_knn.size(0) - 1)
+                _, topk_idx = torch.topk(dm_knn, k, dim=1, largest=False)
+                knn_mask = torch.zeros_like(dist_matrix, dtype=torch.bool)
+                knn_mask.scatter_(1, topk_idx, True)
+                mask = mask | knn_mask
+
             src_d, dst_d = torch.where(mask)
             dist_edge_index = torch.stack([src_d, dst_d], dim=0)
             dist_edge_features = dist_matrix[src_d, dst_d].unsqueeze(-1)

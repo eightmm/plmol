@@ -30,7 +30,7 @@ from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 from skimage import measure
 import trimesh
-from ...constants import (
+from ..constants import (
     SURFACE_DEFAULT_GRID_DENSITY,
     SURFACE_DEFAULT_THRESHOLD,
     SURFACE_DEFAULT_SHARPNESS,

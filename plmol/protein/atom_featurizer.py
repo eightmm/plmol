@@ -228,7 +228,7 @@ class AtomFeaturizer:
         Returns:
             Dictionary containing:
                 - 'token': Atom type tokens [n_atoms]
-                - 'coord': 3D coordinates [n_atoms, 3]
+                - 'coords': 3D coordinates [n_atoms, 3]
                 - 'sasa': Absolute SASA values [n_atoms]
                 - 'relative_sasa': Residue-normalized SASA [n_atoms]
                 - 'residue_token': Residue type for each atom [n_atoms]
@@ -368,7 +368,7 @@ class AtomFeaturizer:
 
         features = {
             'token': token[:min_len],
-            'coord': coord[:min_len],
+            'coords': coord[:min_len],
             'sasa': sasa_truncated,
             'relative_sasa': relative_sasa,
             'residue_token': torch.tensor(residue_tokens[:min_len], dtype=torch.long),
@@ -545,7 +545,7 @@ class AtomFeaturizer:
             residue_features['residue_token'].append(res_tokens[0])
 
             # Calculate center of mass
-            coords = atom_features['coord'][mask]
+            coords = atom_features['coords'][mask]
             center_of_mass = coords.mean(dim=0)
             residue_features['center_of_mass'].append(center_of_mass)
 

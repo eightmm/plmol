@@ -167,7 +167,7 @@ def process_single_ligand(
         # Initialize featurizer with ligand
         featurizer = MoleculeFeaturizer(
             mol,
-            hydrogen=add_hydrogens,
+            add_hs=add_hydrogens,
             canonicalize=canonicalize
         )
 

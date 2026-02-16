@@ -282,7 +282,7 @@ def compute_protein_channels(
         (features, channel_names) where features is (N, 16) float32.
     """
     if mol is None and atom_metadata is not None:
-        from ..surface.featurizer.surface_features import _build_simple_protein_mol
+        from ..surface.features import _build_simple_protein_mol
         mol = _build_simple_protein_mol(atom_metadata)
 
     if mol is None:

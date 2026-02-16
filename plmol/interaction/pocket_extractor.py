@@ -30,8 +30,8 @@ class PocketInfo:
 def extract_pocket(
     protein_pdb: str,
     ligand: Union[str, Chem.Mol, List[Union[str, Chem.Mol]]],
-    cutoff: float = 6.0,
-) -> Union[PocketInfo, List[PocketInfo]]:
+    distance_cutoff: float = 6.0,
+) -> List[PocketInfo]:
     """
     Extract binding pocket from protein based on ligand proximity.
 
@@ -41,26 +41,24 @@ def extract_pocket(
     Args:
         protein_pdb: Path to protein PDB file
         ligand: Single ligand (path or Mol), list of ligands, or multi-mol SDF path
-        cutoff: Distance cutoff in Angstroms (default: 6.0)
+        distance_cutoff: Distance cutoff in Angstroms (default: 6.0)
 
     Returns:
-        - Single Mol object → PocketInfo
-        - Single SDF with 1 molecule → PocketInfo
-        - Single SDF with N molecules → List[PocketInfo]
-        - List of ligands → List[PocketInfo]
+        List of PocketInfo (one per ligand molecule).
 
     Examples:
         >>> # Single ligand
-        >>> pocket = extract_pocket("protein.pdb", "ligand.sdf")
+        >>> pockets = extract_pocket("protein.pdb", "ligand.sdf")
+        >>> pocket = pockets[0]
         >>>
-        >>> # Multi-molecule SDF (returns list automatically)
+        >>> # Multi-molecule SDF
         >>> pockets = extract_pocket("protein.pdb", "multi_ligands.sdf")
         >>>
         >>> # List of ligands
         >>> pockets = extract_pocket("protein.pdb", ["lig1.sdf", "lig2.sdf"])
         >>>
         >>> # With RDKit Mol objects
-        >>> pocket = extract_pocket("protein.pdb", ligand_mol, cutoff=8.0)
+        >>> pockets = extract_pocket("protein.pdb", ligand_mol, distance_cutoff=8.0)
     """
     extractor = PocketExtractor(protein_pdb)
 
@@ -68,23 +66,22 @@ def extract_pocket(
     if isinstance(ligand, list):
         results = []
         for lig in ligand:
-            results.extend(_extract_for_ligand_input(extractor, lig, cutoff))
+            results.extend(_extract_for_ligand_input(extractor, lig, distance_cutoff))
         return results
 
     # Single input (could be multi-mol SDF)
-    results = _extract_for_ligand_input(extractor, ligand, cutoff)
-    return results[0] if len(results) == 1 else results
+    return _extract_for_ligand_input(extractor, ligand, distance_cutoff)
 
 
 def _extract_for_ligand_input(
     extractor: "PocketExtractor",
     ligand: Union[str, Chem.Mol],
-    cutoff: float
+    distance_cutoff: float
 ) -> List[PocketInfo]:
     """Helper to handle single ligand input (may contain multiple mols)."""
     # If it's already a Mol object
     if isinstance(ligand, Chem.Mol):
-        return [extractor.extract_for_ligand(ligand, cutoff)]
+        return [extractor.extract_for_ligand(ligand, distance_cutoff)]
 
     # If it's an SDF file, check for multiple molecules
     if ligand.endswith('.sdf'):
@@ -92,10 +89,10 @@ def _extract_for_ligand_input(
         mols = [mol for mol in supplier if mol is not None]
         if not mols:
             raise ValueError(f"No valid molecules in {ligand}")
-        return [extractor.extract_for_ligand(mol, cutoff) for mol in mols]
+        return [extractor.extract_for_ligand(mol, distance_cutoff) for mol in mols]
 
     # Other file formats (single molecule)
-    return [extractor.extract_for_ligand(ligand, cutoff)]
+    return [extractor.extract_for_ligand(ligand, distance_cutoff)]
 
 
 @dataclass
@@ -142,7 +139,7 @@ class PocketExtractor:
         self,
         protein_pdb_path: str,
         ligand: Optional[Union[str, Chem.Mol]] = None,
-        cutoff: float = 6.0,
+        distance_cutoff: float = 6.0,
     ):
         """
         Initialize PocketExtractor.
@@ -151,10 +148,10 @@ class PocketExtractor:
             protein_pdb_path: Path to protein PDB file
             ligand: Path to ligand file (SDF/MOL2) or RDKit Mol object.
                    If None, use extract_for_ligand() later.
-            cutoff: Distance cutoff in Angstroms for pocket extraction
+            distance_cutoff: Distance cutoff in Angstroms for pocket extraction
         """
         self.protein_pdb_path = protein_pdb_path
-        self.cutoff = cutoff
+        self.distance_cutoff = distance_cutoff
 
         # Parse protein PDB (done once)
         self._parse_protein_pdb()
@@ -192,7 +189,7 @@ class PocketExtractor:
         cls,
         protein_pdb_path: str,
         ligand_path: str,
-        cutoff: float = 6.0,
+        distance_cutoff: float = 6.0,
     ) -> "PocketExtractor":
         """
         Create PocketExtractor from file paths.
@@ -200,9 +197,9 @@ class PocketExtractor:
         Args:
             protein_pdb_path: Path to protein PDB file
             ligand_path: Path to ligand file (SDF, MOL2, etc.)
-            cutoff: Distance cutoff in Angstroms
+            distance_cutoff: Distance cutoff in Angstroms
         """
-        return cls(protein_pdb_path, ligand_path, cutoff)
+        return cls(protein_pdb_path, ligand_path, distance_cutoff)
 
     def set_ligand(self, ligand: Union[str, Chem.Mol]) -> None:
         """
@@ -330,14 +327,14 @@ class PocketExtractor:
     def _compute_pocket_mask(
         self,
         ligand_coords: np.ndarray,
-        cutoff: float
+        distance_cutoff: float
     ) -> np.ndarray:
         """
         Compute boolean mask for pocket residues using vectorized cdist.
 
         Args:
             ligand_coords: Ligand coordinates [num_atoms, 3]
-            cutoff: Distance cutoff in Angstroms
+            distance_cutoff: Distance cutoff in Angstroms
 
         Returns:
             Boolean array [num_residue] indicating pocket membership
@@ -369,19 +366,19 @@ class PocketExtractor:
         min_dist_per_res = np.nanmin(distances, axis=(1, 2))
 
         # Apply cutoff
-        return min_dist_per_res < cutoff
+        return min_dist_per_res < distance_cutoff
 
     def _extract_pocket_from_mask(
         self,
         pocket_mask: np.ndarray,
-        cutoff: float
+        distance_cutoff: float
     ) -> PocketInfo:
         """
         Extract pocket info from residue mask.
 
         Args:
             pocket_mask: Boolean array [num_residue]
-            cutoff: Distance cutoff used
+            distance_cutoff: Distance cutoff used
 
         Returns:
             PocketInfo with extracted pocket
@@ -408,15 +405,15 @@ class PocketExtractor:
             pocket_residues=pocket_residues,
             num_atoms=num_atoms,
             num_residues=len(pocket_residues),
-            distance_cutoff=cutoff,
+            distance_cutoff=distance_cutoff,
         )
 
-    def extract(self, cutoff: Optional[float] = None) -> PocketInfo:
+    def extract(self, distance_cutoff: Optional[float] = None) -> PocketInfo:
         """
         Extract pocket based on distance cutoff.
 
         Args:
-            cutoff: Distance cutoff (uses default if not specified)
+            distance_cutoff: Distance cutoff (uses default if not specified)
 
         Returns:
             PocketInfo with extracted pocket molecule and metadata
@@ -426,14 +423,14 @@ class PocketExtractor:
                 "No ligand set. Use set_ligand() first or use extract_for_ligand()."
             )
 
-        cutoff = cutoff if cutoff is not None else self.cutoff
-        pocket_mask = self._compute_pocket_mask(self._ligand_coords, cutoff)
-        return self._extract_pocket_from_mask(pocket_mask, cutoff)
+        distance_cutoff = distance_cutoff if distance_cutoff is not None else self.distance_cutoff
+        pocket_mask = self._compute_pocket_mask(self._ligand_coords, distance_cutoff)
+        return self._extract_pocket_from_mask(pocket_mask, distance_cutoff)
 
     def extract_for_ligand(
         self,
         ligand: Union[str, Chem.Mol],
-        cutoff: float = 6.0
+        distance_cutoff: float = 6.0
     ) -> PocketInfo:
         """
         Extract pocket for a specific ligand without modifying internal state.
@@ -444,15 +441,15 @@ class PocketExtractor:
 
         Args:
             ligand: Path to ligand file or RDKit Mol object
-            cutoff: Distance cutoff in Angstroms
+            distance_cutoff: Distance cutoff in Angstroms
 
         Returns:
             PocketInfo with extracted pocket
 
         Examples:
             >>> extractor = PocketExtractor.from_protein("protein.pdb")
-            >>> pocket1 = extractor.extract_for_ligand("ligand1.sdf", cutoff=6.0)
-            >>> pocket2 = extractor.extract_for_ligand(ligand2_mol, cutoff=8.0)
+            >>> pocket1 = extractor.extract_for_ligand("ligand1.sdf", distance_cutoff=6.0)
+            >>> pocket2 = extractor.extract_for_ligand(ligand2_mol, distance_cutoff=8.0)
         """
         # Load ligand
         if isinstance(ligand, str):
@@ -469,20 +466,20 @@ class PocketExtractor:
         ligand_coords = self._get_ligand_coords(ligand_mol)
 
         # Compute pocket mask and extract
-        pocket_mask = self._compute_pocket_mask(ligand_coords, cutoff)
-        return self._extract_pocket_from_mask(pocket_mask, cutoff)
+        pocket_mask = self._compute_pocket_mask(ligand_coords, distance_cutoff)
+        return self._extract_pocket_from_mask(pocket_mask, distance_cutoff)
 
     def extract_batch(
         self,
         ligands: List[Union[str, Chem.Mol]],
-        cutoff: float = 6.0
+        distance_cutoff: float = 6.0
     ) -> List[PocketInfo]:
         """
         Extract pockets for multiple ligands efficiently.
 
         Args:
             ligands: List of ligand file paths or RDKit Mol objects
-            cutoff: Distance cutoff in Angstroms
+            distance_cutoff: Distance cutoff in Angstroms
 
         Returns:
             List of PocketInfo for each ligand
@@ -490,24 +487,24 @@ class PocketExtractor:
         Examples:
             >>> extractor = PocketExtractor.from_protein("protein.pdb")
             >>> ligand_mols = [mol1, mol2, mol3]
-            >>> pockets = extractor.extract_batch(ligand_mols, cutoff=6.0)
+            >>> pockets = extractor.extract_batch(ligand_mols, distance_cutoff=6.0)
         """
         results = []
         for ligand in ligands:
             try:
-                pocket_info = self.extract_for_ligand(ligand, cutoff)
+                pocket_info = self.extract_for_ligand(ligand, distance_cutoff)
                 results.append(pocket_info)
             except ValueError as e:
                 # Skip invalid ligands but could also raise or log
                 results.append(None)
         return results
 
-    def get_pocket_pdb_block(self, cutoff: Optional[float] = None) -> str:
+    def get_pocket_pdb_block(self, distance_cutoff: Optional[float] = None) -> str:
         """
         Get PDB block string for the pocket.
 
         Args:
-            cutoff: Distance cutoff (uses default if not specified)
+            distance_cutoff: Distance cutoff (uses default if not specified)
 
         Returns:
             PDB format string containing only pocket residues
@@ -515,8 +512,8 @@ class PocketExtractor:
         if self._ligand_coords is None:
             raise ValueError("No ligand set. Use set_ligand() first.")
 
-        cutoff = cutoff if cutoff is not None else self.cutoff
-        pocket_mask = self._compute_pocket_mask(self._ligand_coords, cutoff)
+        distance_cutoff = distance_cutoff if distance_cutoff is not None else self.distance_cutoff
+        pocket_mask = self._compute_pocket_mask(self._ligand_coords, distance_cutoff)
         pocket_lines: List[str] = []
 
         for i, is_pocket in enumerate(pocket_mask):
@@ -525,24 +522,24 @@ class PocketExtractor:
 
         return ''.join(pocket_lines) + 'END\n'
 
-    def save_pocket_pdb(self, output_path: str, cutoff: Optional[float] = None) -> None:
+    def save_pocket_pdb(self, output_path: str, distance_cutoff: Optional[float] = None) -> None:
         """
         Save pocket to PDB file.
 
         Args:
             output_path: Path to save pocket PDB
-            cutoff: Distance cutoff (uses default if not specified)
+            distance_cutoff: Distance cutoff (uses default if not specified)
         """
-        pdb_block = self.get_pocket_pdb_block(cutoff)
+        pdb_block = self.get_pocket_pdb_block(distance_cutoff)
         with open(output_path, 'w') as f:
             f.write(pdb_block)
 
-    def get_pocket_residue_mask(self, cutoff: Optional[float] = None) -> np.ndarray:
+    def get_pocket_residue_mask(self, distance_cutoff: Optional[float] = None) -> np.ndarray:
         """
         Get boolean mask indicating which residues are in the pocket.
 
         Args:
-            cutoff: Distance cutoff (uses default if not specified)
+            distance_cutoff: Distance cutoff (uses default if not specified)
 
         Returns:
             Boolean array [num_residue]
@@ -550,8 +547,8 @@ class PocketExtractor:
         if self._ligand_coords is None:
             raise ValueError("No ligand set. Use set_ligand() first.")
 
-        cutoff = cutoff if cutoff is not None else self.cutoff
-        return self._compute_pocket_mask(self._ligand_coords, cutoff)
+        distance_cutoff = distance_cutoff if distance_cutoff is not None else self.distance_cutoff
+        return self._compute_pocket_mask(self._ligand_coords, distance_cutoff)
 
     def get_residue_distances(self, ligand: Optional[Union[str, Chem.Mol]] = None) -> np.ndarray:
         """
@@ -632,5 +629,5 @@ class PocketExtractor:
             f"PocketExtractor("
             f"residues={self._num_residues}, "
             f"{ligand_info}, "
-            f"cutoff={self.cutoff}Å)"
+            f"cutoff={self.distance_cutoff}Å)"
         )

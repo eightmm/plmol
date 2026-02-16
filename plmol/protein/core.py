@@ -153,7 +153,7 @@ class Protein(BaseMolecule):
             "residue_token": node.get("residue_token"),
             "atom_element": node.get("atom_element"),
             # Coordinates
-            "coords": node.get("coord"),
+            "coords": node.get("coords"),
             # Node scalar features
             "sasa": node.get("sasa"),
             "relative_sasa": node.get("relative_sasa"),
@@ -177,6 +177,8 @@ class Protein(BaseMolecule):
 
         if "distance_cutoff" in edge:
             graph["distance_cutoff"] = edge["distance_cutoff"]
+        if "knn_cutoff" in edge:
+            graph["knn_cutoff"] = edge["knn_cutoff"]
 
         graph["metadata"] = {
             "atom_name": node.get("atom_name"),
@@ -188,7 +190,8 @@ class Protein(BaseMolecule):
         return graph
 
     def _standardize_residue_graph(
-        self, node: Dict[str, Any], edge: Dict[str, Any], distance_cutoff: float
+        self, node: Dict[str, Any], edge: Dict[str, Any], distance_cutoff: float,
+        knn_cutoff: Optional[int] = None,
     ) -> Dict[str, Any]:
         edge_index = edge.get("edges")
         if isinstance(edge_index, tuple):
@@ -200,8 +203,9 @@ class Protein(BaseMolecule):
             "edge_index": edge_index,
             "edge_features": edge.get("edge_scalar_features"),
             "edge_vector_features": edge.get("edge_vector_features"),
-            "coords": node.get("coord"),
+            "coords": node.get("coords"),
             "distance_cutoff": distance_cutoff,
+            "knn_cutoff": knn_cutoff,
             "level": "residue",
         }
 
@@ -260,19 +264,24 @@ class Protein(BaseMolecule):
         if "graph" in modes:
             graph_kwargs = graph_kwargs or {}
             level = graph_kwargs.get("level", "residue")
+            knn_cutoff = graph_kwargs.get("knn_cutoff")
             featurizer = self._get_featurizer()
 
             if level == "atom":
                 distance_cutoff = graph_kwargs.get("distance_cutoff", DEFAULT_ATOM_GRAPH_DISTANCE_CUTOFF)
-                node, edge = featurizer.get_atom_graph(distance_cutoff=distance_cutoff)
+                node, edge = featurizer.get_atom_graph(
+                    distance_cutoff=distance_cutoff, knn_cutoff=knn_cutoff
+                )
                 self._graph = self._standardize_atom_graph(node, edge)
                 self._graph_level = "atom"
                 self._graph_distance_cutoff = distance_cutoff
             else:
                 distance_cutoff = graph_kwargs.get("distance_cutoff", DEFAULT_RESIDUE_GRAPH_DISTANCE_CUTOFF)
-                node, edge = featurizer.get_features(distance_cutoff=distance_cutoff)
+                node, edge = featurizer.get_features(
+                    distance_cutoff=distance_cutoff, knn_cutoff=knn_cutoff
+                )
                 self._graph = self._standardize_residue_graph(
-                    node, edge, distance_cutoff=distance_cutoff
+                    node, edge, distance_cutoff=distance_cutoff, knn_cutoff=knn_cutoff
                 )
                 self._graph_level = "residue"
                 self._graph_distance_cutoff = distance_cutoff
@@ -298,7 +307,7 @@ class Protein(BaseMolecule):
     def featurize_pocket(
         self,
         ligand: Any,
-        cutoff: float = 6.0,
+        distance_cutoff: float = 6.0,
         mode: Union[str, Iterable[str]] = "graph",
         graph_kwargs: Optional[Dict[str, Any]] = None,
         surface_kwargs: Optional[Dict[str, Any]] = None,
@@ -308,7 +317,7 @@ class Protein(BaseMolecule):
 
         Args:
             ligand: RDKit Mol, ligand path, or list supported by `extract_pocket`.
-            cutoff: Pocket extraction cutoff in Angstrom.
+            distance_cutoff: Pocket extraction cutoff in Angstrom.
             mode: Same mode contract as `featurize` (default: "graph").
             graph_kwargs: Optional graph kwargs passed to pocket Protein object.
             surface_kwargs: Optional surface kwargs passed to pocket Protein object.
@@ -320,11 +329,10 @@ class Protein(BaseMolecule):
 
         from ..interaction import extract_pocket
 
-        pocket_info = extract_pocket(self._pdb_path, ligand, cutoff=cutoff)
-        if isinstance(pocket_info, list):
-            if not pocket_info:
-                raise ValueError("Pocket extraction returned no pocket molecules.")
-            pocket_info = pocket_info[0]
+        pocket_list = extract_pocket(self._pdb_path, ligand, distance_cutoff=distance_cutoff)
+        if not pocket_list:
+            raise ValueError("Pocket extraction returned no pocket molecules.")
+        pocket_info = pocket_list[0]
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".pdb", delete=False) as f:
             f.write(Chem.MolToPDBBlock(pocket_info.pocket_mol))

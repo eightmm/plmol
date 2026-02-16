@@ -67,7 +67,7 @@ class MoleculeFeaturizer:
     def __init__(
         self,
         mol_or_smiles: Optional[Union[str, Chem.Mol]] = None,
-        hydrogen: bool = False,
+        add_hs: bool = False,
         canonicalize: bool = True,
         custom_smarts: Optional[Dict[str, str]] = None,
     ):
@@ -91,7 +91,7 @@ class MoleculeFeaturizer:
             ValueError: If molecule cannot be parsed
         """
         self._graph_featurizer = MoleculeGraphFeaturizer()
-        self.hydrogen = hydrogen
+        self.add_hs = add_hs
         self.canonicalize = canonicalize
         self.custom_smarts = custom_smarts or {}
         self._cache: Dict[str, Any] = {}
@@ -121,7 +121,7 @@ class MoleculeFeaturizer:
             self.input_smiles = Chem.MolToSmiles(mol_or_smiles) if mol_or_smiles else None
 
         # Prepare molecule (canonicalize and add hydrogens if requested)
-        self._mol = self._prepare_mol(self.input_mol, self.hydrogen, self.canonicalize)
+        self._mol = self._prepare_mol(self.input_mol, self.add_hs, self.canonicalize)
         if self._mol is None:
             raise ValueError(f"Failed to prepare molecule: {mol_or_smiles}")
 
@@ -837,6 +837,7 @@ class MoleculeFeaturizer:
         add_hs: bool = False,
         distance_cutoff: Optional[float] = None,
         include_custom_smarts: bool = True,
+        knn_cutoff: Optional[int] = None,
     ) -> Tuple[Dict, Dict, torch.Tensor]:
         """
         New interface for featurization.
@@ -845,11 +846,13 @@ class MoleculeFeaturizer:
         if mol_or_smiles is None:
             if self._mol is None:
                 raise ValueError("No molecule provided.")
-            return self._compute_graph(self._mol, distance_cutoff, include_custom_smarts)
+            return self._compute_graph(self._mol, distance_cutoff, include_custom_smarts,
+                                       knn_cutoff=knn_cutoff)
 
         # Functional mode
         mol = self._prepare_mol(mol_or_smiles, add_hs, self.canonicalize)
-        return self._compute_graph(mol, distance_cutoff, include_custom_smarts)
+        return self._compute_graph(mol, distance_cutoff, include_custom_smarts,
+                                   knn_cutoff=knn_cutoff)
 
     def get_graph(
         self,
@@ -857,20 +860,25 @@ class MoleculeFeaturizer:
         add_hs: bool = False,
         distance_cutoff: Optional[float] = None,
         include_custom_smarts: bool = True,
+        knn_cutoff: Optional[int] = None,
     ) -> Tuple[Dict, Dict, torch.Tensor]:
         """
         Create molecular graph with node and edge features.
         """
-        return self.featurize(mol_or_smiles, add_hs, distance_cutoff, include_custom_smarts)
+        return self.featurize(mol_or_smiles, add_hs, distance_cutoff, include_custom_smarts,
+                              knn_cutoff=knn_cutoff)
 
     def _compute_graph(
         self,
         mol: Chem.Mol,
         distance_cutoff: Optional[float] = None,
         include_custom_smarts: bool = True,
+        knn_cutoff: Optional[int] = None,
     ) -> Tuple[Dict, Dict, torch.Tensor]:
         """Compute graph representation for a prepared molecule."""
-        node, edge, adj = self._graph_featurizer.featurize(mol, distance_cutoff=distance_cutoff)
+        node, edge, adj = self._graph_featurizer.featurize(
+            mol, distance_cutoff=distance_cutoff, knn_cutoff=knn_cutoff
+        )
 
         # Add custom SMARTS features if requested
         if include_custom_smarts and self.custom_smarts:
@@ -988,7 +996,7 @@ class MoleculeFeaturizer:
                 'num_bonds': self.num_bonds,
                 'num_rings': self.num_rings,
                 'has_3d': self.has_3d,
-                'hydrogens_added': self.hydrogen
+                'hydrogens_added': self.add_hs
             }
         }
 

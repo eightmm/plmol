@@ -2,7 +2,7 @@
 
 from rdkit import Chem
 
-from plmol.featurizers.graph_featurizer import MoleculeGraphFeaturizer
+from plmol import MoleculeGraphFeaturizer
 
 
 def main() -> None:

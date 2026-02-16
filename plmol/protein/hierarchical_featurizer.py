@@ -557,7 +557,7 @@ class HierarchicalFeaturizer:
         self,
         protein_pdb_path: str,
         ligand,  # Chem.Mol
-        cutoff: float = 6.0,
+        distance_cutoff: float = 6.0,
     ) -> HierarchicalProteinData:
         """
         Extract hierarchical features from binding pocket.
@@ -565,7 +565,7 @@ class HierarchicalFeaturizer:
         Args:
             protein_pdb_path: Path to protein PDB file
             ligand: RDKit Mol object of ligand (with 3D coords)
-            cutoff: Distance cutoff for pocket extraction (default 6.0 Å)
+            distance_cutoff: Distance cutoff for pocket extraction (default 6.0 Å)
 
         Returns:
             HierarchicalProteinData with all features and mappings
@@ -576,8 +576,8 @@ class HierarchicalFeaturizer:
         from ..interaction import extract_pocket
 
         # Extract pocket
-        pocket_info = extract_pocket(protein_pdb_path, ligand, cutoff=cutoff)
-        pocket_mol = pocket_info.pocket_mol
+        pocket_list = extract_pocket(protein_pdb_path, ligand, distance_cutoff=distance_cutoff)
+        pocket_mol = pocket_list[0].pocket_mol
 
         # Save pocket to temp PDB
         with tempfile.NamedTemporaryFile(mode='w', suffix='.pdb', delete=False) as f:

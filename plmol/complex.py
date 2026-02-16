@@ -164,13 +164,14 @@ class Complex:
         self,
         distance_cutoff: float = DEFAULT_DISTANCE_CUTOFF,
         pocket_cutoff: Optional[float] = None,
+        knn_cutoff: Optional[int] = None,
     ) -> Dict[str, Any]:
         if self.ligand_obj is None or self.protein_obj is None:
             raise InputError("Interaction features require both ligand and protein.")
         if Chem is None:
             raise DependencyError("RDKit is required for interaction featurization.")
 
-        key = ("interaction", float(distance_cutoff), pocket_cutoff)
+        key = ("interaction", float(distance_cutoff), pocket_cutoff, knn_cutoff)
         cached = self._cache.get(key)
         if cached is not None:
             return cached
@@ -182,8 +183,8 @@ class Complex:
         if pocket_cutoff is not None:
             if self.protein_obj._pdb_path is None:
                 raise InputError("Protein PDB path is required for pocket interaction features.")
-            pocket_info = extract_pocket(self.protein_obj._pdb_path, ligand_mol, cutoff=float(pocket_cutoff))
-            protein_mol = pocket_info.pocket_mol if not isinstance(pocket_info, list) else pocket_info[0].pocket_mol
+            pocket_list = extract_pocket(self.protein_obj._pdb_path, ligand_mol, distance_cutoff=float(pocket_cutoff))
+            protein_mol = pocket_list[0].pocket_mol
         else:
             if self._protein_mol_cache is None:
                 if self.protein_obj._pdb_path is None:
@@ -198,8 +199,9 @@ class Complex:
             protein_mol=protein_mol,
             ligand_mol=ligand_mol,
             distance_cutoff=distance_cutoff,
+            knn_cutoff=knn_cutoff,
         )
-        graph = interaction.get_interaction_graph()
+        graph = interaction.get_interaction_graph(knn_cutoff=knn_cutoff)
         self._cache.set(key, graph)
         return graph
 

@@ -39,8 +39,8 @@ from ..constants import (
     VOXEL_DEFAULT_SIGMA_SCALE,
     VOXEL_DEFAULT_CUTOFF_SIGMA,
 )
-from ..featurizers.surface import build_protein_surface
-from ..featurizers.voxel import build_protein_voxel
+from ..surface import build_protein_surface
+from ..voxel import build_protein_voxel
 from .utils import PDBParser
 
 
@@ -130,7 +130,7 @@ class ProteinFeaturizer:
         # Extract CA and SC coordinates
         self.coords_CA = self.coords[:, 1:2, :]
         self.coords_SC = self.coords[:, -1:, :]
-        self.coord = torch.cat([self.coords_CA, self.coords_SC], dim=1)
+        self.coords_ca_sc = torch.cat([self.coords_CA, self.coords_SC], dim=1)
 
     def __del__(self):
         """Clean up temporary files."""
@@ -189,7 +189,7 @@ class ProteinFeaturizer:
                 'backbone_torsion': torsion,
                 'self_distances': self_distance,
                 'self_vectors': self_vector,
-                'coordinates': self.coords
+                'coords': self.coords
             }
 
         return self._cache['geometric']
@@ -206,21 +206,23 @@ class ProteinFeaturizer:
 
         return self._cache['sasa']
 
-    def get_contact_map(self, cutoff: float = 8.0) -> Dict[str, Any]:
+    def get_contact_map(self, distance_cutoff: float = 8.0,
+                        knn_cutoff: Optional[int] = None) -> Dict[str, Any]:
         """
         Get residue-residue contact map and distances.
 
         Args:
-            cutoff: Distance cutoff for contacts (default: 8.0 Å)
+            distance_cutoff: Distance cutoff for contacts (default: 8.0 Å)
+            knn_cutoff: Optional k-nearest neighbors cutoff
 
         Returns:
             Dictionary with contact information
         """
-        cache_key = f'contact_map_{cutoff}'
+        cache_key = f'contact_map_{distance_cutoff}_{knn_cutoff}'
 
         if cache_key not in self._cache:
             distance_adj, adj, vectors = self._featurizer._calculate_interaction_features(
-                self.coords, cutoff=cutoff
+                self.coords, distance_cutoff=distance_cutoff, knn_cutoff=knn_cutoff
             )
 
             # Get sparse representation
@@ -270,29 +272,31 @@ class ProteinFeaturizer:
             )
 
             self._cache['node_features'] = {
-                'coordinates': self.coord,
+                'coords': self.coords_ca_sc,
                 'scalar_features': scalar_features,
                 'vector_features': vector_features
             }
 
         return self._cache['node_features']
 
-    def get_edge_features(self, distance_cutoff: float = 8.0) -> Dict[str, Any]:
+    def get_edge_features(self, distance_cutoff: float = 8.0,
+                          knn_cutoff: Optional[int] = None) -> Dict[str, Any]:
         """
         Get all edge (interaction) features.
 
         Args:
             distance_cutoff: Distance cutoff for interactions
+            knn_cutoff: Optional k-nearest neighbors cutoff
 
         Returns:
             Dictionary with edge indices and features
         """
-        cache_key = f'edge_features_{distance_cutoff}'
+        cache_key = f'edge_features_{distance_cutoff}_{knn_cutoff}'
 
         if cache_key not in self._cache:
             edges, scalar_features, vector_features = \
                 self._featurizer._extract_interaction_features(
-                    self.coords, distance_cutoff=distance_cutoff
+                    self.coords, distance_cutoff=distance_cutoff, knn_cutoff=knn_cutoff
                 )
 
             self._cache[cache_key] = {
@@ -319,24 +323,26 @@ class ProteinFeaturizer:
 
         return self._cache['terminal_flags']
 
-    def get_features(self, distance_cutoff: float = 8.0) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def get_features(self, distance_cutoff: float = 8.0,
+                      knn_cutoff: Optional[int] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Get node and edge features in standard format.
 
         Args:
             distance_cutoff: Distance cutoff for residue-residue edges (default: 8.0 Å)
+            knn_cutoff: Optional k-nearest neighbors cutoff
 
         Returns:
             Tuple of (node, edge) dictionaries with:
-            - node: {'coord', 'node_scalar_features', 'node_vector_features'}
+            - node: {'coords', 'node_scalar_features', 'node_vector_features'}
             - edge: {'edges', 'edge_scalar_features', 'edge_vector_features'}
         """
-        cache_key = f'features_{distance_cutoff}'
+        cache_key = f'features_{distance_cutoff}_{knn_cutoff}'
         if cache_key not in self._cache:
             # Get edges with the specified cutoff
             edges, edge_scalar_features, edge_vector_features = \
                 self._featurizer._extract_interaction_features(
-                    self.coords, distance_cutoff=distance_cutoff
+                    self.coords, distance_cutoff=distance_cutoff, knn_cutoff=knn_cutoff
                 )
 
             # Get node features
@@ -346,7 +352,7 @@ class ProteinFeaturizer:
                 )
 
             node = {
-                'coord': self.coord,
+                'coords': self.coords_ca_sc,
                 'node_scalar_features': node_scalar_features,
                 'node_vector_features': node_vector_features
             }
@@ -561,19 +567,21 @@ class ProteinFeaturizer:
 
     # ============== ATOM-LEVEL FEATURES ==============
 
-    def get_atom_graph(self, distance_cutoff: float = 4.0) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def get_atom_graph(self, distance_cutoff: float = 4.0,
+                       knn_cutoff: Optional[int] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Get atom-level graph representation with node and edge features.
 
         Args:
             distance_cutoff: Distance cutoff for atom-atom edges (default: 4.0 Å)
+            knn_cutoff: Optional k-nearest neighbors cutoff
 
         Returns:
             Tuple of (node, edge) dictionaries:
                 - node: token-based features + enriched scalar features
                 - edge: distance, same_residue, sequence_separation, unit_vector
         """
-        cache_key = f'atom_graph_{distance_cutoff}'
+        cache_key = f'atom_graph_{distance_cutoff}_{knn_cutoff}'
 
         if cache_key not in self._cache:
             from .atom_featurizer import AtomFeaturizer
@@ -585,7 +593,7 @@ class ProteinFeaturizer:
             atom_features = atom_featurizer.get_all_atom_features(pdb_to_use)
 
             # Build distance matrix using torch
-            coords = atom_features['coord']
+            coords = atom_features['coords']
             if not isinstance(coords, torch.Tensor):
                 coords = torch.tensor(coords, dtype=torch.float32)
             coords = coords.float()
@@ -593,6 +601,16 @@ class ProteinFeaturizer:
 
             # Create edges based on distance cutoff
             edge_mask = (dist_matrix < distance_cutoff) & (dist_matrix > 0)
+
+            if knn_cutoff is not None and dist_matrix.size(0) > 1:
+                dm_knn = dist_matrix.clone()
+                dm_knn.fill_diagonal_(float('inf'))
+                k = min(knn_cutoff, dm_knn.size(0) - 1)
+                _, topk_idx = torch.topk(dm_knn, k, dim=1, largest=False)
+                knn_mask = torch.zeros_like(dist_matrix, dtype=torch.bool)
+                knn_mask.scatter_(1, topk_idx, True)
+                edge_mask = edge_mask | knn_mask
+
             edge_index = edge_mask.nonzero(as_tuple=False)
             edges = (edge_index[:, 0].long(), edge_index[:, 1].long())
             edge_distances = dist_matrix[edge_mask].float()
@@ -633,7 +651,7 @@ class ProteinFeaturizer:
             unit_vector = diff / dist_safe  # (E, 3)
 
             node = {
-                'coord': atom_features['coord'],
+                'coords': atom_features['coords'],
                 'node_features': atom_features['token'],
                 'atom_tokens': atom_features['token'],
                 'sasa': atom_features['sasa'],
@@ -660,6 +678,7 @@ class ProteinFeaturizer:
                 'sequence_separation': seq_sep,
                 'unit_vector': unit_vector,
                 'distance_cutoff': distance_cutoff,
+                'knn_cutoff': knn_cutoff,
             }
 
             self._cache[cache_key] = (node, edge)

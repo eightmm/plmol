@@ -110,6 +110,7 @@ class PLInteractionFeaturizer:
         protein_mol: Chem.Mol,
         ligand_mol: Chem.Mol,
         distance_cutoff: float = 4.5,
+        knn_cutoff: Optional[int] = None,
     ):
         """
         Initialize the PLI featurizer.
@@ -118,11 +119,13 @@ class PLInteractionFeaturizer:
             protein_mol: RDKit mol object for protein (must have 3D coordinates)
             ligand_mol: RDKit mol object for ligand (must have 3D coordinates)
             distance_cutoff: Maximum distance for interaction detection (Angstrom)
+            knn_cutoff: Optional k-nearest neighbors cutoff for bipartite edges
 
         Raises:
             ValueError: If molecules lack 3D coordinates
         """
         self.distance_cutoff = distance_cutoff
+        self.knn_cutoff = knn_cutoff
         self._cache: Dict[str, Any] = {}
 
         # Store original molecules and prepare with hydrogens
@@ -516,13 +519,34 @@ class PLInteractionFeaturizer:
     # Interaction Detection Methods
     # =========================================================================
 
-    def _get_close_pairs(self, cutoff: Optional[float] = None) -> List[Tuple[int, int, float]]:
-        """Get heavy atom pairs within distance cutoff."""
-        cutoff = cutoff or self.distance_cutoff
+    def _get_close_pairs(self, distance_cutoff: Optional[float] = None,
+                         knn_cutoff: Optional[int] = None) -> List[Tuple[int, int, float]]:
+        """Get heavy atom pairs within distance cutoff, optionally unioned with bipartite kNN."""
+        distance_cutoff = distance_cutoff or self.distance_cutoff
+        dm = self._distance_matrix
+
+        # Distance-based mask
+        mask = dm < distance_cutoff
+
+        # Bipartite kNN: protein→ligand + ligand→protein
+        knn_cutoff = knn_cutoff or self.knn_cutoff
+        if knn_cutoff is not None:
+            # Each protein atom's k nearest ligand atoms
+            k_lig = min(knn_cutoff, dm.shape[1])
+            topk_lig = np.argpartition(dm, k_lig, axis=1)[:, :k_lig]
+            knn_mask_pl = np.zeros_like(dm, dtype=bool)
+            np.put_along_axis(knn_mask_pl, topk_lig, True, axis=1)
+            # Each ligand atom's k nearest protein atoms
+            k_prot = min(knn_cutoff, dm.shape[0])
+            topk_prot = np.argpartition(dm.T, k_prot, axis=1)[:, :k_prot]
+            knn_mask_lp = np.zeros_like(dm, dtype=bool)
+            np.put_along_axis(knn_mask_lp, topk_prot, True, axis=0)
+            mask = mask | knn_mask_pl | knn_mask_lp
+
         pairs = []
-        protein_idxs, ligand_idxs = np.where(self._distance_matrix < cutoff)
+        protein_idxs, ligand_idxs = np.where(mask)
         for p_idx, l_idx in zip(protein_idxs, ligand_idxs):
-            dist = self._distance_matrix[p_idx, l_idx]
+            dist = dm[p_idx, l_idx]
             pairs.append((int(p_idx), int(l_idx), float(dist)))
         return pairs
 
@@ -1043,18 +1067,34 @@ class PLInteractionFeaturizer:
         return features
 
     def _get_contact_edges(
-        self, cutoff: float
+        self, distance_cutoff: float,
+        knn_cutoff: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Get all heavy atom pairs within cutoff as generic contact edges.
 
         Args:
-            cutoff: Distance cutoff in Angstrom.
+            distance_cutoff: Distance cutoff in Angstrom.
+            knn_cutoff: Optional k-nearest neighbors cutoff for bipartite edges.
 
         Returns:
             contact_edges: (2, E_contact) protein/ligand heavy atom indices.
             contact_distances: (E_contact,) pairwise distances.
         """
-        mask = self._distance_matrix < cutoff
+        dm = self._distance_matrix
+        mask = dm < distance_cutoff
+
+        knn_cutoff = knn_cutoff or self.knn_cutoff
+        if knn_cutoff is not None:
+            k_lig = min(knn_cutoff, dm.shape[1])
+            topk_lig = np.argpartition(dm, k_lig, axis=1)[:, :k_lig]
+            knn_mask_pl = np.zeros_like(dm, dtype=bool)
+            np.put_along_axis(knn_mask_pl, topk_lig, True, axis=1)
+            k_prot = min(knn_cutoff, dm.shape[0])
+            topk_prot = np.argpartition(dm.T, k_prot, axis=1)[:, :k_prot]
+            knn_mask_lp = np.zeros_like(dm, dtype=bool)
+            np.put_along_axis(knn_mask_lp, topk_prot, True, axis=0)
+            mask = mask | knn_mask_pl | knn_mask_lp
+
         p_idx, l_idx = np.where(mask)
         if len(p_idx) == 0:
             return (
@@ -1071,6 +1111,7 @@ class PLInteractionFeaturizer:
         self,
         include_contacts: bool = False,
         contact_cutoff: Optional[float] = None,
+        knn_cutoff: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Get complete interaction graph data.
 
@@ -1078,6 +1119,7 @@ class PLInteractionFeaturizer:
             include_contacts: If True, also include all heavy atom pairs within
                 cutoff as generic contact edges (separate from pharmacophore edges).
             contact_cutoff: Distance cutoff for contacts (default: self.distance_cutoff).
+            knn_cutoff: Optional k-nearest neighbors cutoff for contact edges.
         """
         interactions = self.detect_all_interactions()
         edges, edge_features = self.get_interaction_edges()
@@ -1086,6 +1128,7 @@ class PLInteractionFeaturizer:
         for inter in interactions:
             type_counts[inter.interaction_type] = type_counts.get(inter.interaction_type, 0) + 1
 
+        knn_cutoff = knn_cutoff or self.knn_cutoff
         graph = {
             'edges': edges,
             'edge_features': edge_features,
@@ -1095,6 +1138,7 @@ class PLInteractionFeaturizer:
             'num_protein_atoms': self.num_protein_atoms,  # Heavy atoms only
             'num_ligand_atoms': self.num_ligand_atoms,    # Heavy atoms only
             'distance_cutoff': self.distance_cutoff,
+            'knn_cutoff': knn_cutoff,
             'feature_dim': self._get_edge_feature_dim(),
             'metadata': {
                 'interaction_type_indices': INTERACTION_TYPE_IDX,
@@ -1107,7 +1151,9 @@ class PLInteractionFeaturizer:
 
         if include_contacts:
             c_cutoff = contact_cutoff or self.distance_cutoff
-            contact_edges, contact_distances = self._get_contact_edges(c_cutoff)
+            contact_edges, contact_distances = self._get_contact_edges(
+                c_cutoff, knn_cutoff=knn_cutoff
+            )
             graph['contact_edges'] = contact_edges
             graph['contact_distances'] = contact_distances
             graph['num_contacts'] = contact_edges.shape[1]
@@ -1192,10 +1238,11 @@ class PLInteractionFeaturizer:
         return features
 
     def get_distance_based_edges(
-        self, cutoff: Optional[float] = None
+        self, distance_cutoff: Optional[float] = None,
+        knn_cutoff: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Get all heavy atom pairs within distance cutoff."""
-        pairs = self._get_close_pairs(cutoff)
+        pairs = self._get_close_pairs(distance_cutoff, knn_cutoff=knn_cutoff)
 
         if not pairs:
             return (

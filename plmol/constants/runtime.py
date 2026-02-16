@@ -34,4 +34,6 @@ VOXEL_DEFAULT_CUTOFF_SIGMA = 2.5        # Gaussian cutoff at 2.5 sigma
 DEFAULT_BACKBONE_KNN_NEIGHBORS = 30
 
 # Pocket extraction internals
+# Pure heavy atoms only (TRP = 14); differs from amino_acids.MAX_ATOMS_PER_RESIDUE (15)
+# which includes a virtual sidechain centroid slot.
 POCKET_MAX_ATOMS_PER_RESIDUE = 14
