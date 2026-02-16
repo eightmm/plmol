@@ -206,15 +206,18 @@ class LigandFeaturizer:
             return self._standardize_graph(node, edge, adj)
         return node, edge, adj
 
-    def get_feature(
+    def get_features(
         self,
         mol_or_smiles: Optional[Union[str, "Chem.Mol"]] = None,
         include_fps: Optional[Tuple[str, ...]] = None,
     ) -> Dict[str, Any]:
-        """Backward-compatible ligand feature dictionary (descriptors + fingerprints)."""
+        """Ligand feature dictionary (descriptors + fingerprints)."""
         if mol_or_smiles is None:
-            return self._ligand_base_featurizer.get_feature(include_fps=include_fps)
-        return self._get_featurizer(mol_or_smiles).get_feature(include_fps=include_fps)
+            return self._ligand_base_featurizer.get_features(include_fps=include_fps)
+        return self._get_featurizer(mol_or_smiles).get_features(include_fps=include_fps)
+
+    # Backward-compatible alias
+    get_feature = get_features
 
     def get_morgan_fingerprint(
         self,

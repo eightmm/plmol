@@ -198,7 +198,7 @@ def process_single_ligand(
 
         # Add molecular descriptors and fingerprints if not graph_only
         if not graph_only:
-            features = featurizer.get_feature()
+            features = featurizer.get_features()
             save_dict['descriptors'] = features['descriptors']            # [40]
             save_dict.update({k: v for k, v in features.items() if k != 'descriptors'})
 

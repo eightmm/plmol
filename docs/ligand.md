@@ -248,7 +248,7 @@ from plmol import (
 from plmol import MoleculeFeaturizer
 
 featurizer = MoleculeFeaturizer("CCO")
-features = featurizer.get_feature()           # descriptors + fingerprints
+features = featurizer.get_features()           # descriptors + fingerprints
 node, edge, adj = featurizer.get_graph()      # graph representation
 descriptors = featurizer.get_descriptors()    # 62-dim descriptor tensor
 ecfp4 = featurizer.get_morgan_fingerprint()   # ECFP4 (2048-dim)
@@ -258,6 +258,6 @@ ecfp4 = featurizer.get_morgan_fingerprint()   # ECFP4 (2048-dim)
 
 ```python
 featurizer = MoleculeFeaturizer()
-features = featurizer.get_feature("CCO")
+features = featurizer.get_features("CCO")
 node, edge, adj = featurizer.get_graph("CCO", distance_cutoff=5.0, knn_cutoff=8)
 ```

@@ -28,6 +28,7 @@ from ..constants import (
     DEFAULT_POLARIZABILITY, DEFAULT_VALENCE_ELECTRONS, DEFAULT_ELECTRONEGATIVITY,
     NORM_CONSTANTS,
 )
+from ..utils import knn_mask_torch
 
 
 class MoleculeGraphFeaturizer:
@@ -1255,13 +1256,7 @@ class MoleculeGraphFeaturizer:
                 mask = mask | ((dist_matrix <= distance_cutoff) & (~torch.eye(coords.size(0), dtype=torch.bool)))
 
             if knn_cutoff is not None and coords.size(0) > 1:
-                dm_knn = dist_matrix.clone()
-                dm_knn.fill_diagonal_(float('inf'))
-                k = min(knn_cutoff, dm_knn.size(0) - 1)
-                _, topk_idx = torch.topk(dm_knn, k, dim=1, largest=False)
-                knn_mask = torch.zeros_like(dist_matrix, dtype=torch.bool)
-                knn_mask.scatter_(1, topk_idx, True)
-                mask = mask | knn_mask
+                mask = mask | knn_mask_torch(dist_matrix, knn_cutoff)
 
             src_d, dst_d = torch.where(mask)
             dist_edge_index = torch.stack([src_d, dst_d], dim=0)

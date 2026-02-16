@@ -40,6 +40,7 @@ from ..constants import (
     VOXEL_DEFAULT_CUTOFF_SIGMA,
 )
 from ..surface import build_protein_surface
+from ..utils import knn_mask_torch
 from ..voxel import build_protein_voxel
 from .utils import PDBParser
 
@@ -218,7 +219,7 @@ class ProteinFeaturizer:
         Returns:
             Dictionary with contact information
         """
-        cache_key = f'contact_map_{distance_cutoff}_{knn_cutoff}'
+        cache_key = ('contact_map', distance_cutoff, knn_cutoff)
 
         if cache_key not in self._cache:
             distance_adj, adj, vectors = self._featurizer._calculate_interaction_features(
@@ -250,7 +251,7 @@ class ProteinFeaturizer:
         Returns:
             One-hot encoded relative position tensor
         """
-        cache_key = f'relative_position_{cutoff}'
+        cache_key = ('relative_position', cutoff)
 
         if cache_key not in self._cache:
             self._cache[cache_key] = self._featurizer.get_relative_position(
@@ -291,7 +292,7 @@ class ProteinFeaturizer:
         Returns:
             Dictionary with edge indices and features
         """
-        cache_key = f'edge_features_{distance_cutoff}_{knn_cutoff}'
+        cache_key = ('edge_features', distance_cutoff, knn_cutoff)
 
         if cache_key not in self._cache:
             edges, scalar_features, vector_features = \
@@ -337,7 +338,7 @@ class ProteinFeaturizer:
             - node: {'coords', 'node_scalar_features', 'node_vector_features'}
             - edge: {'edges', 'edge_scalar_features', 'edge_vector_features'}
         """
-        cache_key = f'features_{distance_cutoff}_{knn_cutoff}'
+        cache_key = ('features', distance_cutoff, knn_cutoff)
         if cache_key not in self._cache:
             # Get edges with the specified cutoff
             edges, edge_scalar_features, edge_vector_features = \
@@ -420,10 +421,9 @@ class ProteinFeaturizer:
             included only in mesh mode. Plus protein-tailored residue/geometric
             features mapped to the surface when include_features is True.
         """
-        cache_key = (
-            f"surface_{grid_density}_{threshold}_{sharpness}_{include_features}_"
-            f"{max_memory_gb}_{device}_{mode}_{n_points_per_atom}_{probe_radius}"
-        )
+        cache_key = ('surface', grid_density, threshold, sharpness,
+                     include_features, max_memory_gb, device, mode,
+                     n_points_per_atom, probe_radius)
         if cache_key in self._cache:
             return self._cache[cache_key]
 
@@ -511,10 +511,9 @@ class ProteinFeaturizer:
             Dict with "voxel" (16, D, H, W), "channel_names", "grid_origin",
             "grid_shape", "resolution".
         """
-        center_key = "None" if center is None else f"{center[0]:.2f}_{center[1]:.2f}_{center[2]:.2f}"
-        cache_key = (
-            f"voxel_{center_key}_{resolution}_{box_size}_{padding}_{sigma_scale}_{cutoff_sigma}"
-        )
+        center_key = None if center is None else (round(float(center[0]), 2), round(float(center[1]), 2), round(float(center[2]), 2))
+        cache_key = ('voxel', center_key, resolution, box_size, padding,
+                     sigma_scale, cutoff_sigma)
         if cache_key in self._cache:
             return self._cache[cache_key]
 
@@ -581,7 +580,7 @@ class ProteinFeaturizer:
                 - node: token-based features + enriched scalar features
                 - edge: distance, same_residue, sequence_separation, unit_vector
         """
-        cache_key = f'atom_graph_{distance_cutoff}_{knn_cutoff}'
+        cache_key = ('atom_graph', distance_cutoff, knn_cutoff)
 
         if cache_key not in self._cache:
             from .atom_featurizer import AtomFeaturizer
@@ -603,13 +602,7 @@ class ProteinFeaturizer:
             edge_mask = (dist_matrix < distance_cutoff) & (dist_matrix > 0)
 
             if knn_cutoff is not None and dist_matrix.size(0) > 1:
-                dm_knn = dist_matrix.clone()
-                dm_knn.fill_diagonal_(float('inf'))
-                k = min(knn_cutoff, dm_knn.size(0) - 1)
-                _, topk_idx = torch.topk(dm_knn, k, dim=1, largest=False)
-                knn_mask = torch.zeros_like(dist_matrix, dtype=torch.bool)
-                knn_mask.scatter_(1, topk_idx, True)
-                edge_mask = edge_mask | knn_mask
+                edge_mask = edge_mask | knn_mask_torch(dist_matrix, knn_cutoff)
 
             edge_index = edge_mask.nonzero(as_tuple=False)
             edges = (edge_index[:, 0].long(), edge_index[:, 1].long())
@@ -791,7 +784,7 @@ class ProteinFeaturizer:
             edge_index, edge_dist, edge_unit_vec, edge_seq_sep,
             edge_same_chain, num_residues, num_chains, k_neighbors.
         """
-        cache_key = f"backbone_{k_neighbors}"
+        cache_key = ('backbone', k_neighbors)
         if cache_key in self._cache:
             return self._cache[cache_key]
 

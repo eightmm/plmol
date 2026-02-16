@@ -36,6 +36,7 @@ from ..constants import (
     RESIDUE_TYPES,
     NUM_RESIDUE_TYPES,
 )
+from ..utils import knn_mask_bipartite_numpy
 
 
 # =============================================================================
@@ -531,17 +532,7 @@ class PLInteractionFeaturizer:
         # Bipartite kNN: protein→ligand + ligand→protein
         knn_cutoff = knn_cutoff or self.knn_cutoff
         if knn_cutoff is not None:
-            # Each protein atom's k nearest ligand atoms
-            k_lig = min(knn_cutoff, dm.shape[1])
-            topk_lig = np.argpartition(dm, k_lig, axis=1)[:, :k_lig]
-            knn_mask_pl = np.zeros_like(dm, dtype=bool)
-            np.put_along_axis(knn_mask_pl, topk_lig, True, axis=1)
-            # Each ligand atom's k nearest protein atoms
-            k_prot = min(knn_cutoff, dm.shape[0])
-            topk_prot = np.argpartition(dm.T, k_prot, axis=1)[:, :k_prot]
-            knn_mask_lp = np.zeros_like(dm, dtype=bool)
-            np.put_along_axis(knn_mask_lp, topk_prot, True, axis=0)
-            mask = mask | knn_mask_pl | knn_mask_lp
+            mask = mask | knn_mask_bipartite_numpy(dm, knn_cutoff)
 
         pairs = []
         protein_idxs, ligand_idxs = np.where(mask)
@@ -1085,15 +1076,7 @@ class PLInteractionFeaturizer:
 
         knn_cutoff = knn_cutoff or self.knn_cutoff
         if knn_cutoff is not None:
-            k_lig = min(knn_cutoff, dm.shape[1])
-            topk_lig = np.argpartition(dm, k_lig, axis=1)[:, :k_lig]
-            knn_mask_pl = np.zeros_like(dm, dtype=bool)
-            np.put_along_axis(knn_mask_pl, topk_lig, True, axis=1)
-            k_prot = min(knn_cutoff, dm.shape[0])
-            topk_prot = np.argpartition(dm.T, k_prot, axis=1)[:, :k_prot]
-            knn_mask_lp = np.zeros_like(dm, dtype=bool)
-            np.put_along_axis(knn_mask_lp, topk_prot, True, axis=0)
-            mask = mask | knn_mask_pl | knn_mask_lp
+            mask = mask | knn_mask_bipartite_numpy(dm, knn_cutoff)
 
         p_idx, l_idx = np.where(mask)
         if len(p_idx) == 0:

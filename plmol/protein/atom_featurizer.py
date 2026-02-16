@@ -217,39 +217,13 @@ class AtomFeaturizer:
 
         return atom_sasa, atom_info
 
-    def get_all_atom_features(self, pdb_file: str) -> Dict[str, torch.Tensor]:
+    def _collect_per_atom_data(self, parser: 'PDBParser') -> Dict[str, list]:
+        """Collect per-atom properties from parsed protein atoms.
+
+        Returns dict of lists: residue_tokens, atom_elements, b_factors,
+        is_backbone, formal_charges, is_hbond_donor, is_hbond_acceptor,
+        atom_names, res_names, res_nums, chain_ids.
         """
-        Get all atom-level features including tokens, coordinates, SASA,
-        and enriched per-atom properties.
-
-        Args:
-            pdb_file: Path to PDB file
-
-        Returns:
-            Dictionary containing:
-                - 'token': Atom type tokens [n_atoms]
-                - 'coords': 3D coordinates [n_atoms, 3]
-                - 'sasa': Absolute SASA values [n_atoms]
-                - 'relative_sasa': Residue-normalized SASA [n_atoms]
-                - 'residue_token': Residue type for each atom [n_atoms]
-                - 'atom_element': Element type for each atom [n_atoms]
-                - 'radius': Atomic radii [n_atoms]
-                - 'b_factor': Normalized B-factor [n_atoms]
-                - 'is_backbone': Backbone atom flag [n_atoms]
-                - 'formal_charge': Formal charge [n_atoms]
-                - 'is_hbond_donor': H-bond donor flag [n_atoms]
-                - 'is_hbond_acceptor': H-bond acceptor flag [n_atoms]
-                - 'secondary_structure': SS assignment [n_atoms, 3] (helix/sheet/coil)
-        """
-        # Single PDBParser instance as authoritative source
-        parser = PDBParser(pdb_file)
-
-        # Get basic atom features from parser (not raw PDB lines)
-        token, coord = self.get_protein_atom_features_from_parser(parser)
-
-        # Get SASA features
-        atom_sasa, atom_info = self.get_atom_sasa(pdb_file)
-
         residue_tokens = []
         atom_elements = []
         b_factors = []
@@ -257,24 +231,20 @@ class AtomFeaturizer:
         formal_charges = []
         is_hbond_donor = []
         is_hbond_acceptor = []
-        atom_names_list = []
-        res_names_list = []
-        res_nums_list = []
-        chain_ids_list = []
+        atom_names = []
+        res_names = []
+        res_nums = []
+        chain_ids = []
 
         for atom in parser.protein_atoms:
-            # Skip same atoms as get_protein_atom_features
             if atom.atom_name == 'OXT' or atom.res_name in ['LLP', 'PTR']:
                 continue
 
-            # Normalize residue name
             res_name_clean = normalize_residue_name(atom.res_name, atom.atom_name)
             if res_name_clean == 'UNK':
                 res_name_clean = 'XXX'
 
-            # Residue token
-            res_tok = self.res_token.get(res_name_clean, RESIDUE_TOKEN['UNK'])
-            residue_tokens.append(res_tok)
+            residue_tokens.append(self.res_token.get(res_name_clean, RESIDUE_TOKEN['UNK']))
 
             # Element type
             element = atom.element
@@ -292,43 +262,84 @@ class AtomFeaturizer:
                     element_type = PROTEIN_ELEMENT_TYPES['UNK']
             atom_elements.append(element_type)
 
-            # B-factor (normalized: divide by 100, cap at 1.0)
             b_factors.append(min(atom.b_factor / 100.0, 1.0))
-
-            # Is backbone
             is_backbone.append(1.0 if atom.atom_name in BACKBONE_ATOM_SET else 0.0)
-
-            # Formal charge
-            charge = FORMAL_CHARGE_MAP.get((res_name_clean, atom.atom_name), 0.0)
-            formal_charges.append(charge)
+            formal_charges.append(FORMAL_CHARGE_MAP.get((res_name_clean, atom.atom_name), 0.0))
 
             # H-bond donor: backbone N (except PRO) + sidechain donors
-            donor = False
-            if atom.atom_name == 'N' and res_name_clean != 'PRO':
-                donor = True
-            elif (res_name_clean, atom.atom_name) in HBOND_DONOR_ATOMS:
-                donor = True
+            donor = (atom.atom_name == 'N' and res_name_clean != 'PRO') or \
+                    (res_name_clean, atom.atom_name) in HBOND_DONOR_ATOMS
             is_hbond_donor.append(1.0 if donor else 0.0)
 
             # H-bond acceptor: backbone O + sidechain acceptors
-            acceptor = False
-            if atom.atom_name == 'O':
-                acceptor = True
-            elif (res_name_clean, atom.atom_name) in HBOND_ACCEPTOR_ATOMS:
-                acceptor = True
+            acceptor = atom.atom_name == 'O' or \
+                       (res_name_clean, atom.atom_name) in HBOND_ACCEPTOR_ATOMS
             is_hbond_acceptor.append(1.0 if acceptor else 0.0)
 
-            atom_names_list.append(atom.atom_name)
-            res_names_list.append(res_name_clean)
-            res_nums_list.append(atom.res_num)
-            chain_ids_list.append(atom.chain_id)
+            atom_names.append(atom.atom_name)
+            res_names.append(res_name_clean)
+            res_nums.append(atom.res_num)
+            chain_ids.append(atom.chain_id)
 
-        # token and enriched features come from same PDBParser, so they match.
-        # Only SASA (from freesasa) may differ.
-        n_parser = len(token)
-        n_sasa = len(atom_sasa)
+        return {
+            'residue_tokens': residue_tokens, 'atom_elements': atom_elements,
+            'b_factors': b_factors, 'is_backbone': is_backbone,
+            'formal_charges': formal_charges, 'is_hbond_donor': is_hbond_donor,
+            'is_hbond_acceptor': is_hbond_acceptor, 'atom_names': atom_names,
+            'res_names': res_names, 'res_nums': res_nums, 'chain_ids': chain_ids,
+        }
+
+    def _compute_derived_scalars(
+        self, parser: 'PDBParser', per_atom: Dict[str, list],
+        atom_sasa: torch.Tensor, min_len: int,
+    ) -> Dict[str, torch.Tensor]:
+        """Compute relative SASA, secondary structure, and B-factor z-score."""
+        # Relative SASA
+        sasa_truncated = atom_sasa[:min_len]
+        relative_sasa = torch.zeros(min_len, dtype=torch.float32)
+        for i in range(min_len):
+            max_sasa = RESIDUE_MAX_SASA.get(per_atom['res_names'][i], 200.0)
+            relative_sasa[i] = min(sasa_truncated[i].item() / max_sasa, 1.0) if max_sasa > 0 else 0.0
+
+        # Secondary structure from phi/psi
+        ss = self._compute_secondary_structure(
+            parser, per_atom['atom_names'][:min_len], min_len
+        )
+
+        # Per-chain B-factor z-score
+        b_factor_tensor = torch.tensor(per_atom['b_factors'][:min_len], dtype=torch.float32)
+        b_factor_zscore = torch.zeros(min_len, dtype=torch.float32)
+        chain_groups: Dict[str, List[int]] = {}
+        for i, cid in enumerate(per_atom['chain_ids'][:min_len]):
+            if cid not in chain_groups:
+                chain_groups[cid] = []
+            chain_groups[cid].append(i)
+        for indices in chain_groups.values():
+            idx = torch.tensor(indices, dtype=torch.long)
+            chain_b = b_factor_tensor[idx]
+            mean, std = chain_b.mean(), chain_b.std()
+            if std > 1e-6:
+                b_factor_zscore[idx] = (chain_b - mean) / std
+
+        return {
+            'sasa': sasa_truncated,
+            'relative_sasa': relative_sasa,
+            'secondary_structure': ss,
+            'b_factor': b_factor_tensor,
+            'b_factor_zscore': b_factor_zscore,
+        }
+
+    def get_all_atom_features(self, pdb_file: str) -> Dict[str, torch.Tensor]:
+        """Get all atom-level features including tokens, coordinates, SASA,
+        and enriched per-atom properties."""
+        parser = PDBParser(pdb_file)
+        token, coord = self.get_protein_atom_features_from_parser(parser)
+        atom_sasa, atom_info = self.get_atom_sasa(pdb_file)
+        per_atom = self._collect_per_atom_data(parser)
+
+        # Reconcile parser vs freesasa atom counts
+        n_parser, n_sasa = len(token), len(atom_sasa)
         min_len = min(n_parser, n_sasa)
-
         if n_parser != n_sasa:
             logger.warning(
                 f"SASA atom count mismatch in {pdb_file}: "
@@ -336,61 +347,31 @@ class AtomFeaturizer:
                 f"Truncating to {min_len} atoms."
             )
 
-        # Compute relative_sasa: atom_sasa / max_sasa_for_residue_type
-        sasa_truncated = atom_sasa[:min_len]
-        relative_sasa = torch.zeros(min_len, dtype=torch.float32)
-        for i in range(min_len):
-            res_name = res_names_list[i]
-            max_sasa = RESIDUE_MAX_SASA.get(res_name, 200.0)
-            relative_sasa[i] = min(sasa_truncated[i].item() / max_sasa, 1.0) if max_sasa > 0 else 0.0
+        derived = self._compute_derived_scalars(parser, per_atom, atom_sasa, min_len)
 
-        # Compute secondary structure from phi/psi (Ramachandran heuristic)
-        ss = self._compute_secondary_structure(
-            parser, atom_names_list[:min_len], min_len
-        )
-
-        # Per-chain B-factor z-score normalization
-        b_factor_tensor = torch.tensor(b_factors[:min_len], dtype=torch.float32)
-        chain_ids_truncated = chain_ids_list[:min_len]
-        b_factor_zscore = torch.zeros(min_len, dtype=torch.float32)
-        chain_groups: Dict[str, List[int]] = {}
-        for i, cid in enumerate(chain_ids_truncated):
-            if cid not in chain_groups:
-                chain_groups[cid] = []
-            chain_groups[cid].append(i)
-        for cid, indices in chain_groups.items():
-            idx = torch.tensor(indices, dtype=torch.long)
-            chain_b = b_factor_tensor[idx]
-            mean = chain_b.mean()
-            std = chain_b.std()
-            if std > 1e-6:
-                b_factor_zscore[idx] = (chain_b - mean) / std
-
-        features = {
+        return {
             'token': token[:min_len],
             'coords': coord[:min_len],
-            'sasa': sasa_truncated,
-            'relative_sasa': relative_sasa,
-            'residue_token': torch.tensor(residue_tokens[:min_len], dtype=torch.long),
-            'atom_element': torch.tensor(atom_elements[:min_len], dtype=torch.long),
+            'sasa': derived['sasa'],
+            'relative_sasa': derived['relative_sasa'],
+            'residue_token': torch.tensor(per_atom['residue_tokens'][:min_len], dtype=torch.long),
+            'atom_element': torch.tensor(per_atom['atom_elements'][:min_len], dtype=torch.long),
             'radius': atom_info['radius'][:min_len] if len(atom_info['radius']) >= min_len else atom_info['radius'],
-            'b_factor': b_factor_tensor,
-            'b_factor_zscore': b_factor_zscore,
-            'is_backbone': torch.tensor(is_backbone[:min_len], dtype=torch.float32),
-            'formal_charge': torch.tensor(formal_charges[:min_len], dtype=torch.float32),
-            'is_hbond_donor': torch.tensor(is_hbond_donor[:min_len], dtype=torch.float32),
-            'is_hbond_acceptor': torch.tensor(is_hbond_acceptor[:min_len], dtype=torch.float32),
-            'secondary_structure': ss,
+            'b_factor': derived['b_factor'],
+            'b_factor_zscore': derived['b_factor_zscore'],
+            'is_backbone': torch.tensor(per_atom['is_backbone'][:min_len], dtype=torch.float32),
+            'formal_charge': torch.tensor(per_atom['formal_charges'][:min_len], dtype=torch.float32),
+            'is_hbond_donor': torch.tensor(per_atom['is_hbond_donor'][:min_len], dtype=torch.float32),
+            'is_hbond_acceptor': torch.tensor(per_atom['is_hbond_acceptor'][:min_len], dtype=torch.float32),
+            'secondary_structure': derived['secondary_structure'],
             'metadata': {
                 'n_atoms': min_len,
-                'residue_names': res_names_list[:min_len],
-                'residue_numbers': res_nums_list[:min_len],
-                'atom_names': atom_names_list[:min_len],
-                'chain_labels': chain_ids_list[:min_len],
+                'residue_names': per_atom['res_names'][:min_len],
+                'residue_numbers': per_atom['res_nums'][:min_len],
+                'atom_names': per_atom['atom_names'][:min_len],
+                'chain_labels': per_atom['chain_ids'][:min_len],
             }
         }
-
-        return features
 
     def _compute_secondary_structure(
         self,

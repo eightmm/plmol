@@ -256,9 +256,9 @@ class Ligand(BaseMolecule):
             include_fps = fingerprint_kwargs.get("include_fps")
             # Return descriptor + selected fingerprint dictionary.
             if include_fps is None:
-                features = featurizer.get_feature()
+                features = featurizer.get_features()
             else:
-                features = featurizer.get_feature(include_fps=tuple(include_fps))
+                features = featurizer.get_features(include_fps=tuple(include_fps))
             self._fingerprint = self._to_numpy_tree(features)
             results["fingerprint"] = self._fingerprint
 

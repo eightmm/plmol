@@ -39,18 +39,18 @@ class MoleculeFeaturizer:
 
     1. Object-oriented (recommended for repeated access):
         >>> featurizer = MoleculeFeaturizer("CCO")
-        >>> features = featurizer.get_feature()
+        >>> features = featurizer.get_features()
         >>> node, edge, adj = featurizer.get_graph()
 
     2. Functional (for one-off extraction):
         >>> featurizer = MoleculeFeaturizer()
-        >>> features = featurizer.get_feature("CCO")
+        >>> features = featurizer.get_features("CCO")
         >>> node, edge, adj = featurizer.get_graph("CCO")
 
     Examples:
         >>> # From SMILES
         >>> featurizer = MoleculeFeaturizer("CCO")
-        >>> features = featurizer.get_feature()
+        >>> features = featurizer.get_features()
         >>> descriptors = featurizer.get_descriptors()
         >>>
         >>> # From RDKit mol
@@ -61,7 +61,7 @@ class MoleculeFeaturizer:
         >>> suppl = Chem.SDMolSupplier('molecules.sdf')
         >>> for mol in suppl:
         >>>     featurizer = MoleculeFeaturizer(mol)
-        >>>     features = featurizer.get_feature()
+        >>>     features = featurizer.get_features()
     """
 
     def __init__(
@@ -730,7 +730,7 @@ class MoleculeFeaturizer:
     # Main Feature Extraction Methods
     # =========================================================================
 
-    def get_feature(
+    def get_features(
         self,
         mol_or_smiles: Optional[Union[str, Chem.Mol]] = None,
         add_hs: bool = False,
@@ -900,7 +900,7 @@ class MoleculeFeaturizer:
         Returns:
             torch.Tensor: 62 normalized molecular descriptors
         """
-        features = self.get_feature()
+        features = self.get_features()
         return features['descriptors']
 
     def get_morgan_fingerprint(self, radius: int = 2, n_bits: int = 2048) -> torch.Tensor:
@@ -919,7 +919,7 @@ class MoleculeFeaturizer:
 
         # Use cached value for default parameters
         if radius == 2 and n_bits == 2048:
-            features = self.get_feature()
+            features = self.get_features()
             return features['ecfp4']
 
         # Generate custom fingerprint
@@ -983,7 +983,7 @@ class MoleculeFeaturizer:
         if self._mol is None:
             raise ValueError("No molecule set. Initialize with a molecule first.")
 
-        features = self.get_feature()
+        features = self.get_features()
         node, edge, adj = self.get_graph()
 
         all_features = {
@@ -1018,7 +1018,7 @@ class MoleculeFeaturizer:
 
     # Aliases for consistency
     extract = get_all_features
-    get_features = get_feature
+    get_feature = get_features
 
     def __repr__(self) -> str:
         """String representation."""

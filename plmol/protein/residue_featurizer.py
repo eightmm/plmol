@@ -40,6 +40,8 @@ from .utils import (
     normalize_residue_name,
 )
 
+from ..utils import knn_mask_torch
+
 # Import amino acid constants from centralized module
 from ..constants import (
     AMINO_ACID_3TO1,
@@ -489,11 +491,7 @@ class ResidueFeaturizer:
         if knn_cutoff is not None and coords.shape[0] > 1:
             min_dm = torch.minimum(torch.minimum(dm_CA_CA, dm_SC_SC),
                                    torch.minimum(dm_CA_SC, dm_SC_CA))
-            min_dm.fill_diagonal_(float('inf'))
-            k = min(knn_cutoff, min_dm.size(0) - 1)
-            _, topk_idx = torch.topk(min_dm, k, dim=1, largest=False)
-            knn_adj = torch.zeros_like(adj)
-            knn_adj.scatter_(1, topk_idx, 1)
+            knn_adj = knn_mask_torch(min_dm, knn_cutoff).int()
             knn_adj = (knn_adj * mask).int()
             adj = adj | knn_adj
 
