@@ -6,9 +6,8 @@ Designed to hold multi-view data (Sequence, Graph, 3D, Surface).
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List
 import numpy as np
-from pathlib import Path
 
 class BaseMolecule(ABC):
     """

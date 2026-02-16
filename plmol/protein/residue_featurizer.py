@@ -539,17 +539,15 @@ class ResidueFeaturizer:
         rf_vector = torch.cat([forward_vector, reverse_vector], dim=1)
         rf_distance = torch.cat([forward_distance, reverse_distance], dim=1)
 
-        # Physicochemical properties (5-dim per residue)
-        L = len(residue_types)
-        physchem = torch.zeros(L, NUM_RESIDUE_PROPERTIES)
-        for i in range(L):
-            res_idx = int(residue_types[i].item())
-            if res_idx < len(RESIDUE_TYPES):
-                res_name = RESIDUE_TYPES[res_idx]
-            else:
-                res_name = 'Other'
-            props = RESIDUE_PROPERTIES.get(res_name, RESIDUE_PROPERTIES['Other'])
-            physchem[i] = torch.tensor(props, dtype=torch.float32)
+        # Physicochemical properties (5-dim per residue, vectorized via lookup table)
+        default_props = RESIDUE_PROPERTIES.get('Other', [0.0] * NUM_RESIDUE_PROPERTIES)
+        property_rows = []
+        for res_name in RESIDUE_TYPES:
+            property_rows.append(RESIDUE_PROPERTIES.get(res_name, default_props))
+        property_rows.append(default_props)  # for out-of-range indices
+        property_table = torch.tensor(property_rows, dtype=torch.float32)
+        idx_clamped = torch.clamp(residue_types.long(), 0, len(RESIDUE_TYPES))
+        physchem = property_table[idx_clamped]
 
         # Collect all features
         scalar_features = (

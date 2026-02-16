@@ -8,7 +8,6 @@ import torch
 
 try:
     from rdkit import Chem
-    from rdkit.Chem import AllChem
 except ImportError:
     Chem = None
 
@@ -72,14 +71,14 @@ class Ligand(BaseMolecule):
         return cls(mol)
 
     def generate_conformer(self):
-        """Generate 3D conformer using ETKDG if missing."""
+        """Generate 3D conformer using canonical method if missing."""
         if self._rdmol:
-            if AllChem is None:
-                raise ImportError(
-                    "RDKit AllChem is required to generate conformers. Install RDKit to use this feature."
-                )
-            AllChem.EmbedMolecule(self._rdmol, AllChem.ETKDG())
-            self._coords = self._rdmol.GetConformer().GetPositions()
+            from .base import MoleculeFeaturizer
+            mol_3d = MoleculeFeaturizer._ensure_3d_conformer(self._rdmol)
+            if mol_3d is not None and mol_3d.GetNumConformers() > 0:
+                self._rdmol.RemoveAllConformers()
+                self._rdmol.AddConformer(mol_3d.GetConformer(), assignId=True)
+                self._coords = self._rdmol.GetConformer().GetPositions()
 
     @property
     def smiles(self) -> Optional[str]:

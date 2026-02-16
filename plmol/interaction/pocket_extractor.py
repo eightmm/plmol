@@ -5,7 +5,7 @@ Extracts binding pocket from protein based on ligand proximity.
 Uses fast PDB line-based parsing with vectorized distance calculation.
 """
 
-from typing import Dict, List, Tuple, Optional, Union, overload
+from typing import Dict, List, Tuple, Optional, Union
 from dataclasses import dataclass
 import numpy as np
 from scipy.spatial.distance import cdist

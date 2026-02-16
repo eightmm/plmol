@@ -370,15 +370,32 @@ class MoleculeFeaturizer:
         return cls._PAINS_CATALOG, cls._BRENK_CATALOG
 
     @staticmethod
-    def _ensure_3d_conformer(mol: Chem.Mol) -> Optional[Chem.Mol]:
-        """Return molecule with 3D conformer, generating one if needed."""
+    def _ensure_3d_conformer(
+        mol: Chem.Mol,
+        random_seed: int = 42,
+        optimize: bool = True,
+    ) -> Optional[Chem.Mol]:
+        """Return molecule with 3D conformer, generating one if needed.
+
+        Canonical conformer generation used across all ligand modules.
+        Uses ETKDGv3 with MMFF optimization by default, falls back to
+        random coordinates if standard embedding fails.
+        """
         if mol.GetNumConformers() > 0:
             return mol
         mol_3d = Chem.AddHs(Chem.RWMol(mol).GetMol())
-        status = AllChem.EmbedMolecule(mol_3d, AllChem.ETKDGv3())
+        params = AllChem.ETKDGv3()
+        params.randomSeed = random_seed
+        status = AllChem.EmbedMolecule(mol_3d, params)
         if status == -1:
-            return None
-        AllChem.MMFFOptimizeMolecule(mol_3d, maxIters=200)
+            # Fallback: random coordinates
+            status = AllChem.EmbedMolecule(
+                mol_3d, randomSeed=random_seed, useRandomCoords=True
+            )
+            if status == -1:
+                return None
+        if optimize:
+            AllChem.MMFFOptimizeMolecule(mol_3d, maxIters=200)
         return mol_3d
 
     def get_admet_features(self, mol: Chem.Mol) -> Dict[str, float]:

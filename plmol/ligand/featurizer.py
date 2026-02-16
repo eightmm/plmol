@@ -491,11 +491,10 @@ class LigandFeaturizer:
     def _generate_conformer(self, mol: "Chem.Mol") -> None:
         if AllChem is None:
             raise ImportError("RDKit AllChem is required to generate conformers.")
-        mol_with_h = Chem.AddHs(mol)
-        AllChem.EmbedMolecule(mol_with_h, AllChem.ETKDG())
-        AllChem.UFFOptimizeMolecule(mol_with_h)
-        mol.RemoveAllConformers()
-        mol.AddConformer(mol_with_h.GetConformer(), assignId=True)
+        mol_3d = MoleculeFeaturizer._ensure_3d_conformer(mol)
+        if mol_3d is not None and mol_3d.GetNumConformers() > 0:
+            mol.RemoveAllConformers()
+            mol.AddConformer(mol_3d.GetConformer(), assignId=True)
 
     def _build_surface_cache_key(
         self,

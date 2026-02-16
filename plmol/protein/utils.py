@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from ..cache import LRUCache
 from ..constants import (
     AMINO_ACID_3TO1,
     AMINO_ACID_3_TO_INT,
@@ -236,8 +237,8 @@ class PDBParser:
         residues: Dictionary mapping (chain, resnum) to ParsedResidue
     """
 
-    # Class-level cache for parsed PDB files
-    _cache: Dict[str, 'PDBParser'] = {}
+    # Class-level cache for parsed PDB files (bounded to prevent memory leaks)
+    _cache: LRUCache[str, 'PDBParser'] = LRUCache(max_size=64)
 
     def __init__(self, pdb_path: str, skip_cache: bool = False):
         """
@@ -258,13 +259,14 @@ class PDBParser:
             raise FileNotFoundError(f"PDB file not found: {self.pdb_path}")
 
         # Check if cached
-        if not skip_cache and self.pdb_path in PDBParser._cache:
-            cached = PDBParser._cache[self.pdb_path]
-            self._all_atoms = cached._all_atoms
-            self._protein_atoms = cached._protein_atoms
-            self._residues = cached._residues
-            self._lines = cached._lines
-            return
+        if not skip_cache:
+            cached = PDBParser._cache.get(self.pdb_path)
+            if cached is not None:
+                self._all_atoms = cached._all_atoms
+                self._protein_atoms = cached._protein_atoms
+                self._residues = cached._residues
+                self._lines = cached._lines
+                return
 
         # Parse PDB file
         self._lines: List[str] = []
@@ -276,7 +278,7 @@ class PDBParser:
 
         # Cache if requested
         if not skip_cache:
-            PDBParser._cache[self.pdb_path] = self
+            PDBParser._cache.set(self.pdb_path, self)
 
     def _parse(self):
         """Parse the PDB file."""

@@ -756,20 +756,16 @@ class MoleculeGraphFeaturizer:
 
         # Generate coordinates on a copy to avoid modifying original
         try:
-            mol_copy = Chem.RWMol(mol)
-            mol_copy = mol_copy.GetMol()
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                AllChem.EmbedMolecule(mol_copy, randomSeed=42, useRandomCoords=True)
-                if mol_copy.GetNumConformers() > 0:
-                    AllChem.UFFOptimizeMolecule(mol_copy, maxIters=200)
-                    conf = mol_copy.GetConformer(0)
-                    coords = []
-                    for i in range(num_atoms):
-                        pos = conf.GetAtomPosition(i)
-                        coords.append([pos.x, pos.y, pos.z])
-                    return torch.tensor(coords, dtype=torch.float32)
-        except (RuntimeError, ValueError):
+            from .base import MoleculeFeaturizer
+            mol_3d = MoleculeFeaturizer._ensure_3d_conformer(mol)
+            if mol_3d is not None and mol_3d.GetNumConformers() > 0:
+                conf = mol_3d.GetConformer(0)
+                coords = []
+                for i in range(num_atoms):
+                    pos = conf.GetAtomPosition(i)
+                    coords.append([pos.x, pos.y, pos.z])
+                return torch.tensor(coords, dtype=torch.float32)
+        except (RuntimeError, ValueError, ImportError):
             logger.debug("3D coordinate generation failed, using zero coordinates")
 
         return torch.zeros((num_atoms, 3), dtype=torch.float32)
