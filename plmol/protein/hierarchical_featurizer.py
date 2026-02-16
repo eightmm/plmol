@@ -20,7 +20,7 @@ Usage:
     atom_residue_types = data.atom_residue_types  # [num_atoms] - residue indices (0-21)
 
     # Residue features
-    residue_features = data.residue_features # [num_residues, 76]
+    residue_features = data.residue_features # [num_residues, 81]
     esmc_embeddings = data.esmc_embeddings   # [num_residues, 1152]
     esm3_embeddings = data.esm3_embeddings   # [num_residues, 1536]
 
@@ -81,7 +81,7 @@ class HierarchicalProteinData:
         atom_names: List[str] - PDB atom names (CA, CB, etc.)
 
     Residue-level tensors:
-        residue_features: [num_residues, 76] - Residue feature vectors
+        residue_features: [num_residues, 81] - Residue feature vectors
         residue_ca_coords: [num_residues, 3] - CA coordinates
         residue_sc_coords: [num_residues, 3] - Sidechain centroid coordinates
         residue_names: List[str] - Residue names (ALA, GLY, etc.)
@@ -113,7 +113,7 @@ class HierarchicalProteinData:
     atom_names: List[str]               # atom names (CA, CB, etc.)
 
     # Residue-level
-    residue_features: torch.Tensor      # [N_res, 76]
+    residue_features: torch.Tensor      # [N_res, 81]
     residue_ca_coords: torch.Tensor     # [N_res, 3]
     residue_sc_coords: torch.Tensor     # [N_res, 3]
     residue_names: List[str]
@@ -341,7 +341,7 @@ class HierarchicalFeaturizer:
 
     Combines:
         - AtomFeaturizer for protein-specific atom tokens (187 classes)
-        - ResidueFeaturizer for residue-level features (76 dim + 31x3 vectors)
+        - ResidueFeaturizer for residue-level features (81 dim + 31x3 vectors)
         - DualESMFeaturizer for ESMC + ESM3 embeddings
 
     Args:
@@ -358,7 +358,7 @@ class HierarchicalFeaturizer:
             - atom_residue_types: [N_atom] - Residue type indices (0-21, 22 classes)
 
         Residue features (from ResidueFeaturizer):
-            - residue_features: [N_res, 76] scalar features
+            - residue_features: [N_res, 81] scalar features
             - residue_vector_features: [N_res, 31, 3] vector features
 
         ESM embeddings (6 tensors):
@@ -455,7 +455,7 @@ class HierarchicalFeaturizer:
         )
 
         # Concatenate scalar features
-        residue_one_hot, terminal_flags, self_distance, degree_feature, has_chi, sasa, rf_distance = scalar_features
+        residue_one_hot, terminal_flags, self_distance, degree_feature, has_chi, sasa, rf_distance, physchem = scalar_features
         residue_features = torch.cat([
             residue_one_hot.float(),      # 21
             terminal_flags.float(),       # 2
@@ -464,7 +464,8 @@ class HierarchicalFeaturizer:
             has_chi.float(),              # 5
             sasa,                         # 10
             rf_distance,                  # 8
-        ], dim=-1)  # Total: 76
+            physchem,                     # 5
+        ], dim=-1)  # Total: 81
 
         # Residue coordinates: CA and sidechain centroid
         residue_ca_coords = residue_coords_full[:, 1, :]   # CA atom (index 1)

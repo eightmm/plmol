@@ -2,7 +2,7 @@
 Ligand Representation
 """
 from ..base import BaseMolecule
-from typing import Any, Dict, Iterable, Optional, Union
+from typing import Any, Dict, Iterable, Optional, Tuple, Union
 import numpy as np
 import torch
 

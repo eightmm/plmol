@@ -7,7 +7,10 @@ import math
 import torch
 import numpy as np
 from typing import Dict, Tuple, Optional, List
-import freesasa
+try:
+    import freesasa
+except ImportError:
+    freesasa = None
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +175,11 @@ class AtomFeaturizer:
                     - 'radius': Atomic radii
         """
         # Calculate SASA using FreeSASA
+        if freesasa is None:
+            raise ImportError(
+                "freesasa is required for atom-level SASA calculation. "
+                "Install it with: pip install freesasa"
+            )
         structure = freesasa.Structure(pdb_file)
         result = freesasa.calc(structure)
 

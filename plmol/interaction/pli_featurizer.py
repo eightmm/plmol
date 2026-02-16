@@ -86,7 +86,7 @@ class PLInteractionFeaturizer:
         5. Store angles in edge features
         6. Output graph uses heavy atom indices only
 
-    Features include (Total: 73 dims):
+    Features include (Total: 74 dims):
         - Interaction type one-hot (7 dims)
         - Distance and angle (4 dims): distance, angle, has_valid_angle, angle_type
         - Element types one-hot (20 dims): protein (10) + ligand (10)
@@ -96,6 +96,7 @@ class PLInteractionFeaturizer:
         - Ring membership + degree (4 dims)
         - Residue type one-hot (21 dims)
         - Is backbone flag (1 dim)
+        - Interaction strength (1 dim): Gaussian decay from ideal distance
 
     Examples:
         >>> featurizer = PLInteractionFeaturizer(protein_mol, ligand_mol)
