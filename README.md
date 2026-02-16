@@ -42,7 +42,7 @@ result = cx.featurize(requests="all")
 | Component | Modes | Key Outputs |
 |-----------|-------|-------------|
 | **Protein** | `graph` (residue/atom), `backbone`, `surface`, `voxel`, `sequence` | Residue graph (81-dim nodes, 39-dim edges), atom graph (187 tokens), SE(3)-invariant backbone, MaSIF surface mesh |
-| **Ligand** | `graph`, `fingerprint`, `surface`, `voxel`, `smiles` | Dense adjacency (N, N, 37), node features (N, 98), 62-dim descriptors, ECFP4/6, MACCS, ErG |
+| **Ligand** | `graph`, `fingerprint`, `fragment`, `surface`, `voxel`, `smiles` | Dense adjacency (N, N, 37), node features (N, 98), 62-dim descriptors, ECFP4/6, MACCS, ErG, rotatable-bond fragments |
 | **Interaction** | pharmacophore, contact | Bipartite edges (E, 74), 7 interaction types (H-bond, hydrophobic, pi-stacking, salt bridge, ...) |
 
 All graph modes support `distance_cutoff` and `knn_cutoff` (union strategy) for flexible edge construction.
@@ -59,7 +59,7 @@ plmol-batch-ligand-featurize --input_dir sdfs/ --output_dir features/
 Detailed API reference with feature dimensions, index ranges, and parameters:
 
 - [Protein API](docs/protein.md) — graph (residue/atom), backbone, surface, voxel, sequence, ESM embeddings
-- [Ligand API](docs/ligand.md) — graph, fingerprint, surface, voxel
+- [Ligand API](docs/ligand.md) — graph, fingerprint, fragment, surface, voxel
 - [Complex API](docs/complex.md) — interaction detection, contact edges, pocket extraction
 
 ## License

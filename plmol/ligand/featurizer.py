@@ -19,6 +19,7 @@ except ImportError:  # pragma: no cover - optional dependency
     AllChem = None
 
 from .descriptors import MoleculeFeaturizer
+from .fragment import fragment_on_rotatable_bonds
 from ..surface import build_ligand_surface
 from ..voxel import build_ligand_voxel
 from ..constants import (
@@ -156,6 +157,9 @@ class LigandFeaturizer:
             results["voxel"] = self.get_voxel(
                 generate_conformer=generate_conformer, **voxel_kw
             )
+
+        if "fragment" in modes:
+            results["fragment"] = self.get_fragment()
 
         return results
 
@@ -408,6 +412,17 @@ class LigandFeaturizer:
             cutoff_sigma=cutoff_sigma,
             charge_method=charge_method,
         )
+
+    def get_fragment(
+        self,
+        mol_or_smiles: Optional[Union[str, "Chem.Mol"]] = None,
+        min_fragment_size: int = 1,
+    ) -> Dict[str, Any]:
+        """Return rotatable-bond fragmentation result."""
+        mol = self._resolve_mol(mol_or_smiles)
+        if mol is None:
+            raise ValueError("No ligand set for fragmentation.")
+        return fragment_on_rotatable_bonds(mol, min_fragment_size=min_fragment_size)
 
     def _resolve_mol(
         self, mol_or_smiles: Optional[Union[str, "Chem.Mol"]]

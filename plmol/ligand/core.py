@@ -28,6 +28,7 @@ class Ligand(BaseMolecule):
         super().__init__()
         self._rdmol = rdmol
         self._fingerprint = None
+        self._fragment = None
         self._smiles: Optional[str] = None
         self._featurizer: Optional[LigandFeaturizer] = None
         self._featurizer_mol = None
@@ -157,6 +158,17 @@ class Ligand(BaseMolecule):
             self.featurize(mode="fingerprint")
         return self._fingerprint
 
+    @property
+    def fragment(self) -> Optional[Dict[str, Any]]:
+        """Return fragment representation, computing lazily if needed."""
+        if self._fragment is None:
+            if self._rdmol is None:
+                raise ValueError(
+                    "Ligand has no RDKit molecule. Initialize from SMILES/SDF before requesting fragments."
+                )
+            self.featurize(mode="fragment")
+        return self._fragment
+
     def _get_featurizer(self, add_hs: Optional[bool] = None) -> LigandFeaturizer:
         if self._rdmol is None:
             raise ValueError("Ligand has no RDKit molecule. Initialize from SMILES/SDF first.")
@@ -270,5 +282,9 @@ class Ligand(BaseMolecule):
             if surface is not None:
                 self._surface = surface
             results["surface"] = surface
+
+        if "fragment" in modes:
+            self._fragment = featurizer.get_fragment()
+            results["fragment"] = self._fragment
 
         return results

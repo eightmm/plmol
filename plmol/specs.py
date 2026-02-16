@@ -18,9 +18,9 @@ class FeatureSpec:
 
 LIGAND_SPEC = FeatureSpec(
     name="ligand",
-    allowed_modes=("graph", "surface", "voxel", "fingerprint", "smiles", "sequence", "all"),
+    allowed_modes=("graph", "surface", "voxel", "fingerprint", "smiles", "sequence", "fragment", "all"),
     default_modes=("graph", "fingerprint", "smiles", "sequence"),
-    output_keys=("graph", "surface", "voxel", "fingerprint", "smiles", "sequence"),
+    output_keys=("graph", "surface", "voxel", "fingerprint", "smiles", "sequence", "fragment"),
 )
 
 PROTEIN_SPEC = FeatureSpec(

@@ -23,7 +23,6 @@ result = ligand.featurize(
     graph_kwargs={},               # graph options
     surface_kwargs={},             # surface options
     fingerprint_kwargs={},         # fingerprint options
-    voxel_kwargs={},               # voxel options
     generate_conformer=False,      # auto-generate 3D if missing
     add_hs=None,                   # hydrogen override
 )
@@ -33,11 +32,13 @@ result = ligand.featurize(
 |------|-----------|-------------|
 | `"graph"` | `"graph"` | Dense adjacency graph (node_features, adjacency, bond_mask, ...) |
 | `"fingerprint"` | `"fingerprint"` | Descriptors + ECFP4/6, MACCS, RDKit FP, AtomPair, ErG |
-| `"surface"` | `"surface"` | Molecular surface mesh |
-| `"voxel"` | `"voxel"` | 3D voxel grid |
+| `"fragment"` | `"fragment"` | Rotatable-bond fragmentation (fragment SMILES, adjacency, atom mapping) |
+| `"surface"` | `"surface"` | Molecular surface mesh (requires 3D conformer) |
 | `"smiles"` | `"smiles"` | Canonical SMILES string |
 | `"sequence"` | `"sequence"` | Same as SMILES (ligand alias) |
-| `"all"` | all above | All modes combined |
+| `"all"` | graph + fingerprint + surface + smiles + sequence | Default modes (fragment must be explicitly requested) |
+
+> **Note**: Voxel mode is available through `LigandFeaturizer` (see [Low-Level Featurizers](#low-level-featurizers)).
 
 Lazy properties:
 
@@ -47,6 +48,7 @@ ligand.sequence     # str (alias for smiles)
 ligand.graph        # dict (auto-computed)
 ligand.surface      # dict (auto-computed, needs conformer)
 ligand.fingerprint  # dict (auto-computed)
+ligand.fragment     # dict (auto-computed)
 ```
 
 ---
@@ -197,11 +199,63 @@ All values normalized to [0, 1].
 
 ---
 
-## Surface Mode
+## Fragment Mode
+
+Fragments a molecule by cutting at rotatable bonds (SMARTS: `[!$(*#*)&!D1]-!@[!$(*#*)&!D1]`). Produces a fragment-level graph where each fragment is a rigid substructure connected by rotatable bonds.
 
 ```python
-ligand.generate_conformer()  # needed if from SMILES
-result = ligand.featurize(mode="surface")
+result = ligand.featurize(mode="fragment")
+frag = result["fragment"]
+```
+
+### Output
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `fragment_smiles` | `List[str]` | SMILES string for each fragment |
+| `atom_to_fragment` | `ndarray (N,)` int64 | Maps each atom index to its fragment index |
+| `fragment_adjacency` | `ndarray (F, F)` int64 | Symmetric binary adjacency between fragments |
+| `num_fragments` | `int` | Number of fragments (F) |
+| `num_rotatable_bonds` | `int` | Number of rotatable bonds detected |
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `min_fragment_size` | `int` | `1` | Fragments smaller than this are merged into their largest neighbour |
+
+`min_fragment_size` is available through `LigandFeaturizer` or the low-level function:
+
+```python
+from plmol import LigandFeaturizer
+featurizer = LigandFeaturizer(mol)
+frag = featurizer.get_fragment(min_fragment_size=3)
+```
+
+### Low-Level Function
+
+```python
+from rdkit import Chem
+from plmol.ligand import fragment_on_rotatable_bonds
+
+mol = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
+result = fragment_on_rotatable_bonds(mol, min_fragment_size=1)
+```
+
+### Edge Cases
+
+- **No rotatable bonds** (e.g., benzene): Returns 1 fragment containing the whole molecule.
+- **Single-atom molecule**: Returns 1 fragment, empty adjacency `(1, 1)`.
+- **`min_fragment_size > 1`**: Small fragments are iteratively merged into their largest adjacent fragment. All atoms remain mapped.
+
+---
+
+## Surface Mode
+
+Requires a 3D conformer. Use `generate_conformer=True` or call `ligand.generate_conformer()` first.
+
+```python
+result = ligand.featurize(mode="surface", generate_conformer=True)
 surface = result["surface"]
 ```
 
@@ -214,10 +268,36 @@ surface = result["surface"]
 
 ---
 
-## Voxel Mode
+## Low-Level Featurizers
+
+### LigandFeaturizer
+
+Wraps all ligand representations including voxel mode.
 
 ```python
-result = ligand.featurize(mode="voxel", generate_conformer=True)
+from plmol import LigandFeaturizer
+
+featurizer = LigandFeaturizer("CCO")
+
+# Individual representations
+graph = featurizer.get_graph(standardized=True)
+fp = featurizer.get_morgan_fingerprint()
+frag = featurizer.get_fragment(min_fragment_size=1)
+surface = featurizer.get_surface(generate_conformer=True)
+voxel = featurizer.get_voxel(generate_conformer=True)
+
+# Batch featurize (supports voxel via voxel_kwargs)
+result = featurizer.featurize(
+    mode=["graph", "fingerprint", "voxel"],
+    voxel_kwargs={"resolution": 1.0, "box_size": 24},
+    generate_conformer=True,
+)
+```
+
+#### Voxel Mode (LigandFeaturizer only)
+
+```python
+result = featurizer.featurize(mode="voxel", generate_conformer=True)
 voxel = result["voxel"]
 ```
 
@@ -230,34 +310,29 @@ Channels (16): occupancy, atom type (6), charge, hydrophobicity, HBD, HBA, aroma
 | `box_size` | 24 | Grid dimension per axis. None for adaptive |
 | `charge_method` | `"gasteiger"` | `"gasteiger"` or `"mmff94"` |
 
----
+### MoleculeFeaturizer
 
-## Low-Level Featurizers
-
-```python
-from plmol import (
-    MoleculeFeaturizer,        # Molecular features + fingerprints
-    MoleculeGraphFeaturizer,   # Graph node/edge features
-    LigandFeaturizer,          # Ligand-specific wrapper (graph + surface + FP)
-)
-```
-
-### MoleculeFeaturizer (Object-Oriented)
+Descriptors and fingerprints.
 
 ```python
 from plmol import MoleculeFeaturizer
 
 featurizer = MoleculeFeaturizer("CCO")
 features = featurizer.get_features()           # descriptors + fingerprints
-node, edge, adj = featurizer.get_graph()      # graph representation
-descriptors = featurizer.get_descriptors()    # 62-dim descriptor tensor
-ecfp4 = featurizer.get_morgan_fingerprint()   # ECFP4 (2048-dim)
-```
+node, edge, adj = featurizer.get_graph()       # graph representation
+descriptors = featurizer.get_descriptors()     # 62-dim descriptor tensor
+ecfp4 = featurizer.get_morgan_fingerprint()    # ECFP4 (2048-dim)
 
-### MoleculeFeaturizer (Functional)
-
-```python
+# Functional style (pass molecule per call)
 featurizer = MoleculeFeaturizer()
 features = featurizer.get_features("CCO")
 node, edge, adj = featurizer.get_graph("CCO", distance_cutoff=5.0, knn_cutoff=8)
+```
+
+### MoleculeGraphFeaturizer
+
+Graph node/edge features (used internally by `MoleculeFeaturizer`).
+
+```python
+from plmol import MoleculeGraphFeaturizer
 ```

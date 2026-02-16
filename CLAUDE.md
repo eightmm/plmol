@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is plmol?
 
-A unified protein-ligand feature extraction toolkit for ML. Converts PDB files and SMILES into tensors (graphs, fingerprints, surfaces, voxels) ready for GNNs, transformers, and 3D CNNs.
+A unified protein-ligand feature extraction toolkit for ML. Converts PDB files and SMILES into tensors (graphs, fingerprints, fragments, surfaces, voxels) ready for GNNs, transformers, and 3D CNNs.
 
 ## Commands
 
@@ -52,10 +52,11 @@ Key internal flow: PDB file → `PDBStandardizer` → `PDBParser` (utils.py, cac
 
 ### Ligand Pipeline
 
-`Ligand.featurize(mode=...)` delegates to `LigandFeaturizer` which wraps two core classes:
+`Ligand.featurize(mode=...)` delegates to `LigandFeaturizer` which wraps specialized classes:
 
 - **`MoleculeFeaturizer`** (ligand/descriptors.py): Descriptors (62-dim) and fingerprints (ECFP4/6, MACCS, RDKit, ERG, + optional VSA/MQN)
 - **`MoleculeGraphFeaturizer`** (ligand/graph.py): Dense adjacency `(N, N, 37)` with node features `(N, 98)`, coords, distance matrix
+- **`fragment_on_rotatable_bonds`** (ligand/fragment.py): Cuts molecule at rotatable bonds → fragment SMILES, atom-to-fragment mapping, fragment adjacency matrix
 
 The graph uses **dense adjacency** (not sparse edge_index). Channels [0:27] = bond features, [27:37] = 3D pair features.
 
