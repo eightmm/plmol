@@ -47,16 +47,6 @@ result = cx.featurize(requests="all")
 
 All graph modes support `distance_cutoff` and `knn_cutoff` (union strategy) for flexible edge construction.
 
-## ESM Embeddings
-
-```python
-from plmol import ESMFeaturizer
-
-esm = ESMFeaturizer(model_type="esmc", model_name="esmc_600m", device="cuda")
-embeddings = esm.extract("MKFLIL...")
-# embeddings["embeddings"]: (L, 1152)
-```
-
 ## Batch Processing
 
 ```bash
@@ -68,7 +58,7 @@ plmol-batch-ligand-featurize --input_dir sdfs/ --output_dir features/
 
 Detailed API reference with feature dimensions, index ranges, and parameters:
 
-- [Protein API](docs/protein.md) — graph (residue/atom), backbone, surface, voxel, sequence
+- [Protein API](docs/protein.md) — graph (residue/atom), backbone, surface, voxel, sequence, ESM embeddings
 - [Ligand API](docs/ligand.md) — graph, fingerprint, surface, voxel
 - [Complex & Interaction API](docs/complex.md) — interaction detection, contact edges, pocket extraction
 
