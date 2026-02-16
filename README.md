@@ -60,7 +60,7 @@ Detailed API reference with feature dimensions, index ranges, and parameters:
 
 - [Protein API](docs/protein.md) — graph (residue/atom), backbone, surface, voxel, sequence, ESM embeddings
 - [Ligand API](docs/ligand.md) — graph, fingerprint, surface, voxel
-- [Complex & Interaction API](docs/complex.md) — interaction detection, contact edges, pocket extraction
+- [Complex API](docs/complex.md) — interaction detection, contact edges, pocket extraction
 
 ## License
 

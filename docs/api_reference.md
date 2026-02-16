@@ -7,7 +7,7 @@
 
 - [Protein API](protein.md) — Initialization, graph (residue/atom), backbone, surface, voxel, sequence, pocket, ESM embeddings, geometry functions, constants
 - [Ligand API](ligand.md) — Initialization, graph, fingerprint, surface, voxel, low-level featurizers
-- [Complex & Interaction API](complex.md) — Complex initialization, combined featurization, interaction features, contact edges, pocket extraction
+- [Complex API](complex.md) — Initialization, combined featurization, interaction features, contact edges, pocket extraction
 
 ## Quick Start
 

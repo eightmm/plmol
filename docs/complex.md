@@ -1,4 +1,4 @@
-# Complex & Interaction API Reference
+# Complex API Reference
 
 ## Initialization
 
