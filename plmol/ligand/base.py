@@ -491,7 +491,7 @@ class MoleculeFeaturizer:
                 features['radius_of_gyration'] = min(
                     rdMolDescriptors.CalcRadiusOfGyration(mol_3d) / 10.0, 1.0
                 )
-            except Exception:
+            except (RuntimeError, ValueError):
                 for k in ('npr1', 'npr2', 'asphericity', 'eccentricity', 'radius_of_gyration'):
                     features[k] = 0.0
         else:

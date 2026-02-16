@@ -241,14 +241,14 @@ class AtomFeaturizer:
                 - 'is_hbond_acceptor': H-bond acceptor flag [n_atoms]
                 - 'secondary_structure': SS assignment [n_atoms, 3] (helix/sheet/coil)
         """
-        # Get basic atom features
-        token, coord = self.get_protein_atom_features(pdb_file)
+        # Single PDBParser instance as authoritative source
+        parser = PDBParser(pdb_file)
+
+        # Get basic atom features from parser (not raw PDB lines)
+        token, coord = self.get_protein_atom_features_from_parser(parser)
 
         # Get SASA features
         atom_sasa, atom_info = self.get_atom_sasa(pdb_file)
-
-        # Use PDBParser for enriched per-atom features (single parse)
-        parser = PDBParser(pdb_file)
 
         residue_tokens = []
         atom_elements = []
@@ -259,6 +259,7 @@ class AtomFeaturizer:
         is_hbond_acceptor = []
         atom_names_list = []
         res_names_list = []
+        res_nums_list = []
         chain_ids_list = []
 
         for atom in parser.protein_atoms:
@@ -319,18 +320,19 @@ class AtomFeaturizer:
 
             atom_names_list.append(atom.atom_name)
             res_names_list.append(res_name_clean)
+            res_nums_list.append(atom.res_num)
             chain_ids_list.append(atom.chain_id)
 
-        # Ensure all tensors have the same length
-        orig_token_len = len(token)
-        orig_sasa_len = len(atom_sasa)
-        orig_element_len = len(atom_elements)
-        min_len = min(orig_token_len, orig_sasa_len, orig_element_len)
+        # token and enriched features come from same PDBParser, so they match.
+        # Only SASA (from freesasa) may differ.
+        n_parser = len(token)
+        n_sasa = len(atom_sasa)
+        min_len = min(n_parser, n_sasa)
 
-        if not (orig_token_len == orig_sasa_len == orig_element_len):
+        if n_parser != n_sasa:
             logger.warning(
-                f"Atom count mismatch in {pdb_file}: "
-                f"tokens={orig_token_len}, SASA={orig_sasa_len}, elements={orig_element_len}. "
+                f"SASA atom count mismatch in {pdb_file}: "
+                f"parser={n_parser}, freesasa={n_sasa}. "
                 f"Truncating to {min_len} atoms."
             )
 
@@ -381,10 +383,10 @@ class AtomFeaturizer:
             'secondary_structure': ss,
             'metadata': {
                 'n_atoms': min_len,
-                'residue_names': atom_info['residue_name'][:min_len],
-                'residue_numbers': atom_info['residue_number'][:min_len],
-                'atom_names': atom_info['atom_name'][:min_len],
-                'chain_labels': atom_info['chain_label'][:min_len]
+                'residue_names': res_names_list[:min_len],
+                'residue_numbers': res_nums_list[:min_len],
+                'atom_names': atom_names_list[:min_len],
+                'chain_labels': chain_ids_list[:min_len],
             }
         }
 

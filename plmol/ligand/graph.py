@@ -5,12 +5,15 @@ This module provides atom (node) and bond (edge) feature extraction
 for molecular graph representations.
 """
 
+import logging
 import warnings
 import numpy as np
 import torch
 from rdkit import Chem, RDLogger
 from rdkit.Chem import rdMolDescriptors, rdPartialCharges, AllChem, rdDistGeom
 from typing import Dict, Tuple, Optional
+
+logger = logging.getLogger(__name__)
 
 # Suppress RDKit C++ warnings (e.g., "Molecule does not have explicit Hs")
 RDLogger.DisableLog('rdApp.*')
@@ -117,7 +120,7 @@ class MoleculeGraphFeaturizer:
                 charge = float(atom.GetProp('_GasteigerCharge'))
                 if np.isnan(charge) or np.isinf(charge):
                     charge = 0.0
-            except:
+            except (KeyError, ValueError, RuntimeError):
                 charge = 0.0
             charges[idx] = max(-1.0, min(1.0, charge))
 
@@ -527,40 +530,49 @@ class MoleculeGraphFeaturizer:
         for ring in ring_info.AtomRings():
             ring_atoms.update(ring)
 
-        for idx in range(num_atoms):
-            distances = dm[idx]
-            valid_dist = distances[distances < np.inf]
+        # Vectorized eccentricity and closeness
+        dm_masked = np.where(np.isinf(dm), 0, dm)
+        valid_mask = np.isfinite(dm)
 
-            # Eccentricity
-            if len(valid_dist) > 1:
-                features[idx, 0] = min(np.max(valid_dist) / norm['eccentricity'], 1.0)
+        # Eccentricity: max finite distance per atom
+        dm_for_max = np.where(valid_mask, dm, -np.inf)
+        max_dists = np.max(dm_for_max, axis=1)
+        max_dists[max_dists < 0] = 0
+        features[:, 0] = torch.tensor(
+            np.clip(max_dists / norm['eccentricity'], 0, 1), dtype=torch.float32
+        )
 
-            # Closeness centrality
-            dist_sum = np.sum(valid_dist)
-            if dist_sum > 0:
-                features[idx, 1] = min((num_atoms - 1) / dist_sum, 1.0)
+        # Closeness centrality: (N-1) / sum(finite distances)
+        dist_sums = dm_masked.sum(axis=1)
+        closeness = np.where(dist_sums > 0, (num_atoms - 1) / dist_sums, 0)
+        features[:, 1] = torch.tensor(np.clip(closeness, 0, 1), dtype=torch.float32)
 
-            # Distance to nearest heteroatom
-            if hetero_indices:
-                if idx in hetero_indices:
+        # Distance to nearest heteroatom (vectorized)
+        if hetero_indices:
+            hetero_arr = np.array(hetero_indices)
+            min_hetero_dist = dm[:, hetero_arr].min(axis=1)
+            hetero_set = set(hetero_indices)
+            for idx in range(num_atoms):
+                if idx in hetero_set:
                     features[idx, 3] = 0.0
                 else:
-                    min_dist = min(dm[idx][j] for j in hetero_indices)
-                    features[idx, 3] = min(min_dist / norm['dist_to_special'], 1.0)
-            else:
-                features[idx, 3] = 1.0
+                    features[idx, 3] = min(min_hetero_dist[idx] / norm['dist_to_special'], 1.0)
+        else:
+            features[:, 3] = 1.0
 
-            # Distance to nearest ring atom
-            if ring_atoms:
+        # Distance to nearest ring atom (vectorized)
+        if ring_atoms:
+            ring_arr = np.array(list(ring_atoms))
+            min_ring_dist = dm[:, ring_arr].min(axis=1)
+            for idx in range(num_atoms):
                 if idx in ring_atoms:
                     features[idx, 4] = 0.0
                 else:
-                    min_dist = min(dm[idx][j] for j in ring_atoms)
-                    features[idx, 4] = min(min_dist / norm['dist_to_special'], 1.0)
-            else:
-                features[idx, 4] = 1.0
+                    features[idx, 4] = min(min_ring_dist[idx] / norm['dist_to_special'], 1.0)
+        else:
+            features[:, 4] = 1.0
 
-        # Betweenness centrality
+        # Betweenness centrality (vectorized)
         features[:, 2] = torch.tensor(
             self._calc_betweenness(dm, num_atoms), dtype=torch.float32
         )
@@ -568,21 +580,23 @@ class MoleculeGraphFeaturizer:
         return features
 
     def _calc_betweenness(self, dm: np.ndarray, num_atoms: int) -> np.ndarray:
-        """Calculate betweenness centrality for all atoms."""
+        """Calculate betweenness centrality for all atoms (vectorized)."""
         betweenness = np.zeros(num_atoms)
 
         if num_atoms <= 2:
             return betweenness
 
-        for s in range(num_atoms):
-            for t in range(s + 1, num_atoms):
-                if dm[s, t] == np.inf:
-                    continue
-                for v in range(num_atoms):
-                    if v == s or v == t:
-                        continue
-                    if abs(dm[s, v] + dm[v, t] - dm[s, t]) < 0.01:
-                        betweenness[v] += 1
+        # For each intermediate node v, count how many (s,t) pairs
+        # have shortest path through v: dm[s,v] + dm[v,t] == dm[s,t]
+        for v in range(num_atoms):
+            # dm[s, v] + dm[v, t] for all (s, t) pairs
+            path_via_v = dm[:, v:v+1] + dm[v:v+1, :]  # (N, N) broadcast
+            on_shortest = np.abs(path_via_v - dm) < 0.01  # (N, N) bool
+            # Exclude pairs where v == s or v == t, and only upper triangle
+            on_shortest[v, :] = False
+            on_shortest[:, v] = False
+            # Count upper triangle only (s < t)
+            betweenness[v] = np.sum(np.triu(on_shortest, k=1))
 
         # Normalize
         max_pairs = (num_atoms - 1) * (num_atoms - 2) / 2
@@ -755,8 +769,8 @@ class MoleculeGraphFeaturizer:
                         pos = conf.GetAtomPosition(i)
                         coords.append([pos.x, pos.y, pos.z])
                     return torch.tensor(coords, dtype=torch.float32)
-        except:
-            pass
+        except (RuntimeError, ValueError):
+            logger.debug("3D coordinate generation failed, using zero coordinates")
 
         return torch.zeros((num_atoms, 3), dtype=torch.float32)
 
@@ -888,6 +902,13 @@ class MoleculeGraphFeaturizer:
         dm = self._get_distance_matrix(mol)
         ring_info = mol.GetRingInfo()
 
+        # Precompute once for all bonds (avoid per-bond recomputation)
+        hetero_indices = [i for i, atom in enumerate(mol.GetAtoms())
+                        if atom.GetAtomicNum() not in [1, 6]]
+        ring_atoms = set()
+        for ring in ring_info.AtomRings():
+            ring_atoms.update(ring)
+
         norm = NORM_CONSTANTS
 
         adj = torch.zeros(num_atoms, num_atoms, num_edge_features)
@@ -930,7 +951,8 @@ class MoleculeGraphFeaturizer:
             features.append(dist_norm)
             features.extend(
                 self._get_bond_topological_features(
-                    mol, bond, src_idx, dst_idx, dm, ring_info
+                    mol, bond, src_idx, dst_idx, dm, ring_info,
+                    hetero_indices, ring_atoms
                 )
             )
 
@@ -958,7 +980,8 @@ class MoleculeGraphFeaturizer:
 
     def _get_bond_topological_features(
         self, mol, bond, src_idx: int, dst_idx: int,
-        dm: np.ndarray, ring_info
+        dm: np.ndarray, ring_info,
+        hetero_indices: list = None, ring_atoms: set = None,
     ) -> list:
         """
         Compute topological features for a bond (6 dimensions).
@@ -975,25 +998,22 @@ class MoleculeGraphFeaturizer:
         features = []
         norm = NORM_CONSTANTS
 
-        # Bond betweenness (simplified)
+        # Bond betweenness (vectorized)
         betweenness = 0.0
         if dm is not None and num_atoms > 2:
-            count = 0
-            for s in range(num_atoms):
-                for t in range(s + 1, num_atoms):
-                    if dm[s, t] == np.inf:
-                        continue
-                    # Check if this bond is on shortest path s->t
-                    d_via_bond = min(dm[s, src_idx] + 1 + dm[dst_idx, t],
-                                    dm[s, dst_idx] + 1 + dm[src_idx, t])
-                    if abs(d_via_bond - dm[s, t]) < 0.01:
-                        count += 1
+            # For each (s,t) pair, check if shortest path goes through this bond
+            d_via_fwd = dm[:, src_idx:src_idx+1] + 1 + dm[dst_idx:dst_idx+1, :]  # (N, N)
+            d_via_rev = dm[:, dst_idx:dst_idx+1] + 1 + dm[src_idx:src_idx+1, :]  # (N, N)
+            d_via_bond = np.minimum(d_via_fwd, d_via_rev)
+            on_path = np.abs(d_via_bond - dm) < 0.01
+            # Only upper triangle, exclude inf pairs
+            valid = np.isfinite(dm)
+            count = np.sum(np.triu(on_path & valid, k=1))
             max_pairs = (num_atoms - 1) * (num_atoms - 2) / 2
             betweenness = count / max_pairs if max_pairs > 0 else 0
         features.append(min(betweenness, 1.0))
 
         # Is bridge bond (removal disconnects graph) - approximation
-        # A bond is likely a bridge if it's not in any ring
         is_bridge = not bond.IsInRing()
         features.append(float(is_bridge))
 
@@ -1001,31 +1021,33 @@ class MoleculeGraphFeaturizer:
         n_rings = ring_info.NumBondRings(bond.GetIdx())
         features.append(min(n_rings / 3.0, 1.0))
 
-        # Shortest path to heteroatom
-        hetero_indices = [i for i, atom in enumerate(mol.GetAtoms())
-                        if atom.GetAtomicNum() not in [1, 6]]
+        # Shortest path to heteroatom (use precomputed indices)
+        if hetero_indices is None:
+            hetero_indices = [i for i, atom in enumerate(mol.GetAtoms())
+                            if atom.GetAtomicNum() not in [1, 6]]
         if hetero_indices and dm is not None:
             if src_idx in hetero_indices or dst_idx in hetero_indices:
                 dist_to_hetero = 0
             else:
-                dist_src = min(dm[src_idx][j] for j in hetero_indices)
-                dist_dst = min(dm[dst_idx][j] for j in hetero_indices)
-                dist_to_hetero = min(dist_src, dist_dst)
+                hetero_arr = np.array(hetero_indices)
+                dist_to_hetero = min(dm[src_idx, hetero_arr].min(),
+                                    dm[dst_idx, hetero_arr].min())
             features.append(min(dist_to_hetero / norm['path_length_max'], 1.0))
         else:
             features.append(1.0)
 
-        # Shortest path to ring atom
-        ring_atoms = set()
-        for ring in ring_info.AtomRings():
-            ring_atoms.update(ring)
+        # Shortest path to ring atom (use precomputed set)
+        if ring_atoms is None:
+            ring_atoms = set()
+            for ring in ring_info.AtomRings():
+                ring_atoms.update(ring)
         if ring_atoms and dm is not None:
             if src_idx in ring_atoms or dst_idx in ring_atoms:
                 dist_to_ring = 0
             else:
-                dist_src = min(dm[src_idx][j] for j in ring_atoms)
-                dist_dst = min(dm[dst_idx][j] for j in ring_atoms)
-                dist_to_ring = min(dist_src, dist_dst)
+                ring_arr = np.array(list(ring_atoms))
+                dist_to_ring = min(dm[src_idx, ring_arr].min(),
+                                  dm[dst_idx, ring_arr].min())
             features.append(min(dist_to_ring / norm['path_length_max'], 1.0))
         else:
             features.append(1.0)

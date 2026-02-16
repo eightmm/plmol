@@ -66,8 +66,8 @@ def load_ligand(file_path: Path) -> Optional[Chem.Mol]:
             mol = Chem.MolFromMolFile(str(file_path), removeHs=False)
         elif ext == '.pdb':
             mol = Chem.MolFromPDBFile(str(file_path), removeHs=False)
-    except Exception:
-        pass
+    except (OSError, ValueError, RuntimeError) as e:
+        logger.warning(f"Failed to load ligand file {file_path}: {e}")
 
     return mol
 
