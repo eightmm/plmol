@@ -55,7 +55,7 @@ Key internal flow: PDB file → `PDBStandardizer` → `PDBParser` (utils.py, cac
 `Ligand.featurize(mode=...)` delegates to `LigandFeaturizer` which wraps two core classes:
 
 - **`MoleculeFeaturizer`** (ligand/descriptors.py): Descriptors (62-dim) and fingerprints (ECFP4/6, MACCS, RDKit, ERG, + optional VSA/MQN)
-- **`MoleculeGraphFeaturizer`** (ligand/graph.py): Dense adjacency `(N, N, 37)` with node features `(N, 78)`, coords, distance matrix
+- **`MoleculeGraphFeaturizer`** (ligand/graph.py): Dense adjacency `(N, N, 37)` with node features `(N, 98)`, coords, distance matrix
 
 The graph uses **dense adjacency** (not sparse edge_index). Channels [0:27] = bond features, [27:37] = 3D pair features.
 
@@ -79,7 +79,7 @@ Custom hierarchy in `errors.py`: `PlmolError` → `InputError` (bad user input),
 - **Residue graph uses tuples**: `get_features()` returns `(node_dict, edge_dict)` where values contain tuples of tensors (scalar_features, vector_features).
 - **PDB standardization**: Enabled by default. Normalizes residue names (HIS variants → HIS, modified residues → standard), removes waters/metals/ligands.
 - **PDB parsing is centralized**: All modules use `PDBParser` and `parse_pdb_line()` from `protein/utils.py`. The `ParsedAtom` dataclass is the single source of truth for atom data.
-- **Feature dimension docs**: Detailed dimension breakdowns with index ranges are in `docs/api_reference.md`.
+- **Feature dimension docs**: Detailed dimension breakdowns with index ranges are in `docs/protein.md`, `docs/ligand.md`, `docs/complex.md`.
 
 ## Dependencies
 
