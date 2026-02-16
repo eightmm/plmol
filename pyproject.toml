@@ -70,3 +70,23 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["plmol*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["plmol"]
+omit = [
+    "plmol/cli/*",
+    "plmol/surface/features.py",
+    "plmol/voxel/features.py",
+    "plmol/protein/esm_featurizer.py",
+    "plmol/protein/hierarchical_featurizer.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__",
+    "raise ImportError",
+]
