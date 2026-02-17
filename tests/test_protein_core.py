@@ -62,6 +62,25 @@ class TestProteinFromPDB:
         graph = result["graph"]
         assert graph["level"] == "atom"
 
+    def test_featurize_graph_atom_bidirectional_mapping(self, mini_pdb):
+        PDBParser.clear_cache()
+        p = Protein.from_pdb(mini_pdb, standardize=False)
+        result = p.featurize(mode="graph", graph_kwargs={"level": "atom"})
+        graph = result["graph"]
+        # Both keys present
+        assert "atom_to_residue" in graph
+        assert "residue_atom_indices" in graph
+        # atom_to_residue is the same tensor as residue_count
+        assert graph["atom_to_residue"] is graph["residue_count"]
+        # Reverse mapping is consistent with forward mapping
+        for res_idx, atoms in enumerate(graph["residue_atom_indices"]):
+            for a in atoms:
+                assert graph["atom_to_residue"][a].item() == res_idx
+        # All atoms are covered
+        all_atoms = sorted(a for atoms in graph["residue_atom_indices"] for a in atoms)
+        num_atoms = graph["atom_to_residue"].shape[0]
+        assert all_atoms == list(range(num_atoms))
+
     def test_featurize_backbone(self, mini_pdb):
         PDBParser.clear_cache()
         p = Protein.from_pdb(mini_pdb, standardize=False)

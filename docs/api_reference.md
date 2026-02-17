@@ -66,7 +66,7 @@ plmol/
 │   ├── pli_featurizer.py           # PLInteractionFeaturizer
 │   └── pocket_extractor.py         # Pocket extraction
 ├── surface/
-│   └── __init__.py                 # Surface building (mesh / point cloud)
+│   └── __init__.py                 # Surface building (point cloud)
 ├── voxel/
 │   └── __init__.py                 # Voxel building (3D grid)
 ├── io/

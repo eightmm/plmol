@@ -28,7 +28,7 @@ def main() -> None:
         else:
             print(
                 "Protein surface keys:",
-                sorted([k for k in protein_surface.keys() if k in {"points", "faces", "normals", "verts"}]),
+                sorted([k for k in protein_surface.keys() if k in {"points", "normals", "verts"}]),
             )
     except ImportError as exc:
         print(f"Protein surface unavailable: {exc}")
@@ -40,7 +40,7 @@ def main() -> None:
         else:
             print(
                 "Ligand surface keys:",
-                sorted([k for k in ligand_surface.keys() if k in {"points", "faces", "normals", "verts"}]),
+                sorted([k for k in ligand_surface.keys() if k in {"points", "normals", "verts"}]),
             )
     except (ImportError, ValueError) as exc:
         print(f"Ligand surface unavailable: {exc}")

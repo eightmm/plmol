@@ -167,6 +167,8 @@ class Protein(BaseMolecule):
             # Node index features
             "residue_number": node.get("residue_number"),
             "residue_count": node.get("residue_count"),
+            "atom_to_residue": node.get("atom_to_residue"),
+            "residue_atom_indices": node.get("residue_atom_indices"),
             # Edge features
             "edge_index": edge_index,
             "edge_distances": edge.get("edge_distances"),

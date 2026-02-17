@@ -33,7 +33,7 @@ result = ligand.featurize(
 | `"graph"` | `"graph"` | Dense adjacency graph (node_features, adjacency, bond_mask, ...) |
 | `"fingerprint"` | `"fingerprint"` | Descriptors + ECFP4/6, MACCS, RDKit FP, AtomPair, ErG |
 | `"fragment"` | `"fragment"` | Rotatable-bond fragmentation (fragment SMILES, adjacency, atom mapping) |
-| `"surface"` | `"surface"` | Molecular surface mesh (requires 3D conformer) |
+| `"surface"` | `"surface"` | dMaSIF point cloud surface (requires 3D conformer) |
 | `"smiles"` | `"smiles"` | Canonical SMILES string |
 | `"sequence"` | `"sequence"` | Same as SMILES (ligand alias) |
 | `"all"` | graph + fingerprint + surface + smiles + sequence | Default modes (fragment must be explicitly requested) |
@@ -214,6 +214,7 @@ frag = result["fragment"]
 |-----|------|-------------|
 | `fragment_smiles` | `List[str]` | SMILES string for each fragment |
 | `atom_to_fragment` | `ndarray (N,)` int64 | Maps each atom index to its fragment index |
+| `fragment_atom_indices` | `List[List[int]]` | Atom indices per fragment (reverse of `atom_to_fragment`) |
 | `fragment_adjacency` | `ndarray (F, F)` int64 | Symmetric binary adjacency between fragments |
 | `num_fragments` | `int` | Number of fragments (F) |
 | `num_rotatable_bonds` | `int` | Number of rotatable bonds detected |
@@ -252,7 +253,7 @@ result = fragment_on_rotatable_bonds(mol, min_fragment_size=1)
 
 ## Surface Mode
 
-Requires a 3D conformer. Use `generate_conformer=True` or call `ligand.generate_conformer()` first.
+dMaSIF-style point cloud surface. Requires a 3D conformer. Use `generate_conformer=True` or call `ligand.generate_conformer()` first.
 
 ```python
 result = ligand.featurize(mode="surface", generate_conformer=True)
@@ -261,10 +262,10 @@ surface = result["surface"]
 
 | Key | Shape | Description |
 |-----|-------|-------------|
-| `points` | `(V, 3)` | Vertex positions |
-| `faces` | `(F, 3)` | Triangle face indices |
-| `normals` | `(V, 3)` | Vertex normals |
-| `features` | `(V, C)` | Per-vertex chemical features |
+| `points` | `(V, 3)` | Surface point positions |
+| `normals` | `(V, 3)` | Outward surface normals |
+| `features` | `(V, 31)` | Per-vertex chemical features |
+| `feature_names` | `list[str]` | Column names for features |
 
 ---
 

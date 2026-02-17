@@ -32,7 +32,7 @@ result = protein.featurize(
 |------|-----------|-------------|
 | `"graph"` | `"graph"` | Residue/atom-level graph (node_features, edge_index, ...) |
 | `"backbone"` | `"backbone"` | Backbone features for inverse folding (dihedrals, kNN, local frames) |
-| `"surface"` | `"surface"` | Molecular surface mesh with per-vertex features |
+| `"surface"` | `"surface"` | dMaSIF point cloud with per-vertex features |
 | `"sequence"` | `"sequence"` | Amino acid sequence string or chain dict |
 | `"all"` | all above | All modes combined |
 
@@ -41,7 +41,7 @@ Lazy properties:
 ```python
 protein.sequence   # str (single chain) or Dict[str, str] (multi-chain)
 protein.graph      # residue-level graph (auto-computed)
-protein.surface    # surface mesh (auto-computed)
+protein.surface    # surface point cloud (auto-computed)
 ```
 
 ---
@@ -131,6 +131,8 @@ graph = result["graph"]
 | Key | Shape | Type | Description |
 |-----|-------|------|-------------|
 | `node_features` | `(A,)` | `int64` | Atom token ID (0-186, for `nn.Embedding`) -- same as `atom_tokens` |
+| `atom_to_residue` | `(A,)` | `int64` | Maps each atom to 0-indexed residue index (= `residue_count`) |
+| `residue_atom_indices` | `List[List[int]]` | -- | Atom indices per residue (reverse of `atom_to_residue`) |
 | Node token features | 3 tensors | `int64` | Integer tokens for embedding layers |
 | Node scalar features | 11 tensors | `float32` | Continuous per-atom features (total 11-dim) |
 | `coords` | `(A, 3)` | `float32` | Atom 3D coordinates |
@@ -233,40 +235,33 @@ backbone = result["backbone"]
 
 ## Surface Mode
 
+dMaSIF-style point cloud surface with PCA curvature and chemical features.
+
 ```python
 result = protein.featurize(mode="surface", surface_kwargs={
-    "mode": "mesh",           # "mesh" (default) or "point_cloud"
-    "grid_density": 2.5,
     "include_features": True,
+    "n_points_per_atom": 100,
 })
 surface = result["surface"]
 ```
 
-### Output (mesh mode)
+### Output
 
 | Key | Shape | Type | Description |
 |-----|-------|------|-------------|
-| `points` | `(V, 3)` | `ndarray` | Vertex positions |
+| `points` | `(V, 3)` | `ndarray` | Surface point positions |
 | `verts` | `(V, 3)` | `ndarray` | Alias for points |
-| `faces` | `(F, 3)` | `ndarray` | Triangle face indices (mesh mode only) |
-| `normals` | `(V, 3)` | `ndarray` | Vertex normals |
-| `hydropathy` | `(V,)` | `ndarray` | Hydrophobicity per vertex |
-| `charge` | `(V,)` | `ndarray` | Electrostatic potential per vertex |
-| `curvature` | `(V,)` | `ndarray` | Surface curvature per vertex |
-| `shape_index` | `(V,)` | `ndarray` | Shape index descriptor per vertex |
-| `residue_ids` | `(V,)` | `ndarray` | Nearest residue index per vertex |
+| `normals` | `(V, 3)` | `ndarray` | Outward surface normals |
+| `features` | `(V, 40)` | `ndarray` | Per-vertex feature vector |
+| `feature_names` | `list[str]` | -- | Column names for features |
 
 ### Surface Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `grid_density` | 2.5 | Grid resolution (higher = finer mesh) |
-| `threshold` | 0.5 | Isosurface threshold |
-| `sharpness` | 1.5 | Atom field sharpness |
-| `include_features` | True | Compute MaSIF-style features |
-| `mode` | `"mesh"` | `"mesh"` (marching cubes) or `"point_cloud"` (SAS sampling) |
-| `n_points_per_atom` | 100 | Points per atom (point cloud mode) |
-| `probe_radius` | 1.4 | Solvent probe radius (point cloud mode) |
+| `include_features` | True | Compute dMaSIF-style features |
+| `n_points_per_atom` | 100 | Points per atom for SAS sampling |
+| `probe_radius` | 1.4 | Solvent probe radius (A) |
 
 ---
 

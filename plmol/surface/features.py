@@ -2,18 +2,16 @@
 Vertex Creation and Feature Extraction Module
 
 This module provides functions for:
-1. Creating surface meshes (vertices and faces) from molecular structures
+1. Creating SAS point cloud surfaces from molecular structures
 2. Extracting dMaSIF-inspired features at each vertex
 
 Features:
-    - Multi-scale curvature (mean + Gaussian at 5 radii)
+    - Multi-scale PCA curvature (mean + Gaussian at 5 radii)
     - KNN-based atom-to-vertex mapping (K=16, no global blur)
     - Consistent [-1, 1] normalization across all features
 
 Functions:
-    - create_surface_mesh: Create surface mesh from atom positions and radii
-    - create_pocket_from_full_protein: Create pocket surface mesh from full protein
-    - simplify_mesh: Simplify mesh using Quadric Error Metrics
+    - create_surface_points: Create SAS point cloud from atom positions and radii
     - compute_all_vertex_features: Extract features at each vertex
 """
 
@@ -21,21 +19,10 @@ from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
-import open3d as o3d
-import torch
 from rdkit import Chem
 from rdkit.Chem import AllChem, Crippen, Lipinski
-from scipy.sparse import csr_matrix
-from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
-from skimage import measure
-import trimesh
 from ..constants import (
-    SURFACE_DEFAULT_GRID_DENSITY,
-    SURFACE_DEFAULT_THRESHOLD,
-    SURFACE_DEFAULT_SHARPNESS,
-    SURFACE_DEFAULT_MAX_MEMORY_GB,
-    SURFACE_DEFAULT_CUDA_CLEANUP_INTERVAL,
     SURFACE_DEFAULT_CURVATURE_SCALES,
     SURFACE_DEFAULT_KNN_ATOMS,
     SURFACE_DEFAULT_POINTS_PER_ATOM,
@@ -147,107 +134,6 @@ def _knn_map_matrix(
     gathered = atom_features[knn_idx]
     # knn_weights[:, :, None] -> (N, K, 1) for broadcasting
     return (knn_weights[:, :, None] * gathered).sum(axis=1)
-
-
-def create_surface_mesh(
-    positions: np.ndarray,
-    radii: np.ndarray,
-    grid_density: float = SURFACE_DEFAULT_GRID_DENSITY,
-    threshold: float = SURFACE_DEFAULT_THRESHOLD,
-    sharpness: float = SURFACE_DEFAULT_SHARPNESS,
-    max_memory_gb: float = SURFACE_DEFAULT_MAX_MEMORY_GB,
-    device: Optional[str] = None,
-    cuda_cleanup_interval: int = SURFACE_DEFAULT_CUDA_CLEANUP_INTERVAL,
-):
-    """Create a surface mesh using marching cubes algorithm.
-
-    Uses GPU with small batches to avoid memory overflow.
-
-    Args:
-        positions: Atom positions (N, 3)
-        radii: VdW radii for each atom (N,)
-        grid_density: Grid points per Angstrom (default: 2.5)
-        threshold: Isosurface threshold (default: 0.5)
-        sharpness: Controls surface smoothness (higher = sharper, closer to VdW) (default: 1.5)
-
-    Returns:
-        Tuple of (verts, faces, normals) or (None, None, None) if failed
-    """
-    padding = 2.0
-    min_bound = positions.min(axis=0) - padding
-    max_bound = positions.max(axis=0) + padding
-    size = max_bound - min_bound
-
-    res_x, res_y, res_z = (int(s * grid_density) for s in size)
-    res_x, res_y, res_z = max(res_x, 10), max(res_y, 10), max(res_z, 10)
-
-    n_atoms = len(positions)
-    n_grid_points = res_x * res_y * res_z
-
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    if device not in {"cpu", "cuda"}:
-        raise ValueError("device must be 'cpu', 'cuda', or None")
-    if device == "cuda" and not torch.cuda.is_available():
-        device = "cpu"
-
-    # Batch size targeting configurable memory usage per batch.
-    target_bytes = int(max_memory_gb * (1024**3))
-    target_bytes = max(target_bytes, 128 * 1024**2)  # floor to 128MB
-    bytes_per_atom = n_grid_points * 4 * 3  # float32, ~3 intermediate tensors
-    batch_size = max(1, target_bytes // max(bytes_per_atom, 1))
-    batch_size = min(batch_size, n_atoms)
-
-    pos_tensor = torch.tensor(positions, dtype=torch.float32, device=device)
-    rad_tensor = torch.tensor(radii, dtype=torch.float32, device=device)
-
-    min_bound_t = torch.tensor(min_bound, dtype=torch.float32, device=device)
-    max_bound_t = torch.tensor(max_bound, dtype=torch.float32, device=device)
-
-    x = torch.linspace(min_bound_t[0], max_bound_t[0], res_x, device=device)
-    y = torch.linspace(min_bound_t[1], max_bound_t[1], res_y, device=device)
-    z = torch.linspace(min_bound_t[2], max_bound_t[2], res_z, device=device)
-
-    grid_x, grid_y, grid_z = torch.meshgrid(x, y, z, indexing="ij")
-    grid_coords = torch.stack([grid_x, grid_y, grid_z], dim=-1)
-
-    scalar_field = torch.zeros((res_x, res_y, res_z), dtype=torch.float32, device=device)
-
-    batch_idx = 0
-    for start_idx in range(0, n_atoms, batch_size):
-        end_idx = min(start_idx + batch_size, n_atoms)
-        batch_pos = pos_tensor[start_idx:end_idx]
-        batch_rad = rad_tensor[start_idx:end_idx]
-
-        diff = grid_coords.unsqueeze(0) - batch_pos.view(-1, 1, 1, 1, 3)
-        dist_sq = torch.sum(diff**2, dim=-1)
-        blobs = torch.exp(-sharpness * (dist_sq / (batch_rad.view(-1, 1, 1, 1) ** 2)))
-        scalar_field += torch.sum(blobs, dim=0)
-
-        del diff, dist_sq, blobs
-        batch_idx += 1
-        if device == "cuda" and cuda_cleanup_interval > 0 and (batch_idx % cuda_cleanup_interval == 0):
-            torch.cuda.empty_cache()
-
-    scalar_field = scalar_field.cpu().numpy()
-
-    try:
-        verts, faces, normals, _ = measure.marching_cubes(scalar_field, level=threshold)
-        scale = np.array(
-            [
-                size[0] / (res_x - 1),
-                size[1] / (res_y - 1),
-                size[2] / (res_z - 1),
-            ]
-        )
-        verts = verts * scale + min_bound
-
-        # Normalize to unit vectors (outward from surface)
-        normals = normals / (np.linalg.norm(normals, axis=1, keepdims=True) + 1e-8)
-
-        return verts, faces, normals
-    except Exception:
-        return None, None, None
 
 
 def _fibonacci_sphere(n: int) -> np.ndarray:
@@ -363,283 +249,6 @@ def build_surface_dict(
     return d
 
 
-def compute_geodesic_patches(
-    verts: np.ndarray,
-    faces: np.ndarray,
-    vertex_features: Optional[np.ndarray] = None,
-    patch_radius: float = 6.0,
-    max_patch_size: int = 128,
-    max_patches: Optional[int] = None,
-    center_stride: int = 1,
-) -> dict:
-    """Build geodesic patches from mesh connectivity.
-
-    Geodesic distance is approximated by shortest paths on the undirected mesh
-    graph, with edge weights equal to Euclidean edge length.
-    """
-    if patch_radius <= 0:
-        raise ValueError("patch_radius must be > 0")
-    if max_patch_size <= 0:
-        raise ValueError("max_patch_size must be > 0")
-    if center_stride <= 0:
-        raise ValueError("center_stride must be > 0")
-
-    n_verts = int(verts.shape[0])
-    if n_verts == 0:
-        empty = np.zeros((0, max_patch_size), dtype=np.int32)
-        return {
-            "patch_center_idx": np.zeros((0,), dtype=np.int32),
-            "patch_index": empty,
-            "patch_mask": np.zeros_like(empty, dtype=bool),
-            "patch_geodesic": np.zeros_like(empty, dtype=np.float32),
-            "patch_radius": np.float32(patch_radius),
-            "patch_max_size": np.int32(max_patch_size),
-        }
-
-    centers = np.arange(0, n_verts, center_stride, dtype=np.int32)
-    if max_patches is not None and max_patches > 0 and centers.shape[0] > max_patches:
-        select = np.linspace(0, centers.shape[0] - 1, num=max_patches, dtype=np.int32)
-        centers = centers[select]
-
-    mesh_edges = np.concatenate(
-        [faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]], axis=0
-    ).astype(np.int32, copy=False)
-    mesh_edges = mesh_edges[mesh_edges[:, 0] != mesh_edges[:, 1]]
-    mesh_edges = np.sort(mesh_edges, axis=1)
-    mesh_edges = np.unique(mesh_edges, axis=0)
-
-    edge_w = np.linalg.norm(
-        verts[mesh_edges[:, 0]] - verts[mesh_edges[:, 1]],
-        axis=1,
-    ).astype(np.float32, copy=False)
-    row = np.concatenate([mesh_edges[:, 0], mesh_edges[:, 1]])
-    col = np.concatenate([mesh_edges[:, 1], mesh_edges[:, 0]])
-    data = np.concatenate([edge_w, edge_w])
-    graph = csr_matrix((data, (row, col)), shape=(n_verts, n_verts))
-
-    n_centers = int(centers.shape[0])
-    patch_index = np.full((n_centers, max_patch_size), -1, dtype=np.int32)
-    patch_mask = np.zeros((n_centers, max_patch_size), dtype=bool)
-    patch_geodesic = np.full((n_centers, max_patch_size), np.inf, dtype=np.float32)
-    patch_features = None
-    if vertex_features is not None:
-        patch_features = np.zeros(
-            (n_centers, max_patch_size, int(vertex_features.shape[1])),
-            dtype=vertex_features.dtype,
-        )
-
-    for i, center in enumerate(centers):
-        dist = dijkstra(graph, directed=False, indices=int(center), limit=patch_radius)
-        in_patch = np.where(np.isfinite(dist))[0]
-        if in_patch.shape[0] == 0:
-            in_patch = np.asarray([center], dtype=np.int32)
-            in_dist = np.asarray([0.0], dtype=np.float32)
-        else:
-            in_dist = dist[in_patch].astype(np.float32, copy=False)
-            order = np.argsort(in_dist, kind="stable")
-            in_patch = in_patch[order].astype(np.int32, copy=False)
-            in_dist = in_dist[order]
-
-        k = min(max_patch_size, int(in_patch.shape[0]))
-        patch_index[i, :k] = in_patch[:k]
-        patch_geodesic[i, :k] = in_dist[:k]
-        patch_mask[i, :k] = True
-        if patch_features is not None:
-            patch_features[i, :k] = vertex_features[in_patch[:k]]
-
-    out = {
-        "patch_center_idx": centers,
-        "patch_index": patch_index,
-        "patch_mask": patch_mask,
-        "patch_geodesic": patch_geodesic,
-        "patch_radius": np.float32(patch_radius),
-        "patch_max_size": np.int32(max_patch_size),
-    }
-    if patch_features is not None:
-        out["patch_features"] = patch_features
-    return out
-
-
-def create_pocket_from_full_protein(
-    prot_positions: np.ndarray,
-    prot_radii: np.ndarray,
-    ligand_center: np.ndarray,
-    pocket_radius: float = 6.0,
-    grid_density: float = SURFACE_DEFAULT_GRID_DENSITY,
-    sharpness: float = SURFACE_DEFAULT_SHARPNESS,
-    verbose: bool = False,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Create pocket surface by extracting from full protein surface.
-
-    This method:
-    1. Generates the full protein molecular surface
-    2. Extracts only the faces near the ligand binding site
-
-    This is more accurate than creating a surface from pocket atoms only,
-    because it only includes faces that are actually solvent-exposed.
-
-    Args:
-        prot_positions: All protein atom positions (N, 3)
-        prot_radii: VdW radii for all protein atoms (N,)
-        ligand_center: Center of the ligand (3,)
-        pocket_radius: Radius around ligand center to extract pocket faces (default: 6.0 Å)
-        grid_density: Grid points per Angstrom for Marching Cubes (default: 2.5)
-        sharpness: Controls surface smoothness (higher = sharper, closer to VdW) (default: 1.5)
-        verbose: Whether to print progress messages
-
-    Returns:
-        Tuple of (verts, faces, normals) for the pocket region only
-    """
-    import time
-    start = time.time()
-
-    # 1. Create full protein surface
-    full_verts, full_faces, full_normals = create_surface_mesh(
-        prot_positions, prot_radii, grid_density=grid_density, sharpness=sharpness
-    )
-
-    if full_verts is None:
-        return None, None, None
-
-    mc_time = time.time() - start
-
-    # 2. Compute face centroids
-    v0 = full_verts[full_faces[:, 0]]
-    v1 = full_verts[full_faces[:, 1]]
-    v2 = full_verts[full_faces[:, 2]]
-    face_centroids = (v0 + v1 + v2) / 3.0
-
-    # 3. Select faces within pocket_radius of ligand center
-    distances = np.linalg.norm(face_centroids - ligand_center, axis=1)
-    pocket_mask = distances <= pocket_radius
-
-    if not pocket_mask.any():
-        if verbose:
-            print(f"Warning: No faces found within {pocket_radius}Å of ligand center")
-        return None, None, None
-
-    # 4. Extract pocket faces and reindex vertices
-    pocket_faces = full_faces[pocket_mask]
-
-    # Find unique vertices used by pocket faces
-    unique_vert_indices = np.unique(pocket_faces.flatten())
-
-    # Create mapping from old to new vertex indices
-    old_to_new = {old: new for new, old in enumerate(unique_vert_indices)}
-
-    # Reindex faces
-    new_faces = np.array([[old_to_new[v] for v in face] for face in pocket_faces])
-
-    # Extract vertices and normals
-    new_verts = full_verts[unique_vert_indices]
-    new_normals = full_normals[unique_vert_indices]
-
-    if verbose:
-        extract_time = time.time() - start - mc_time
-        print(f"Full protein surface: {len(full_faces)} faces ({mc_time:.2f}s)")
-        print(f"Pocket extraction (radius={pocket_radius}Å): {len(new_faces)} faces ({extract_time:.2f}s)")
-
-    return new_verts, new_faces, new_normals
-
-
-def compute_mesh_surface_area(verts: np.ndarray, faces: np.ndarray) -> float:
-    """Compute total surface area of a triangle mesh.
-
-    Args:
-        verts: Vertex positions (N, 3)
-        faces: Face indices (M, 3)
-
-    Returns:
-        Total surface area in Å²
-    """
-    v0 = verts[faces[:, 0]]
-    v1 = verts[faces[:, 1]]
-    v2 = verts[faces[:, 2]]
-    cross = np.cross(v1 - v0, v2 - v0)
-    areas = 0.5 * np.linalg.norm(cross, axis=1)
-    return areas.sum()
-
-
-def simplify_mesh(
-    verts: np.ndarray,
-    faces: np.ndarray,
-    normals: np.ndarray,
-    target_face_area: float = 1.0,
-    min_faces: int = 100,
-    max_faces: int = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Simplify mesh using Open3D's Quadric Error Metrics (QEM) algorithm.
-
-    Target face count is dynamically computed based on surface area to maintain
-    consistent triangle size regardless of molecule size.
-
-    Unified resolution: ~1.0 Å² per face (edge length ~1.4 Å)
-
-    Args:
-        verts: Vertex positions (N, 3)
-        faces: Face indices (M, 3)
-        normals: Vertex normals (N, 3)
-        target_face_area: Target area per triangle in Å² (default: 1.0)
-        min_faces: Minimum number of faces to keep (default: 100)
-        max_faces: Maximum number of faces to keep (default: None, no limit)
-
-    Returns:
-        Simplified (verts, faces, normals)
-    """
-    # Compute total surface area and target face count
-    total_area = compute_mesh_surface_area(verts, faces)
-    target_faces = int(total_area / target_face_area)
-    target_faces = max(min_faces, target_faces)
-    if max_faces is not None:
-        target_faces = min(max_faces, target_faces)
-
-    if len(faces) <= target_faces:
-        return verts, faces, normals
-
-    # Convert to Open3D mesh
-    mesh = o3d.geometry.TriangleMesh()
-    mesh.vertices = o3d.utility.Vector3dVector(verts.astype(np.float64))
-    mesh.triangles = o3d.utility.Vector3iVector(faces.astype(np.int32))
-    mesh.compute_vertex_normals()
-
-    # Simplify using Quadric Error Metrics
-    simplified = mesh.simplify_quadric_decimation(target_number_of_triangles=target_faces)
-
-    # Extract results
-    new_verts = np.asarray(simplified.vertices)
-    new_faces = np.asarray(simplified.triangles)
-    new_normals = np.asarray(simplified.vertex_normals)
-
-    # Ensure normals are unit vectors
-    norms = np.linalg.norm(new_normals, axis=1, keepdims=True)
-    new_normals = new_normals / (norms + 1e-8)
-
-    # Ensure normals point outward from centroid
-    if len(new_verts) > 0:
-        centroid = new_verts.mean(axis=0)
-        outward_dir = new_verts - centroid
-        dot_products = np.sum(new_normals * outward_dir, axis=1)
-        flip_mask = dot_products < 0
-        new_normals[flip_mask] *= -1
-
-    return new_verts, new_faces, new_normals
-
-
-def _compute_curvature_at_scale(
-    mesh: trimesh.Trimesh,
-    vertices: np.ndarray,
-    radius: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Compute mean and Gaussian curvature at a single scale."""
-    mc = trimesh.curvature.discrete_mean_curvature_measure(
-        mesh, vertices, radius=radius
-    )
-    gc = trimesh.curvature.discrete_gaussian_curvature_measure(
-        mesh, vertices, radius=radius
-    )
-    return _normalize_to_range(mc), _normalize_to_range(gc)
-
-
 def _compute_pca_curvature(
     points: np.ndarray,
     normals: np.ndarray,
@@ -719,82 +328,6 @@ def _compute_pca_curvature(
 # =========================================================================
 # Modular Feature Computation Functions
 # =========================================================================
-
-
-def compute_mesh_geometry(
-    verts: np.ndarray,
-    faces: np.ndarray,
-    curvature_scales: tuple[float, ...] = CURVATURE_SCALES,
-    verbose: bool = False,
-) -> dict:
-    """Compute geometry features from a triangle mesh.
-
-    Extracts multi-scale curvature (mean + Gaussian) and vertex normals
-    using trimesh discrete curvature measures.
-
-    Can be used independently for mesh-based surface analysis.
-
-    Args:
-        verts: Mesh vertices (N, 3)
-        faces: Mesh faces (F, 3)
-        curvature_scales: Radii for multi-scale curvature computation
-        verbose: Whether to print progress messages
-
-    Returns:
-        Dict with keys:
-            - 'mean_curvature': (N, n_scales) normalized to [-1, 1]
-            - 'gaussian_curvature': (N, n_scales) normalized to [-1, 1]
-            - 'vertex_normal': (N, 3) unit vectors
-    """
-    n_verts = len(verts)
-    n_scales = len(curvature_scales)
-    mean_curvatures = np.zeros((n_verts, n_scales), dtype=np.float32)
-    gauss_curvatures = np.zeros((n_verts, n_scales), dtype=np.float32)
-
-    try:
-        mesh = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
-    except Exception as exc:
-        if verbose:
-            print(f"Mesh construction failed: {exc}, using zero normals/curvatures")
-        return {
-            'mean_curvature': mean_curvatures,
-            'gaussian_curvature': gauss_curvatures,
-            'vertex_normal': np.zeros((n_verts, 3), dtype=np.float32),
-        }
-
-    # Pre-warm trimesh cached properties for thread safety
-    _ = mesh.face_adjacency_tree
-    _ = mesh.face_adjacency_edges
-    _ = mesh.face_adjacency_angles
-    _ = mesh.face_adjacency_convex
-
-    if verbose:
-        print("  Computing mesh multi-scale curvature features...")
-
-    with ThreadPoolExecutor(max_workers=n_scales) as executor:
-        futures = {
-            executor.submit(
-                _compute_curvature_at_scale, mesh, mesh.vertices, radius
-            ): i
-            for i, radius in enumerate(curvature_scales)
-        }
-        for future in as_completed(futures):
-            i = futures[future]
-            try:
-                mc, gc = future.result()
-                mean_curvatures[:, i] = mc
-                gauss_curvatures[:, i] = gc
-            except Exception as e:
-                if verbose:
-                    print(f"  Curvature at radius={curvature_scales[i]} failed: {e}")
-
-    vertex_normals = np.asarray(mesh.vertex_normals, dtype=np.float32)
-
-    return {
-        'mean_curvature': mean_curvatures,
-        'gaussian_curvature': gauss_curvatures,
-        'vertex_normal': vertex_normals,
-    }
 
 
 def compute_pointcloud_geometry(
@@ -1243,7 +776,6 @@ def compute_extra_features(
 
 def compute_all_vertex_features(
     verts: np.ndarray,
-    faces: Optional[np.ndarray],
     atom_positions: np.ndarray,
     mol,
     is_ligand: bool = True,
@@ -1256,8 +788,8 @@ def compute_all_vertex_features(
 ) -> dict:
     """Compute dMaSIF-inspired surface features at each vertex.
 
-    Backward-compatible wrapper that delegates to modular functions:
-    - compute_mesh_geometry / compute_pointcloud_geometry
+    Wrapper that delegates to modular functions:
+    - compute_pointcloud_geometry
     - compute_chemical_features
     - compute_ligand_type_features / compute_protein_type_features
     - compute_extra_features
@@ -1265,15 +797,14 @@ def compute_all_vertex_features(
     For fine-grained control, call the individual functions directly.
 
     Args:
-        verts: Mesh vertices or point cloud positions (N, 3)
-        faces: Mesh faces (F, 3) or None for point cloud mode
+        verts: Point cloud positions (N, 3)
         atom_positions: Atom positions (M, 3)
         mol: RDKit molecule or _SimpleMol for protein
         is_ligand: Whether this is a ligand (True) or protein (False)
         curvature_scales: Radii for multi-scale curvature computation
         knn_atoms: Number of nearest atoms per vertex for feature mapping
         verbose: Whether to print progress messages
-        normals: Pre-computed normals (N, 3) for point cloud mode
+        normals: Pre-computed normals (N, 3)
         extra_atom_features: User-provided per-atom features to map to vertices
         charge_method: "gasteiger" or "mmff94" (ligand only)
 
@@ -1283,11 +814,7 @@ def compute_all_vertex_features(
     n_verts = len(verts)
 
     # === 1. Geometry features ===
-    if faces is not None:
-        geom = compute_mesh_geometry(verts, faces, curvature_scales, verbose)
-        if normals is not None:
-            geom['vertex_normal'] = np.asarray(normals, dtype=np.float32)
-    elif normals is not None:
+    if normals is not None:
         geom = compute_pointcloud_geometry(verts, normals, curvature_scales, verbose)
     else:
         n_scales = len(curvature_scales)
@@ -1392,7 +919,6 @@ def _stack_surface_features(
 
 def compute_ligand_surface_features(
     verts: np.ndarray,
-    faces: Optional[np.ndarray],
     atom_positions: np.ndarray,
     mol,
     curvature_scales: tuple[float, ...] = CURVATURE_SCALES,
@@ -1409,7 +935,6 @@ def compute_ligand_surface_features(
     """
     all_features = compute_all_vertex_features(
         verts=verts,
-        faces=faces,
         atom_positions=atom_positions,
         mol=mol,
         is_ligand=True,
@@ -1517,7 +1042,6 @@ def _build_simple_protein_mol(atom_metadata: list[dict]) -> _SimpleMol:
 
 def compute_protein_surface_features(
     verts: np.ndarray,
-    faces: Optional[np.ndarray],
     atom_positions: np.ndarray,
     mol=None,
     atom_metadata: Optional[list[dict]] = None,
@@ -1537,7 +1061,6 @@ def compute_protein_surface_features(
 
     all_features = compute_all_vertex_features(
         verts=verts,
-        faces=faces,
         atom_positions=atom_positions,
         mol=mol,
         is_ligand=False,

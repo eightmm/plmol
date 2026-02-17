@@ -1,4 +1,4 @@
-"""Surface feature extraction package for plmol."""
+"""Surface feature extraction package for plmol (dMaSIF point cloud only)."""
 
 from __future__ import annotations
 
@@ -7,12 +7,9 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 
 from .features import (
-    create_surface_mesh,
     create_surface_points,
     build_surface_dict,
     compute_all_vertex_features,
-    compute_geodesic_patches,
-    compute_mesh_geometry,
     compute_pointcloud_geometry,
     compute_chemical_features,
     compute_ligand_type_features,
@@ -20,8 +17,6 @@ from .features import (
     compute_extra_features,
     compute_ligand_surface_features,
     compute_protein_surface_features,
-    simplify_mesh,
-    create_pocket_from_full_protein,
     _build_simple_protein_mol,
 )
 from ..constants import (
@@ -36,64 +31,41 @@ def build_ligand_surface(
     coords: np.ndarray,
     radii: np.ndarray,
     mol,
-    grid_density: float = 2.5,
-    threshold: float = 0.5,
-    sharpness: float = 1.5,
     include_features: bool = True,
-    include_patches: bool = False,
-    patch_radius: float = 6.0,
-    max_patch_size: int = 128,
-    max_patches: Optional[int] = None,
-    patch_center_stride: int = 1,
-    max_memory_gb: float = 1.0,
-    device: Optional[str] = None,
     curvature_scales: Tuple[float, ...] = SURFACE_DEFAULT_CURVATURE_SCALES,
     knn_atoms: int = SURFACE_DEFAULT_KNN_ATOMS,
     verbose: bool = False,
-    mode: str = "mesh",
     charge_method: str = "gasteiger",
     extra_atom_features: Optional[Dict[str, np.ndarray]] = None,
     n_points_per_atom: int = SURFACE_DEFAULT_POINTS_PER_ATOM,
     probe_radius: float = SURFACE_DEFAULT_PROBE_RADIUS,
 ) -> Optional[Dict[str, np.ndarray]]:
-    """Create ligand surface and optional ligand-specific vertex features.
+    """Create ligand surface point cloud and optional vertex features.
 
     Args:
-        mode: "mesh" for marching cubes mesh, "point_cloud" for SAS point cloud.
+        coords: Atom positions (N, 3).
+        radii: VdW radii (N,).
+        mol: RDKit molecule.
+        include_features: Compute dMaSIF-style features.
         charge_method: "gasteiger" or "mmff94" for partial charge computation.
         extra_atom_features: User-provided per-atom features to map to vertices.
-        n_points_per_atom: Points per atom for point cloud mode (default: 100).
-        probe_radius: Solvent probe radius for point cloud mode (default: 1.4).
+        n_points_per_atom: Points per atom (default: 100).
+        probe_radius: Solvent probe radius (default: 1.4).
     """
-    if mode == "point_cloud":
-        verts, normals = create_surface_points(
-            coords,
-            radii,
-            n_points_per_atom=n_points_per_atom,
-            probe_radius=probe_radius,
-        )
-        if len(verts) == 0:
-            return None
-        faces = None
-    else:
-        verts, faces, normals = create_surface_mesh(
-            coords,
-            radii,
-            grid_density=grid_density,
-            threshold=threshold,
-            sharpness=sharpness,
-            max_memory_gb=max_memory_gb,
-            device=device,
-        )
-        if verts is None or faces is None or normals is None:
-            return None
+    verts, normals = create_surface_points(
+        coords,
+        radii,
+        n_points_per_atom=n_points_per_atom,
+        probe_radius=probe_radius,
+    )
+    if len(verts) == 0:
+        return None
 
-    surface = build_surface_dict(verts, faces, normals)
+    surface = build_surface_dict(verts, None, normals)
     if include_features:
         surface.update(
             compute_ligand_surface_features(
                 verts=verts,
-                faces=faces,
                 atom_positions=coords,
                 mol=mol,
                 curvature_scales=curvature_scales,
@@ -104,18 +76,6 @@ def build_ligand_surface(
                 charge_method=charge_method,
             )
         )
-    if include_patches and faces is not None:
-        surface.update(
-            compute_geodesic_patches(
-                verts=verts,
-                faces=faces,
-                vertex_features=surface.get("features"),
-                patch_radius=patch_radius,
-                max_patch_size=max_patch_size,
-                max_patches=max_patches,
-                center_stride=patch_center_stride,
-            )
-        )
     return surface
 
 
@@ -123,57 +83,39 @@ def build_protein_surface(
     coords: np.ndarray,
     radii: np.ndarray,
     atom_metadata: list[dict],
-    grid_density: float = 2.5,
-    threshold: float = 0.5,
-    sharpness: float = 1.5,
     include_features: bool = True,
-    max_memory_gb: float = 1.0,
-    device: Optional[str] = None,
     curvature_scales: Tuple[float, ...] = SURFACE_DEFAULT_CURVATURE_SCALES,
     knn_atoms: int = SURFACE_DEFAULT_KNN_ATOMS,
     verbose: bool = False,
-    mode: str = "mesh",
     n_points_per_atom: int = SURFACE_DEFAULT_POINTS_PER_ATOM,
     probe_radius: float = SURFACE_DEFAULT_PROBE_RADIUS,
     extra_atom_features: Optional[Dict[str, np.ndarray]] = None,
 ) -> Optional[Dict[str, np.ndarray]]:
-    """Create protein surface and optional protein-specific vertex features.
+    """Create protein surface point cloud and optional vertex features.
 
     Args:
-        mode: "mesh" for marching cubes mesh, "point_cloud" for SAS point cloud.
-        n_points_per_atom: Points per atom for point cloud mode (default: 100).
-        probe_radius: Solvent probe radius for point cloud mode (default: 1.4).
+        coords: Atom positions (N, 3).
+        radii: VdW radii (N,).
+        atom_metadata: Per-atom dicts with res_name, atom_name, element, b_factor.
+        include_features: Compute dMaSIF-style features.
+        n_points_per_atom: Points per atom (default: 100).
+        probe_radius: Solvent probe radius (default: 1.4).
         extra_atom_features: User-provided per-atom features to map to vertices.
     """
-    if mode == "point_cloud":
-        verts, normals = create_surface_points(
-            coords,
-            radii,
-            n_points_per_atom=n_points_per_atom,
-            probe_radius=probe_radius,
-        )
-        if len(verts) == 0:
-            return None
-        faces = None
-    else:
-        verts, faces, normals = create_surface_mesh(
-            coords,
-            radii,
-            grid_density=grid_density,
-            threshold=threshold,
-            sharpness=sharpness,
-            max_memory_gb=max_memory_gb,
-            device=device,
-        )
-        if verts is None or faces is None or normals is None:
-            return None
+    verts, normals = create_surface_points(
+        coords,
+        radii,
+        n_points_per_atom=n_points_per_atom,
+        probe_radius=probe_radius,
+    )
+    if len(verts) == 0:
+        return None
 
-    surface = build_surface_dict(verts, faces, normals)
+    surface = build_surface_dict(verts, None, normals)
     if include_features:
         surface.update(
             compute_protein_surface_features(
                 verts=verts,
-                faces=faces,
                 atom_positions=coords,
                 mol=None,
                 atom_metadata=atom_metadata,
@@ -188,12 +130,9 @@ def build_protein_surface(
 
 
 __all__ = [
-    "create_surface_mesh",
     "create_surface_points",
     "build_surface_dict",
     "compute_all_vertex_features",
-    "compute_geodesic_patches",
-    "compute_mesh_geometry",
     "compute_pointcloud_geometry",
     "compute_chemical_features",
     "compute_ligand_type_features",
@@ -201,8 +140,6 @@ __all__ = [
     "compute_extra_features",
     "compute_ligand_surface_features",
     "compute_protein_surface_features",
-    "simplify_mesh",
-    "create_pocket_from_full_protein",
     "build_ligand_surface",
     "build_protein_surface",
 ]

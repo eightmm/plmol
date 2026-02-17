@@ -44,7 +44,7 @@ BaseMolecule (base.py) — abstract: sequence, graph, coords, surface
 | `graph` (level=residue) | `ResidueFeaturizer` → `get_features()` | Scalar/vector node+edge tuples |
 | `graph` (level=atom) | `AtomFeaturizer` → `get_atom_graph()` | Token-based node dict + edge dict |
 | `backbone` | `backbone_featurizer` → `compute_backbone_features()` | SE(3)-invariant kNN graph |
-| `surface` | `surface/` → `build_protein_surface()` | Mesh or point cloud with MaSIF features |
+| `surface` | `surface/` → `build_protein_surface()` | dMaSIF point cloud with PCA curvature features |
 | `voxel` | `voxel/` → `build_protein_voxel()` | 16-channel 3D grid |
 | `sequence` | Direct from parser | Amino acid string |
 
@@ -81,8 +81,8 @@ Custom hierarchy in `errors.py`: `PlmolError` → `InputError` (bad user input),
 - **PDB standardization**: Enabled by default. Normalizes residue names (HIS variants → HIS, modified residues → standard), removes waters/metals/ligands.
 - **PDB parsing is centralized**: All modules use `PDBParser` and `parse_pdb_line()` from `protein/utils.py`. The `ParsedAtom` dataclass is the single source of truth for atom data.
 - **Feature dimension docs**: Detailed dimension breakdowns with index ranges are in `docs/protein.md`, `docs/ligand.md`, `docs/complex.md`.
+- **Bidirectional atom_to_X mappings**: Hierarchical groupings provide both forward (`atom_to_X`: `(A,)` int, atom→group) and reverse (`X_atom_indices`: `List[List[int]]`, group→atoms). Protein atom graph has `atom_to_residue`/`residue_atom_indices`; ligand fragment has `atom_to_fragment`/`fragment_atom_indices`.
 
 ## Dependencies
 
 Core: `torch`, `rdkit`, `numpy`, `pandas`, `scipy`, `freesasa`
-Optional: `open3d`, `scikit-image`, `trimesh` (for surface mode)

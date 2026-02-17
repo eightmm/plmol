@@ -44,7 +44,7 @@ class LigandFeaturizer:
     Supports:
         - Graph representations for GNNs
         - Morgan fingerprints (ECFP)
-        - Surface meshes (MaSIF-style point clouds)
+        - Surface point clouds (dMaSIF-style)
 
     Best practice:
         - Use `featurize()` for a standardized output dictionary.
@@ -242,40 +242,27 @@ class LigandFeaturizer:
     def get_surface(
         self,
         mol_or_smiles: Optional[Union[str, "Chem.Mol"]] = None,
-        grid_density: float = 2.5,
-        threshold: float = 0.5,
-        sharpness: float = 1.5,
         generate_conformer: bool = False,
         include_features: bool = True,
-        include_patches: bool = False,
-        patch_radius: float = 6.0,
-        max_patch_size: int = 128,
-        max_patches: Optional[int] = None,
-        patch_center_stride: int = 1,
-        max_memory_gb: float = 1.0,
-        device: Optional[str] = None,
         curvature_scales: tuple = SURFACE_DEFAULT_CURVATURE_SCALES,
         knn_atoms: int = SURFACE_DEFAULT_KNN_ATOMS,
-        mode: str = "mesh",
         charge_method: str = "gasteiger",
         extra_atom_features: Optional[Dict[str, np.ndarray]] = None,
         n_points_per_atom: int = SURFACE_DEFAULT_POINTS_PER_ATOM,
         probe_radius: float = SURFACE_DEFAULT_PROBE_RADIUS,
     ) -> Optional[Dict[str, np.ndarray]]:
         """
-        Create a ligand surface from 3D coordinates.
+        Create a ligand surface point cloud from 3D coordinates.
 
         Args:
-            mode: "mesh" for marching cubes mesh, "point_cloud" for SAS point cloud.
             charge_method: "gasteiger" or "mmff94" for partial charge computation.
             extra_atom_features: Custom per-atom features to map to vertices.
-            n_points_per_atom: Points per atom for point cloud mode (default: 100).
-            probe_radius: Solvent probe radius for point cloud mode (default: 1.4).
+            n_points_per_atom: Points per atom (default: 100).
+            probe_radius: Solvent probe radius (default: 1.4).
 
         Returns:
-            Dict with "points", "normals" (and legacy "verts"). "faces" is
-            included only in mesh mode. Plus ligand-tailored atomic features
-            mapped to the surface when include_features is True.
+            Dict with "points", "normals" (and legacy "verts"), plus
+            ligand-tailored atomic features when include_features is True.
         """
         if Chem is None:
             raise ImportError(
@@ -295,17 +282,7 @@ class LigandFeaturizer:
         coords = conformer.GetPositions()
 
         cache_key = self._build_surface_cache_key(
-            mol,
-            coords,
-            grid_density=grid_density,
-            threshold=threshold,
-            sharpness=sharpness,
-            include_features=include_features,
-            include_patches=include_patches,
-            patch_radius=patch_radius,
-            max_patch_size=max_patch_size,
-            max_patches=max_patches,
-            patch_center_stride=patch_center_stride,
+            mol, coords, include_features=include_features,
         )
         if mol_or_smiles is None and cache_key in self._surface_cache:
             return self._surface_cache[cache_key]
@@ -323,20 +300,9 @@ class LigandFeaturizer:
                 coords=coords,
                 radii=radii,
                 mol=mol,
-                grid_density=grid_density,
-                threshold=threshold,
-                sharpness=sharpness,
                 include_features=include_features,
-                include_patches=include_patches,
-                patch_radius=patch_radius,
-                max_patch_size=max_patch_size,
-                max_patches=max_patches,
-                patch_center_stride=patch_center_stride,
-                max_memory_gb=max_memory_gb,
-                device=device,
                 curvature_scales=curvature_scales,
                 knn_atoms=knn_atoms,
-                mode=mode,
                 charge_method=charge_method,
                 extra_atom_features=extra_atom_features,
                 n_points_per_atom=n_points_per_atom,
@@ -344,8 +310,8 @@ class LigandFeaturizer:
             )
         except Exception as exc:  # pragma: no cover - optional dependency
             raise ImportError(
-                "Surface featurization requires optional dependencies (open3d, scikit-image, trimesh). "
-                "Install them to enable surface features."
+                "Surface featurization requires scipy. "
+                "Install it to enable surface features."
             ) from exc
         if surface is None and mol_or_smiles is None:
             self._surface_cache[cache_key] = None
@@ -504,15 +470,7 @@ class LigandFeaturizer:
         self,
         mol: "Chem.Mol",
         coords: np.ndarray,
-        grid_density: float,
-        threshold: float,
-        sharpness: float,
         include_features: bool,
-        include_patches: bool,
-        patch_radius: float,
-        max_patch_size: int,
-        max_patches: Optional[int],
-        patch_center_stride: int,
     ) -> str:
         coords32 = np.asarray(coords, dtype=np.float32)
         coord_sig = (
@@ -520,12 +478,7 @@ class LigandFeaturizer:
             round(float(coords32.mean()), 4),
             round(float(coords32.std()), 4),
         )
-        return (
-            f"{id(mol)}|{coord_sig}|{round(grid_density,3)}|{round(threshold,3)}|"
-            f"{round(sharpness,3)}|{int(include_features)}|{int(include_patches)}|"
-            f"{round(patch_radius,3)}|{int(max_patch_size)}|"
-            f"{-1 if max_patches is None else int(max_patches)}|{int(patch_center_stride)}"
-        )
+        return f"{id(mol)}|{coord_sig}|{int(include_features)}"
 
     @property
     def num_atoms(self) -> int:

@@ -100,6 +100,28 @@ class TestFragmentOnRotatableBonds:
         num_edges = result["fragment_adjacency"].sum() // 2  # symmetric
         assert num_edges == result["num_rotatable_bonds"]
 
+    def test_fragment_atom_indices(self):
+        """fragment_atom_indices is consistent reverse of atom_to_fragment."""
+        mol = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
+        result = fragment_on_rotatable_bonds(mol)
+        fai = result["fragment_atom_indices"]
+        assert len(fai) == result["num_fragments"]
+        # All atoms covered exactly once
+        all_atoms = sorted(a for atoms in fai for a in atoms)
+        assert all_atoms == list(range(mol.GetNumAtoms()))
+        # Consistent with atom_to_fragment
+        for frag_idx, atoms in enumerate(fai):
+            for a in atoms:
+                assert result["atom_to_fragment"][a] == frag_idx
+
+    def test_fragment_atom_indices_no_rotatable(self):
+        """No rotatable bonds → single fragment covers all atoms."""
+        mol = Chem.MolFromSmiles("c1ccccc1")
+        result = fragment_on_rotatable_bonds(mol)
+        fai = result["fragment_atom_indices"]
+        assert len(fai) == 1
+        assert sorted(fai[0]) == list(range(mol.GetNumAtoms()))
+
 
 # ---------------------------------------------------------------------------
 # Integration: Ligand.featurize(mode="fragment")

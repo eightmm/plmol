@@ -26,21 +26,31 @@ class TestBaseMolecule:
         assert mol.has_surface is False
         assert mol.metadata == {}
 
-    def test_set_surface(self):
+    def test_set_surface_without_faces(self):
         mol = ConcreteMolecule()
         points = np.random.randn(100, 3)
-        faces = np.array([[0, 1, 2], [1, 2, 3]])
         normals = np.random.randn(100, 3)
-        mol.set_surface(points, faces, normals)
+        mol.set_surface(points, normals)
         assert mol.has_surface is True
         surface = mol.get_surface()
         assert surface is not None
         assert "points" in surface
-        assert "faces" in surface
+        assert "faces" not in surface
         assert "normals" in surface
         assert "verts" in surface
         np.testing.assert_array_equal(surface["points"], points)
         np.testing.assert_array_equal(surface["verts"], points)
+
+    def test_set_surface_with_faces(self):
+        mol = ConcreteMolecule()
+        points = np.random.randn(100, 3)
+        faces = np.array([[0, 1, 2], [1, 2, 3]])
+        normals = np.random.randn(100, 3)
+        mol.set_surface(points, normals, faces=faces)
+        assert mol.has_surface is True
+        surface = mol.get_surface()
+        assert "faces" in surface
+        np.testing.assert_array_equal(surface["faces"], faces)
 
     def test_get_surface_none(self):
         mol = ConcreteMolecule()

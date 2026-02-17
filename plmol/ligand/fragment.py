@@ -74,6 +74,7 @@ def fragment_on_rotatable_bonds(
     return {
         "fragment_smiles": smiles_list,
         "atom_to_fragment": atom_to_frag,
+        "fragment_atom_indices": [list(atoms) for atoms in atom_map],
         "fragment_adjacency": adj,
         "num_fragments": num_frags,
         "num_rotatable_bonds": num_rotatable,
@@ -85,6 +86,7 @@ def _single_fragment_result(mol: Chem.Mol, num_atoms: int) -> Dict[str, Any]:
     return {
         "fragment_smiles": [Chem.MolToSmiles(mol)],
         "atom_to_fragment": np.zeros(num_atoms, dtype=np.int64),
+        "fragment_atom_indices": [list(range(num_atoms))],
         "fragment_adjacency": np.zeros((1, 1), dtype=np.int64),
         "num_fragments": 1,
         "num_rotatable_bonds": 0,

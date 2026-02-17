@@ -56,14 +56,16 @@ class BaseMolecule(ABC):
     def has_surface(self) -> bool:
         return self._surface is not None
 
-    def set_surface(self, points: np.ndarray, faces: np.ndarray, normals: np.ndarray):
-        """Store surface mesh data with standardized keys."""
+    def set_surface(self, points: np.ndarray, normals: np.ndarray,
+                     faces: Optional[np.ndarray] = None):
+        """Store surface data with standardized keys."""
         self._surface = {
             "points": points,
-            "faces": faces,
             "normals": normals,
             "verts": points,
         }
+        if faces is not None:
+            self._surface["faces"] = faces
 
     def get_surface(self) -> Optional[Dict[str, np.ndarray]]:
         return self._surface

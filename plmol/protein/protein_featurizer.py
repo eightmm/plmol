@@ -27,10 +27,6 @@ from ..constants import (
     DEFAULT_VDW_RADIUS,
     ELEMENT_SYMBOL_TO_ATOMIC_NUMBER,
     DEFAULT_BACKBONE_KNN_NEIGHBORS,
-    SURFACE_DEFAULT_GRID_DENSITY,
-    SURFACE_DEFAULT_THRESHOLD,
-    SURFACE_DEFAULT_SHARPNESS,
-    SURFACE_DEFAULT_MAX_MEMORY_GB,
     SURFACE_DEFAULT_POINTS_PER_ATOM,
     SURFACE_DEFAULT_PROBE_RADIUS,
     VOXEL_DEFAULT_RESOLUTION,
@@ -398,31 +394,23 @@ class ProteinFeaturizer:
 
     def get_surface(
         self,
-        grid_density: float = SURFACE_DEFAULT_GRID_DENSITY,
-        threshold: float = SURFACE_DEFAULT_THRESHOLD,
-        sharpness: float = SURFACE_DEFAULT_SHARPNESS,
         include_features: bool = True,
-        max_memory_gb: float = SURFACE_DEFAULT_MAX_MEMORY_GB,
-        device: Optional[str] = None,
-        mode: str = "mesh",
         n_points_per_atom: int = SURFACE_DEFAULT_POINTS_PER_ATOM,
         probe_radius: float = SURFACE_DEFAULT_PROBE_RADIUS,
     ) -> Optional[Dict[str, np.ndarray]]:
         """
-        Create a protein surface from atom coordinates.
+        Create a protein surface point cloud from atom coordinates.
 
         Args:
-            mode: "mesh" for marching cubes mesh, "point_cloud" for SAS point cloud.
-            n_points_per_atom: Points per atom for point cloud mode (default: 100).
-            probe_radius: Solvent probe radius for point cloud mode (default: 1.4).
+            include_features: Compute dMaSIF-style vertex features.
+            n_points_per_atom: Points per atom (default: 100).
+            probe_radius: Solvent probe radius (default: 1.4).
 
         Returns:
-            Dict with "points", "normals" (and legacy "verts"). "faces" is
-            included only in mesh mode. Plus protein-tailored residue/geometric
-            features mapped to the surface when include_features is True.
+            Dict with "points", "normals" (and legacy "verts"), plus
+            protein-tailored residue/geometric features when include_features is True.
         """
-        cache_key = ('surface', grid_density, threshold, sharpness,
-                     include_features, max_memory_gb, device, mode,
+        cache_key = ('surface', include_features,
                      n_points_per_atom, probe_radius)
         if cache_key in self._cache:
             return self._cache[cache_key]
@@ -460,20 +448,14 @@ class ProteinFeaturizer:
                 coords=coords,
                 radii=radii,
                 atom_metadata=atom_metadata,
-                grid_density=grid_density,
-                threshold=threshold,
-                sharpness=sharpness,
                 include_features=include_features,
-                max_memory_gb=max_memory_gb,
-                device=device,
-                mode=mode,
                 n_points_per_atom=n_points_per_atom,
                 probe_radius=probe_radius,
             )
         except Exception as exc:  # pragma: no cover - optional dependency
             raise ImportError(
-                "Surface featurization requires optional dependencies (open3d, scikit-image, trimesh). "
-                "Install them to enable surface features."
+                "Surface featurization requires scipy. "
+                "Install it to enable surface features."
             ) from exc
         if surface is None:
             self._cache[cache_key] = None
@@ -628,6 +610,12 @@ class ProteinFeaturizer:
                         current_count += 1
                     residue_count[i] = current_count
 
+            # Build residue_atom_indices (reverse mapping)
+            num_residues = int(residue_count.max().item()) + 1 if len(residue_count) > 0 else 0
+            residue_atom_indices = [[] for _ in range(num_residues)]
+            for atom_idx in range(len(residue_count)):
+                residue_atom_indices[residue_count[atom_idx].item()].append(atom_idx)
+
             # --- Edge features ---
             src, dst = edges
 
@@ -653,6 +641,8 @@ class ProteinFeaturizer:
                 'atom_element': atom_features['atom_element'],
                 'residue_number': residue_number_tensor,
                 'residue_count': residue_count,
+                'atom_to_residue': residue_count,
+                'residue_atom_indices': residue_atom_indices,
                 'b_factor': atom_features['b_factor'],
                 'b_factor_zscore': atom_features['b_factor_zscore'],
                 'is_backbone': atom_features['is_backbone'],

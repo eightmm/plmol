@@ -24,14 +24,13 @@ def main() -> None:
     try:
         surface = ligand.featurize(
             "surface",
-            surface_kwargs={"grid_density": 2.5, "threshold": 0.5, "sharpness": 1.5},
             generate_conformer=True,
         )["surface"]
         if surface is None:
             print("Surface extraction failed (returned None).")
         else:
-            print(f"Surface verts: {surface['verts'].shape}")
-            print(f"Surface faces: {surface['faces'].shape}")
+            print(f"Surface points: {surface['points'].shape}")
+            print(f"Surface normals: {surface['normals'].shape}")
     except Exception as exc:
         print(f"Surface extraction skipped: {exc}")
 
