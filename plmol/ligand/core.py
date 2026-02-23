@@ -81,8 +81,11 @@ class Ligand(BaseMolecule):
             from .descriptors import MoleculeFeaturizer
             mol_3d = MoleculeFeaturizer._ensure_3d_conformer(self._rdmol)
             if mol_3d is not None and mol_3d.GetNumConformers() > 0:
+                # _ensure_3d_conformer adds Hs internally, so remove them
+                # to match the heavy-atom-only _rdmol before transferring
+                mol_noh = Chem.RemoveHs(mol_3d)
                 self._rdmol.RemoveAllConformers()
-                self._rdmol.AddConformer(mol_3d.GetConformer(), assignId=True)
+                self._rdmol.AddConformer(mol_noh.GetConformer(), assignId=True)
                 self._coords = self._rdmol.GetConformer().GetPositions()
 
     @property

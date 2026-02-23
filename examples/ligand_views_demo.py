@@ -5,7 +5,7 @@ Demonstrates the container-style interface for ligand representations:
 graph, fingerprint, surface, and SMILES.
 """
 
-from plmol.mol.ligand import Ligand
+from plmol import Ligand
 
 
 def main() -> None:
@@ -15,11 +15,12 @@ def main() -> None:
     print(f"SMILES: {ligand.smiles}")
 
     graph = ligand.featurize("graph")["graph"]
-    print(f"Graph nodes: {graph['node']['node_feats'].shape}")
-    print(f"Graph edges: {graph['edge']['edge_feats'].shape}")
+    print(f"Graph node_features: {graph['node_features'].shape}")
+    print(f"Graph adjacency: {graph['adjacency'].shape}")
 
     fingerprint = ligand.featurize("fingerprint")["fingerprint"]
-    print(f"Morgan fingerprint: {fingerprint.shape}")
+    print(f"Fingerprint keys: {sorted(fingerprint.keys())}")
+    print(f"ECFP4: {fingerprint['ecfp4'].shape}")
 
     try:
         surface = ligand.featurize(
