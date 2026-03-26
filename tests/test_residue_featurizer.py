@@ -76,4 +76,4 @@ class TestResidueFeaturizerReal:
         sasa = rf.calculate_sasa()
         assert isinstance(sasa, torch.Tensor)
         assert sasa.ndim == 2
-        assert sasa.shape[1] == 10
+        assert sasa.shape[1] == 12

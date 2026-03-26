@@ -176,10 +176,19 @@ class AtomFeaturizer:
         """
         # Calculate SASA using FreeSASA
         if freesasa is None:
-            raise ImportError(
-                "freesasa is required for atom-level SASA calculation. "
-                "Install it with: pip install freesasa"
+            logger.warning(
+                "freesasa is not available for atom-level SASA calculation. "
+                "Returning zeros. Install it with: pip install freesasa"
             )
+            empty_sasa = torch.zeros(0, dtype=torch.float32)
+            empty_info = {
+                'residue_name': [],
+                'residue_number': torch.zeros(0, dtype=torch.long),
+                'atom_name': [],
+                'chain_label': [],
+                'radius': torch.zeros(0, dtype=torch.float32),
+            }
+            return empty_sasa, empty_info
         structure = freesasa.Structure(pdb_file)
         result = freesasa.calc(structure)
 
@@ -220,13 +229,12 @@ class AtomFeaturizer:
     def _collect_per_atom_data(self, parser: 'PDBParser') -> Dict[str, list]:
         """Collect per-atom properties from parsed protein atoms.
 
-        Returns dict of lists: residue_tokens, atom_elements, b_factors,
+        Returns dict of lists: residue_tokens, atom_elements,
         is_backbone, formal_charges, is_hbond_donor, is_hbond_acceptor,
         atom_names, res_names, res_nums, chain_ids.
         """
         residue_tokens = []
         atom_elements = []
-        b_factors = []
         is_backbone = []
         formal_charges = []
         is_hbond_donor = []
@@ -262,7 +270,6 @@ class AtomFeaturizer:
                     element_type = PROTEIN_ELEMENT_TYPES['UNK']
             atom_elements.append(element_type)
 
-            b_factors.append(min(atom.b_factor / 100.0, 1.0))
             is_backbone.append(1.0 if atom.atom_name in BACKBONE_ATOM_SET else 0.0)
             formal_charges.append(FORMAL_CHARGE_MAP.get((res_name_clean, atom.atom_name), 0.0))
 
@@ -283,7 +290,7 @@ class AtomFeaturizer:
 
         return {
             'residue_tokens': residue_tokens, 'atom_elements': atom_elements,
-            'b_factors': b_factors, 'is_backbone': is_backbone,
+            'is_backbone': is_backbone,
             'formal_charges': formal_charges, 'is_hbond_donor': is_hbond_donor,
             'is_hbond_acceptor': is_hbond_acceptor, 'atom_names': atom_names,
             'res_names': res_names, 'res_nums': res_nums, 'chain_ids': chain_ids,
@@ -292,8 +299,9 @@ class AtomFeaturizer:
     def _compute_derived_scalars(
         self, parser: 'PDBParser', per_atom: Dict[str, list],
         atom_sasa: torch.Tensor, min_len: int,
+        pdb_file: str,
     ) -> Dict[str, torch.Tensor]:
-        """Compute relative SASA, secondary structure, and B-factor z-score."""
+        """Compute relative SASA, burial index, polar classification, and secondary structure."""
         # Relative SASA
         sasa_truncated = atom_sasa[:min_len]
         relative_sasa = torch.zeros(min_len, dtype=torch.float32)
@@ -301,32 +309,33 @@ class AtomFeaturizer:
             max_sasa = RESIDUE_MAX_SASA.get(per_atom['res_names'][i], 200.0)
             relative_sasa[i] = min(sasa_truncated[i].item() / max_sasa, 1.0) if max_sasa > 0 else 0.0
 
+        # Burial index: 1.0 = fully buried, 0.0 = fully exposed
+        burial_index = 1.0 - relative_sasa
+
+        # Per-atom polar/apolar SASA classification via freesasa.Classifier
+        is_polar_sasa = torch.zeros(min_len, dtype=torch.float32)
+        if freesasa is not None:
+            try:
+                classifier = freesasa.Classifier()
+                for i in range(min_len):
+                    res_name = per_atom['res_names'][i]
+                    atom_name = per_atom['atom_names'][i]
+                    atom_class = classifier.classify(res_name, atom_name)
+                    is_polar_sasa[i] = 1.0 if atom_class == freesasa.polar else 0.0
+            except Exception:
+                logger.warning("freesasa.Classifier failed; is_polar_sasa set to zeros.")
+
         # Secondary structure from phi/psi
         ss = self._compute_secondary_structure(
             parser, per_atom['atom_names'][:min_len], min_len
         )
 
-        # Per-chain B-factor z-score
-        b_factor_tensor = torch.tensor(per_atom['b_factors'][:min_len], dtype=torch.float32)
-        b_factor_zscore = torch.zeros(min_len, dtype=torch.float32)
-        chain_groups: Dict[str, List[int]] = {}
-        for i, cid in enumerate(per_atom['chain_ids'][:min_len]):
-            if cid not in chain_groups:
-                chain_groups[cid] = []
-            chain_groups[cid].append(i)
-        for indices in chain_groups.values():
-            idx = torch.tensor(indices, dtype=torch.long)
-            chain_b = b_factor_tensor[idx]
-            mean, std = chain_b.mean(), chain_b.std()
-            if std > 1e-6:
-                b_factor_zscore[idx] = (chain_b - mean) / std
-
         return {
             'sasa': sasa_truncated,
             'relative_sasa': relative_sasa,
+            'burial_index': burial_index,
+            'is_polar_sasa': is_polar_sasa,
             'secondary_structure': ss,
-            'b_factor': b_factor_tensor,
-            'b_factor_zscore': b_factor_zscore,
         }
 
     def get_all_atom_features(self, pdb_file: str) -> Dict[str, torch.Tensor]:
@@ -347,18 +356,18 @@ class AtomFeaturizer:
                 f"Truncating to {min_len} atoms."
             )
 
-        derived = self._compute_derived_scalars(parser, per_atom, atom_sasa, min_len)
+        derived = self._compute_derived_scalars(parser, per_atom, atom_sasa, min_len, pdb_file)
 
         return {
             'token': token[:min_len],
             'coords': coord[:min_len],
             'sasa': derived['sasa'],
             'relative_sasa': derived['relative_sasa'],
+            'burial_index': derived['burial_index'],
+            'is_polar_sasa': derived['is_polar_sasa'],
             'residue_token': torch.tensor(per_atom['residue_tokens'][:min_len], dtype=torch.long),
             'atom_element': torch.tensor(per_atom['atom_elements'][:min_len], dtype=torch.long),
             'radius': atom_info['radius'][:min_len] if len(atom_info['radius']) >= min_len else atom_info['radius'],
-            'b_factor': derived['b_factor'],
-            'b_factor_zscore': derived['b_factor_zscore'],
             'is_backbone': torch.tensor(per_atom['is_backbone'][:min_len], dtype=torch.float32),
             'formal_charge': torch.tensor(per_atom['formal_charges'][:min_len], dtype=torch.float32),
             'is_hbond_donor': torch.tensor(per_atom['is_hbond_donor'][:min_len], dtype=torch.float32),
@@ -492,57 +501,6 @@ class AtomFeaturizer:
         y = np.dot(np.cross(b1, v), w)
 
         return math.atan2(y, x)
-
-    def get_residue_aggregated_features(self, pdb_file: str) -> Dict[str, torch.Tensor]:
-        """
-        Get residue-level features by aggregating atom features.
-
-        Args:
-            pdb_file: Path to PDB file
-
-        Returns:
-            Dictionary with residue-aggregated features
-        """
-        # Get all atom features
-        atom_features = self.get_all_atom_features(pdb_file)
-
-        # Group by residue
-        residue_numbers = atom_features['metadata']['residue_numbers']
-        unique_residues = torch.unique(residue_numbers)
-
-        residue_features = {
-            'residue_token': [],
-            'center_of_mass': [],
-            'total_sasa': [],
-            'mean_sasa': [],
-            'n_atoms': []
-        }
-
-        for res_num in unique_residues:
-            mask = residue_numbers == res_num
-
-            # Get residue token (should be same for all atoms in residue)
-            res_tokens = atom_features['residue_token'][mask]
-            residue_features['residue_token'].append(res_tokens[0])
-
-            # Calculate center of mass
-            coords = atom_features['coords'][mask]
-            center_of_mass = coords.mean(dim=0)
-            residue_features['center_of_mass'].append(center_of_mass)
-
-            # Aggregate SASA
-            sasa = atom_features['sasa'][mask]
-            residue_features['total_sasa'].append(sasa.sum())
-            residue_features['mean_sasa'].append(sasa.mean())
-
-            # Count atoms
-            residue_features['n_atoms'].append(mask.sum())
-
-        # Convert to tensors
-        for key in residue_features:
-            residue_features[key] = torch.stack(residue_features[key]) if key == 'center_of_mass' else torch.tensor(residue_features[key])
-
-        return residue_features
 
 
 # Convenience function for direct use

@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover - optional dependency
 
 from .descriptors import MoleculeFeaturizer
 from .fragment import fragment_on_rotatable_bonds
+from ..rdkit_utils import ensure_3d_conformer, has_3d, prepare_mol
 from ..surface import build_ligand_surface
 from ..voxel import build_ligand_voxel
 from ..constants import (
@@ -143,7 +144,8 @@ class LigandFeaturizer:
 
         if "fingerprint" in modes or "morgan" in modes:
             fingerprint_kwargs = fingerprint_kwargs or {}
-            results["fingerprint"] = self.get_morgan_fingerprint(**fingerprint_kwargs)
+            include_fps = fingerprint_kwargs.pop("include_fps", None)
+            results["fingerprint"] = self.get_features(include_fps=include_fps)
 
         if "surface" in modes:
             surface_kwargs = surface_kwargs or {}
@@ -207,7 +209,7 @@ class LigandFeaturizer:
             knn_cutoff=knn_cutoff,
         )
         if standardized:
-            return self._standardize_graph(node, edge, adj)
+            return self._standardize_graph(node, edge, adj, featurizer)
         return node, edge, adj
 
     def get_features(
@@ -282,7 +284,14 @@ class LigandFeaturizer:
         coords = conformer.GetPositions()
 
         cache_key = self._build_surface_cache_key(
-            mol, coords, include_features=include_features,
+            mol, coords,
+            include_features=include_features,
+            charge_method=charge_method,
+            curvature_scales=curvature_scales,
+            knn_atoms=knn_atoms,
+            extra_atom_features=extra_atom_features,
+            n_points_per_atom=n_points_per_atom,
+            probe_radius=probe_radius,
         )
         if mol_or_smiles is None and cache_key in self._surface_cache:
             return self._surface_cache[cache_key]
@@ -308,7 +317,7 @@ class LigandFeaturizer:
                 n_points_per_atom=n_points_per_atom,
                 probe_radius=probe_radius,
             )
-        except Exception as exc:  # pragma: no cover - optional dependency
+        except ImportError as exc:  # pragma: no cover - optional dependency
             raise ImportError(
                 "Surface featurization requires scipy. "
                 "Install it to enable surface features."
@@ -396,14 +405,16 @@ class LigandFeaturizer:
         if mol_or_smiles is None:
             return self._mol
         if isinstance(mol_or_smiles, str):
-            mol = Chem.MolFromSmiles(mol_or_smiles)
-            if mol is None:
-                raise ValueError(f"Invalid SMILES: {mol_or_smiles}")
-            return mol
+            return prepare_mol(
+                mol_or_smiles,
+                add_hs=self._add_hs,
+                canonicalize=self._canonicalize,
+            )
         return mol_or_smiles
 
     def _standardize_graph(
-        self, node: Dict[str, Any], edge: Dict[str, Any], adj: Any
+        self, node: Dict[str, Any], edge: Dict[str, Any], adj: Any,
+        featurizer: Optional["MoleculeFeaturizer"] = None,
     ) -> Dict[str, Any]:
         if not isinstance(adj, torch.Tensor):
             adj = torch.as_tensor(adj)
@@ -433,6 +444,19 @@ class LigandFeaturizer:
             n_atoms = int(graph["node_features"].shape[0]) if graph["node_features"] is not None else 0
             coords = torch.zeros((n_atoms, 3), dtype=torch.float32)
         graph["coords"] = coords
+
+        # Hierarchical fragment mappings (mirrors protein atom_to_residue)
+        feat = featurizer if featurizer is not None else self._ligand_base_featurizer
+        mol = feat.get_rdkit_mol()
+        frag_result = fragment_on_rotatable_bonds(mol)
+        graph["atom_to_fragment"] = frag_result["atom_to_fragment"]
+        graph["fragment_atom_indices"] = frag_result["fragment_atom_indices"]
+        graph["fragment_adjacency"] = frag_result["fragment_adjacency"]
+        graph["num_fragments"] = frag_result["num_fragments"]
+
+        # Molecule-level descriptors (62-dim, same space as fragment_features)
+        graph["molecule_features"] = feat.get_descriptors().numpy().astype(np.float32)
+
         return graph
 
     @staticmethod
@@ -461,8 +485,8 @@ class LigandFeaturizer:
     def _generate_conformer(self, mol: "Chem.Mol") -> None:
         if AllChem is None:
             raise ImportError("RDKit AllChem is required to generate conformers.")
-        mol_3d = MoleculeFeaturizer._ensure_3d_conformer(mol)
-        if mol_3d is not None and mol_3d.GetNumConformers() > 0:
+        mol_3d = ensure_3d_conformer(mol)
+        if mol_3d is not None and has_3d(mol_3d):
             mol.RemoveAllConformers()
             mol.AddConformer(mol_3d.GetConformer(), assignId=True)
 
@@ -471,6 +495,12 @@ class LigandFeaturizer:
         mol: "Chem.Mol",
         coords: np.ndarray,
         include_features: bool,
+        charge_method: str = "gasteiger",
+        curvature_scales: tuple = SURFACE_DEFAULT_CURVATURE_SCALES,
+        knn_atoms: int = SURFACE_DEFAULT_KNN_ATOMS,
+        extra_atom_features: Optional[Dict[str, np.ndarray]] = None,
+        n_points_per_atom: int = SURFACE_DEFAULT_POINTS_PER_ATOM,
+        probe_radius: float = SURFACE_DEFAULT_PROBE_RADIUS,
     ) -> str:
         coords32 = np.asarray(coords, dtype=np.float32)
         coord_sig = (
@@ -478,7 +508,15 @@ class LigandFeaturizer:
             round(float(coords32.mean()), 4),
             round(float(coords32.std()), 4),
         )
-        return f"{id(mol)}|{coord_sig}|{int(include_features)}"
+        extra_key = (
+            frozenset(extra_atom_features.keys()) if extra_atom_features else None
+        )
+        return (
+            f"{id(mol)}|{coord_sig}|{int(include_features)}"
+            f"|{charge_method}|{tuple(curvature_scales)}"
+            f"|{knn_atoms}|{n_points_per_atom}|{probe_radius}"
+            f"|{extra_key}"
+        )
 
     @property
     def num_atoms(self) -> int:

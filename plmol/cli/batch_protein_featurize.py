@@ -16,7 +16,7 @@ import time
 import tempfile
 import uuid
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import torch
@@ -72,6 +72,51 @@ def standardize_pdb_to_tmp(
     return tmp_path
 
 
+def _build_save_dict(data, pdb_id: str, pdb_path: Path, standardize: bool, ptm_handling: str) -> dict:
+    """Build the output dict from featurized data."""
+    return {
+        # Atom-level (integer indices for nn.Embedding lookup)
+        'atom_tokens': data.atom_tokens,           # [N_atom] - indices 0-186 (187 classes)
+        'atom_coords': data.atom_coords,           # [N_atom, 3]
+        'atom_sasa': data.atom_sasa,               # [N_atom]
+        'atom_elements': data.atom_elements,       # [N_atom] - indices 0-7 (8 classes)
+        'atom_residue_types': data.atom_residue_types,  # [N_atom] - indices 0-21 (22 classes)
+        'atom_names': data.atom_names,
+
+        # Residue-level
+        'residue_features': data.residue_features,  # [N_res, 76]
+        'residue_ca_coords': data.residue_ca_coords,  # [N_res, 3]
+        'residue_sc_coords': data.residue_sc_coords,  # [N_res, 3]
+        'residue_names': data.residue_names,
+        'residue_ids': data.residue_ids,
+
+        # ESM embeddings (6 tensors)
+        'esmc_embeddings': data.esmc_embeddings,   # [N_res, 1152]
+        'esmc_bos': data.esmc_bos,                 # [1152]
+        'esmc_eos': data.esmc_eos,                 # [1152]
+        'esm3_embeddings': data.esm3_embeddings,   # [N_res, 1536]
+        'esm3_bos': data.esm3_bos,                 # [1536]
+        'esm3_eos': data.esm3_eos,                 # [1536]
+
+        # Residue vector features
+        'residue_vector_features': data.residue_vector_features,  # [N_res, 31, 3]
+
+        # Mapping
+        'atom_to_residue': data.atom_to_residue,   # [N_atom]
+        'residue_atom_indices': data.residue_atom_indices,
+        'residue_atom_mask': data.residue_atom_mask,
+        'num_atoms_per_residue': data.num_atoms_per_residue,
+
+        # Metadata
+        'num_atoms': data.num_atoms,
+        'num_residues': data.num_residues,
+        'pdb_id': pdb_id,
+        'source_path': str(pdb_path),
+        'standardized': standardize,
+        'ptm_handling': ptm_handling if standardize else None,
+    }
+
+
 def process_single_file(args: Tuple) -> Tuple[str, bool, str]:
     """
     Process a single PDB file (for multi-process mode).
@@ -106,51 +151,8 @@ def process_single_file(args: Tuple) -> Tuple[str, bool, str]:
         # Extract features
         data = featurizer.featurize(pdb_to_process)
 
-        # Convert to dict for saving
-        save_dict = {
-            # Atom-level (integer indices for nn.Embedding lookup)
-            'atom_tokens': data.atom_tokens,           # [N_atom] - indices 0-186 (187 classes)
-            'atom_coords': data.atom_coords,           # [N_atom, 3]
-            'atom_sasa': data.atom_sasa,               # [N_atom]
-            'atom_elements': data.atom_elements,       # [N_atom] - indices 0-7 (8 classes)
-            'atom_residue_types': data.atom_residue_types,  # [N_atom] - indices 0-21 (22 classes)
-            'atom_names': data.atom_names,
-
-            # Residue-level
-            'residue_features': data.residue_features,  # [N_res, 76]
-            'residue_ca_coords': data.residue_ca_coords,  # [N_res, 3]
-            'residue_sc_coords': data.residue_sc_coords,  # [N_res, 3]
-            'residue_names': data.residue_names,
-            'residue_ids': data.residue_ids,
-
-            # ESM embeddings (6 tensors)
-            'esmc_embeddings': data.esmc_embeddings,   # [N_res, 1152]
-            'esmc_bos': data.esmc_bos,                 # [1152]
-            'esmc_eos': data.esmc_eos,                 # [1152]
-            'esm3_embeddings': data.esm3_embeddings,   # [N_res, 1536]
-            'esm3_bos': data.esm3_bos,                 # [1536]
-            'esm3_eos': data.esm3_eos,                 # [1536]
-
-            # Residue vector features
-            'residue_vector_features': data.residue_vector_features,  # [N_res, 31, 3]
-
-            # Mapping
-            'atom_to_residue': data.atom_to_residue,   # [N_atom]
-            'residue_atom_indices': data.residue_atom_indices,
-            'residue_atom_mask': data.residue_atom_mask,
-            'num_atoms_per_residue': data.num_atoms_per_residue,
-
-            # Metadata
-            'num_atoms': data.num_atoms,
-            'num_residues': data.num_residues,
-            'pdb_id': pdb_id,
-            'source_path': str(pdb_path),
-            'standardized': standardize,
-            'ptm_handling': ptm_handling if standardize else None,
-        }
-
         # Save
-        torch.save(save_dict, output_path)
+        torch.save(_build_save_dict(data, pdb_id, pdb_path, standardize, ptm_handling), output_path)
 
         return (pdb_id, True, f"ok ({data.num_residues} residues)")
 
@@ -170,7 +172,6 @@ def process_single_file_shared_featurizer(
     featurizer: HierarchicalFeaturizer,
     standardize: bool = False,
     ptm_handling: str = 'unk',
-    standardizer: Optional[PDBStandardizer] = None
 ) -> Tuple[str, bool, str]:
     """
     Process a single PDB file with shared featurizer (for single-process mode).
@@ -189,7 +190,7 @@ def process_single_file_shared_featurizer(
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Standardize if requested
-        if standardize and standardizer:
+        if standardize:
             tmp_pdb_path = standardize_pdb_to_tmp(pdb_path, ptm_handling)
             pdb_to_process = tmp_pdb_path
         else:
@@ -198,51 +199,8 @@ def process_single_file_shared_featurizer(
         # Extract features
         data = featurizer.featurize(pdb_to_process)
 
-        # Convert to dict for saving
-        save_dict = {
-            # Atom-level (integer indices for nn.Embedding lookup)
-            'atom_tokens': data.atom_tokens,           # [N_atom] - indices 0-186 (187 classes)
-            'atom_coords': data.atom_coords,           # [N_atom, 3]
-            'atom_sasa': data.atom_sasa,               # [N_atom]
-            'atom_elements': data.atom_elements,       # [N_atom] - indices 0-7 (8 classes)
-            'atom_residue_types': data.atom_residue_types,  # [N_atom] - indices 0-21 (22 classes)
-            'atom_names': data.atom_names,
-
-            # Residue-level
-            'residue_features': data.residue_features,  # [N_res, 76]
-            'residue_ca_coords': data.residue_ca_coords,  # [N_res, 3]
-            'residue_sc_coords': data.residue_sc_coords,  # [N_res, 3]
-            'residue_names': data.residue_names,
-            'residue_ids': data.residue_ids,
-
-            # ESM embeddings (6 tensors)
-            'esmc_embeddings': data.esmc_embeddings,   # [N_res, 1152]
-            'esmc_bos': data.esmc_bos,                 # [1152]
-            'esmc_eos': data.esmc_eos,                 # [1152]
-            'esm3_embeddings': data.esm3_embeddings,   # [N_res, 1536]
-            'esm3_bos': data.esm3_bos,                 # [1536]
-            'esm3_eos': data.esm3_eos,                 # [1536]
-
-            # Residue vector features
-            'residue_vector_features': data.residue_vector_features,  # [N_res, 31, 3]
-
-            # Mapping
-            'atom_to_residue': data.atom_to_residue,   # [N_atom]
-            'residue_atom_indices': data.residue_atom_indices,
-            'residue_atom_mask': data.residue_atom_mask,
-            'num_atoms_per_residue': data.num_atoms_per_residue,
-
-            # Metadata
-            'num_atoms': data.num_atoms,
-            'num_residues': data.num_residues,
-            'pdb_id': pdb_id,
-            'source_path': str(pdb_path),
-            'standardized': standardize,
-            'ptm_handling': ptm_handling if standardize else None,
-        }
-
         # Save
-        torch.save(save_dict, output_path)
+        torch.save(_build_save_dict(data, pdb_id, pdb_path, standardize, ptm_handling), output_path)
 
         return (pdb_id, True, f"{data.num_residues} res")
 
@@ -317,14 +275,11 @@ def main():
         )
         logger.info("Featurizer ready")
 
-        # Create standardizer if needed
-        standardizer = PDBStandardizer(ptm_handling=args.ptm_handling) if args.standardize else None
-
         with tqdm(pdb_files, desc="Processing", unit="file") as pbar:
             for pdb_path in pbar:
                 pdb_id, success, msg = process_single_file_shared_featurizer(
                     pdb_path, args.input_dir, args.output_dir, featurizer,
-                    args.standardize, args.ptm_handling, standardizer
+                    args.standardize, args.ptm_handling
                 )
 
                 if success:

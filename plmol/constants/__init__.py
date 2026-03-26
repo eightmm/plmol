@@ -172,6 +172,11 @@ from .physical_properties import (
 
     # Normalization
     NORM_CONSTANTS,
+
+    # Surface/voxel feature constants
+    ATOM_TYPE_MAP,
+    KD_SCALE,
+    CHARGED_RESIDUES,
 )
 
 # =============================================================================
@@ -292,6 +297,9 @@ __all__ = [
     'ATOMIC_MASS',
     'TYPICAL_BOND_LENGTHS',
     'NORM_CONSTANTS',
+    'ATOM_TYPE_MAP',
+    'KD_SCALE',
+    'CHARGED_RESIDUES',
 
     # Runtime defaults
     'IO_SUPPORTED_LIGAND_EXTENSIONS',

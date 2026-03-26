@@ -253,3 +253,28 @@ ATOMIC_MASS = {
     35: 79.904,  # Br
     53: 126.90,  # I
 }
+
+# =============================================================================
+# Molecular Surface / Voxel Feature Constants
+# =============================================================================
+
+# Atom type index for 6-class scheme: C, N, O, S, Halogen, Other
+# Keys are atomic numbers; value is 0-indexed class (Other = 5, used as default)
+ATOM_TYPE_MAP = {6: 0, 7: 1, 8: 2, 16: 3, 9: 4, 17: 4, 35: 4, 53: 4}
+
+# Kyte-Doolittle hydrophobicity scale (per residue name)
+KD_SCALE = {
+    'ILE': 4.5, 'VAL': 4.2, 'LEU': 3.8, 'PHE': 2.8, 'CYS': 2.5,
+    'MET': 1.9, 'ALA': 1.8, 'GLY': -0.4, 'THR': -0.7, 'SER': -0.8,
+    'TRP': -0.9, 'TYR': -1.3, 'PRO': -1.6, 'HIS': -3.2, 'GLU': -3.5,
+    'GLN': -3.5, 'ASP': -3.5, 'ASN': -3.5, 'LYS': -3.9, 'ARG': -4.5,
+}
+
+# Partial charges for charged residue atoms (residue → atom → charge)
+CHARGED_RESIDUES = {
+    'ASP': {'OD1': -0.5, 'OD2': -0.5},
+    'GLU': {'OE1': -0.5, 'OE2': -0.5},
+    'LYS': {'NZ': 1.0},
+    'ARG': {'NH1': 0.5, 'NH2': 0.5},
+    'HIS': {'ND1': 0.5, 'NE2': 0.5},
+}

@@ -11,10 +11,14 @@ import numpy as np
 from scipy.spatial.distance import cdist
 from rdkit import Chem
 from ..constants import POCKET_MAX_ATOMS_PER_RESIDUE
+from ..rdkit_utils import has_3d
 
 
 # Maximum heavy atoms per residue (covers all standard amino acids)
 MAX_ATOMS_PER_RESIDUE = POCKET_MAX_ATOMS_PER_RESIDUE
+
+# Metal elements to preserve from HETATM records
+_METAL_ELEMENTS = {'ZN', 'FE', 'MG', 'CA', 'MN', 'CU', 'CO', 'NI'}
 
 
 @dataclass
@@ -215,8 +219,8 @@ class PocketExtractor:
 
         if self._ligand_mol is None:
             raise ValueError("Failed to load ligand molecule")
-        if self._ligand_mol.GetNumConformers() == 0:
-            raise ValueError("Ligand must have 3D coordinates")
+        if not has_3d(self._ligand_mol):
+            raise ValueError("Ligand must have a 3D conformer required for pocket extraction")
 
         # Extract ligand coordinates (heavy atoms only)
         self._ligand_coords = self._get_ligand_coords(self._ligand_mol)
@@ -260,9 +264,25 @@ class PocketExtractor:
         """
         residue_coords: Dict[Tuple, List[List[float]]] = {}
         residue_lines: Dict[Tuple, List[str]] = {}
+        metal_lines: List[str] = []
+        metal_coords: List[List[float]] = []
 
         with open(self.protein_pdb_path, 'r') as f:
             for line in f:
+                # Collect HETATM metal atoms for pocket metal preservation
+                if line.startswith('HETATM'):
+                    element = line[76:78].strip().upper() if len(line) > 76 else ''
+                    if element in _METAL_ELEMENTS:
+                        try:
+                            x = float(line[30:38])
+                            y = float(line[38:46])
+                            z = float(line[46:54])
+                        except ValueError:
+                            continue
+                        metal_lines.append(line)
+                        metal_coords.append([x, y, z])
+                    continue
+
                 # ATOM lines only (standard amino acids, no HETATM)
                 if not line.startswith('ATOM'):
                     continue
@@ -324,6 +344,13 @@ class PocketExtractor:
 
         self._num_residues = num_residues
 
+        # Store metal HETATM data for pocket extraction
+        self._metal_lines = metal_lines
+        self._metal_coords = (
+            np.array(metal_coords, dtype=np.float32) if metal_coords
+            else np.empty((0, 3), dtype=np.float32)
+        )
+
     def _compute_pocket_mask(
         self,
         ligand_coords: np.ndarray,
@@ -371,7 +398,8 @@ class PocketExtractor:
     def _extract_pocket_from_mask(
         self,
         pocket_mask: np.ndarray,
-        distance_cutoff: float
+        distance_cutoff: float,
+        ligand_coords: Optional[np.ndarray] = None,
     ) -> PocketInfo:
         """
         Extract pocket info from residue mask.
@@ -379,6 +407,7 @@ class PocketExtractor:
         Args:
             pocket_mask: Boolean array [num_residue]
             distance_cutoff: Distance cutoff used
+            ligand_coords: Ligand coordinates for metal proximity check
 
         Returns:
             PocketInfo with extracted pocket
@@ -391,6 +420,14 @@ class PocketExtractor:
             if is_pocket:
                 pocket_lines.extend(self._residue_lines[i])
                 pocket_residues.append(self._residue_keys[i])
+
+        # Include nearby metal HETATM lines
+        if ligand_coords is not None and len(self._metal_coords) > 0:
+            metal_dists = cdist(self._metal_coords, ligand_coords)
+            min_metal_dists = metal_dists.min(axis=1)
+            for j, dist in enumerate(min_metal_dists):
+                if dist < distance_cutoff:
+                    pocket_lines.append(self._metal_lines[j])
 
         # Create PDB block
         pdb_block = ''.join(pocket_lines) + 'END\n'
@@ -425,7 +462,7 @@ class PocketExtractor:
 
         distance_cutoff = distance_cutoff if distance_cutoff is not None else self.distance_cutoff
         pocket_mask = self._compute_pocket_mask(self._ligand_coords, distance_cutoff)
-        return self._extract_pocket_from_mask(pocket_mask, distance_cutoff)
+        return self._extract_pocket_from_mask(pocket_mask, distance_cutoff, self._ligand_coords)
 
     def extract_for_ligand(
         self,
@@ -459,21 +496,21 @@ class PocketExtractor:
 
         if ligand_mol is None:
             raise ValueError("Failed to load ligand molecule")
-        if ligand_mol.GetNumConformers() == 0:
-            raise ValueError("Ligand must have 3D coordinates")
+        if not has_3d(ligand_mol):
+            raise ValueError("Ligand must have a 3D conformer required for pocket extraction")
 
         # Get ligand coordinates
         ligand_coords = self._get_ligand_coords(ligand_mol)
 
         # Compute pocket mask and extract
         pocket_mask = self._compute_pocket_mask(ligand_coords, distance_cutoff)
-        return self._extract_pocket_from_mask(pocket_mask, distance_cutoff)
+        return self._extract_pocket_from_mask(pocket_mask, distance_cutoff, ligand_coords)
 
     def extract_batch(
         self,
         ligands: List[Union[str, Chem.Mol]],
         distance_cutoff: float = 6.0
-    ) -> List[PocketInfo]:
+    ) -> List[Optional[PocketInfo]]:
         """
         Extract pockets for multiple ligands efficiently.
 
@@ -482,7 +519,7 @@ class PocketExtractor:
             distance_cutoff: Distance cutoff in Angstroms
 
         Returns:
-            List of PocketInfo for each ligand
+            List of PocketInfo (or None for invalid ligands) for each ligand
 
         Examples:
             >>> extractor = PocketExtractor.from_protein("protein.pdb")

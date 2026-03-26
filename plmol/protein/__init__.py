@@ -15,7 +15,18 @@ from .geometry import (
     rbf_encode,
 )
 from .backbone_featurizer import compute_backbone_features, compute_edge_frame_features
-from .utils import *  # noqa: F401,F403
+from .utils import (
+    ParsedAtom,
+    ParsedResidue,
+    PDBParser,
+    is_atom_record,
+    is_hetatm_record,
+    is_hydrogen,
+    parse_pdb_line,
+    parse_pdb_atom_line,
+    normalize_residue_name,
+    calculate_sidechain_centroid,
+)
 
 __all__ = [
     "Protein",

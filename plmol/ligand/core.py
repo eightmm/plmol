@@ -2,7 +2,7 @@
 Ligand Representation
 """
 from ..base import BaseMolecule
-from typing import Any, Dict, Iterable, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, Optional, Union
 import numpy as np
 import torch
 
@@ -11,6 +11,7 @@ try:
 except ImportError:
     Chem = None
 
+from ..rdkit_utils import has_3d, ensure_3d_conformer
 from .featurizer import LigandFeaturizer
 
 class Ligand(BaseMolecule):
@@ -32,7 +33,7 @@ class Ligand(BaseMolecule):
         self._smiles: Optional[str] = None
         self._featurizer: Optional[LigandFeaturizer] = None
         self._featurizer_mol = None
-        self._featurizer_variants: Dict[Tuple[bool, int], LigandFeaturizer] = {}
+        self._featurizer_variants: Dict[bool, LigandFeaturizer] = {}
         if rdmol:
             if Chem is None:
                 raise ImportError(
@@ -41,7 +42,7 @@ class Ligand(BaseMolecule):
             self._smiles = Chem.MolToSmiles(rdmol)
             self._sequence = self._smiles  # Sequence for ligand is SMILES
             # Extract coords if available
-            if rdmol.GetNumConformers() > 0:
+            if has_3d(rdmol):
                 conf = rdmol.GetConformer()
                 self._coords = conf.GetPositions()
                 self._atoms = [a.GetSymbol() for a in rdmol.GetAtoms()]
@@ -78,15 +79,17 @@ class Ligand(BaseMolecule):
     def generate_conformer(self):
         """Generate 3D conformer using canonical method if missing."""
         if self._rdmol:
-            from .descriptors import MoleculeFeaturizer
-            mol_3d = MoleculeFeaturizer._ensure_3d_conformer(self._rdmol)
-            if mol_3d is not None and mol_3d.GetNumConformers() > 0:
-                # _ensure_3d_conformer adds Hs internally, so remove them
-                # to match the heavy-atom-only _rdmol before transferring
-                mol_noh = Chem.RemoveHs(mol_3d)
+            orig_num_atoms = self._rdmol.GetNumAtoms()
+            mol_3d = ensure_3d_conformer(self._rdmol)
+            if mol_3d is not None and has_3d(mol_3d):
+                # ensure_3d_conformer adds Hs internally; only remove them
+                # when the original mol doesn't have explicit Hs
+                if mol_3d.GetNumAtoms() != orig_num_atoms:
+                    mol_3d = Chem.RemoveHs(mol_3d)
                 self._rdmol.RemoveAllConformers()
-                self._rdmol.AddConformer(mol_noh.GetConformer(), assignId=True)
+                self._rdmol.AddConformer(mol_3d.GetConformer(), assignId=True)
                 self._coords = self._rdmol.GetConformer().GetPositions()
+                self._invalidate_caches()
 
     @property
     def smiles(self) -> Optional[str]:
@@ -102,8 +105,17 @@ class Ligand(BaseMolecule):
 
     @smiles.setter
     def smiles(self, value: str) -> None:
-        self._smiles = value
-        self._sequence = value
+        if Chem is None:
+            raise ImportError("RDKit is required to set SMILES.")
+        mol = Chem.MolFromSmiles(value)
+        if mol is None:
+            raise ValueError(f"Invalid SMILES string: '{value}'")
+        self._rdmol = mol
+        self._smiles = Chem.MolToSmiles(mol)
+        self._sequence = self._smiles
+        self._coords = None
+        self._atoms = []
+        self._invalidate_caches()
 
     @property
     def sequence(self) -> Optional[str]:
@@ -172,6 +184,16 @@ class Ligand(BaseMolecule):
             self.featurize(mode="fragment")
         return self._fragment
 
+    def _invalidate_caches(self) -> None:
+        """Clear cached featurizers so they are rebuilt from current _rdmol."""
+        self._featurizer = None
+        self._featurizer_mol = None
+        self._featurizer_variants.clear()
+        self._graph = None
+        self._fingerprint = None
+        self._fragment = None
+        self._surface = None
+
     def _get_featurizer(self, add_hs: Optional[bool] = None) -> LigandFeaturizer:
         if self._rdmol is None:
             raise ValueError("Ligand has no RDKit molecule. Initialize from SMILES/SDF first.")
@@ -185,7 +207,7 @@ class Ligand(BaseMolecule):
         if Chem is None:
             raise ImportError("RDKit is required for hydrogen variant featurization.")
 
-        key = (bool(add_hs), id(self._rdmol))
+        key = bool(add_hs)
         cached = self._featurizer_variants.get(key)
         if cached is not None:
             return cached
@@ -193,7 +215,7 @@ class Ligand(BaseMolecule):
         if add_hs:
             variant = Chem.AddHs(
                 self._rdmol,
-                addCoords=(self._rdmol.GetNumConformers() > 0),
+                addCoords=has_3d(self._rdmol),
             )
         else:
             variant = Chem.RemoveHs(self._rdmol)

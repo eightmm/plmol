@@ -45,11 +45,20 @@ class TestLigandProperties:
         lig.smiles = "CCC"
         assert lig.smiles == "CCC"
         assert lig.sequence == "CCC"
+        # Verify _rdmol was rebuilt
+        assert lig._rdmol is not None
+        assert lig._rdmol.GetNumAtoms() == 3
+
+    def test_smiles_setter_invalid(self, ethanol_smiles):
+        lig = Ligand.from_smiles(ethanol_smiles)
+        with pytest.raises(ValueError, match="Invalid SMILES"):
+            lig.smiles = "not_a_smiles_XXXXX"
 
     def test_sequence_setter(self, ethanol_smiles):
         lig = Ligand.from_smiles(ethanol_smiles)
         lig.sequence = "CCCC"
         assert lig.smiles == "CCCC"
+        assert lig._rdmol.GetNumAtoms() == 4
 
     def test_no_mol_raises(self):
         lig = Ligand()

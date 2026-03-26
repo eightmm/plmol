@@ -82,6 +82,11 @@ graph = result["graph"]
 | `distance_matrix` | `(N, N)` | `float32` | Euclidean distance (0 if no 3D) |
 | `distance_bounds` | `(N, N, 2)` | `float32` | DG lower/upper distance bounds |
 | `coords` | `(N, 3)` | `float32` | 3D coordinates (0 if no conformer) |
+| `atom_to_fragment` | `(N,)` | `int64` | Atom → fragment index mapping |
+| `fragment_atom_indices` | `List[List[int]]` | — | Fragment → atom indices (reverse) |
+| `fragment_adjacency` | `(F, F)` | `int64` | Fragment-level connectivity |
+| `num_fragments` | `int` | — | Number of fragments (F) |
+| `molecule_features` | `(62,)` | `float32` | Whole-molecule descriptors |
 
 Sparse conversion:
 
@@ -90,6 +95,16 @@ from plmol import LigandFeaturizer
 edge_index, edge_features = LigandFeaturizer.adjacency_to_bond_edges(graph["adjacency"])
 # edge_index: (2, E)  edge_features: (E, 37)
 ```
+
+### Implementation
+
+The graph featurizer is split across three files:
+
+- **`graph.py`** (`MoleculeGraphFeaturizer`): Orchestrator class that composes atom and edge features via mixins.
+- **`graph_atom_features.py`** (`AtomFeatureMixin`): Per-atom feature extraction (ring analysis, stereochemistry, partial charges, physical properties, topological features, SMARTS matching, neighborhood statistics).
+- **`graph_edge_features.py`** (`EdgeFeatureMixin`): Bond-level and pairwise feature extraction (bond features, pair features, distance matrices, distance bounds).
+
+The public API is unchanged: `MoleculeGraphFeaturizer.featurize(mol)` returns `(node_dict, edge_dict, adjacency_matrix)`.
 
 ### Node Features `(N, 98)`
 
@@ -137,6 +152,8 @@ Channels `[27:37]` are pair features (defined for all atom pairs).
 result = ligand.featurize(mode="fingerprint")
 fp = result["fingerprint"]
 ```
+
+Fingerprint generation is handled by `FingerprintGenerator` (`ligand/fingerprint_generator.py`), which uses lazy imports for optional dependencies (Pharm2D, Avalon).
 
 ### Default Output
 
@@ -189,7 +206,7 @@ All values normalized to [0, 1].
 | `[24:29]` | Ring subtypes | 5 | saturated_rings, aliphatic_rings, saturated_heterocycles, aliphatic_heterocycles, aromatic_heterocycles |
 | `[29:32]` | Misc | 3 | num_heteroatoms, formal_charge, chi0n |
 | `[32:37]` | Drug-likeness | 5 | lipinski_violations, passes_lipinski, qed, num_heavy_atoms, frac_csp3 |
-| `[37:40]` | Ring structure | 3 | n_ring_systems, max_ring_size, avg_ring_size |
+| `[37:40]` | Ring structure | 3 | n_atom_rings, max_ring_size, avg_ring_size |
 | `[40:44]` | Charge distribution | 4 | max_partial_charge, min_partial_charge, max_abs_partial_charge, min_abs_partial_charge |
 | `[44:50]` | ADMET filters | 6 | veber_violations, ghose_violations, egan_violations, muegge_violations, pfizer_375_alert, gsk_4400_pass |
 | `[50:52]` | Structural alerts | 2 | pains_alert_count, brenk_alert_count |
@@ -216,6 +233,7 @@ frag = result["fragment"]
 | `atom_to_fragment` | `ndarray (N,)` int64 | Maps each atom index to its fragment index |
 | `fragment_atom_indices` | `List[List[int]]` | Atom indices per fragment (reverse of `atom_to_fragment`) |
 | `fragment_adjacency` | `ndarray (F, F)` int64 | Symmetric binary adjacency between fragments |
+| `fragment_features` | `ndarray (F, 62)` float32 | Per-fragment RDKit descriptors (same 62-dim space as molecule-level `descriptors`) |
 | `num_fragments` | `int` | Number of fragments (F) |
 | `num_rotatable_bonds` | `int` | Number of rotatable bonds detected |
 
@@ -243,11 +261,32 @@ mol = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
 result = fragment_on_rotatable_bonds(mol, min_fragment_size=1)
 ```
 
+Fragment uses `rdkit_utils.prepare_mol` for molecule preparation and computes per-fragment descriptors via `MoleculeFeaturizer.get_descriptors()`.
+
 ### Edge Cases
 
 - **No rotatable bonds** (e.g., benzene): Returns 1 fragment containing the whole molecule.
 - **Single-atom molecule**: Returns 1 fragment, empty adjacency `(1, 1)`.
 - **`min_fragment_size > 1`**: Small fragments are iteratively merged into their largest adjacent fragment. All atoms remain mapped.
+
+---
+
+## Hierarchical Mappings (Atom <-> Fragment <-> Molecule)
+
+The graph dict embeds a 3-level hierarchy enabling atom->fragment pooling and fragment->molecule pooling in downstream ML models:
+
+```
+molecule_features (62,)           <- whole molecule descriptors
+    ^ aggregate fragment_features
+fragment_features (F, 62)         <- per-fragment descriptors (in fragment dict)
+fragment_adjacency (F, F)         <- fragment connectivity
+    ^ aggregate via fragment_atom_indices
+    v lookup via atom_to_fragment
+node_features (N, 98)             <- per-atom features
+adjacency (N, N, 37)              <- atom connectivity
+```
+
+This mirrors the protein side's `atom_to_residue` / `residue_atom_indices` convention.
 
 ---
 
@@ -266,6 +305,20 @@ surface = result["surface"]
 | `normals` | `(V, 3)` | Outward surface normals |
 | `features` | `(V, 31)` | Per-vertex chemical features |
 | `feature_names` | `list[str]` | Column names for features |
+
+---
+
+## Utility Module: `rdkit_utils`
+
+Centralized RDKit utility functions used across the ligand pipeline (`plmol/rdkit_utils.py`):
+
+| Function | Description |
+|----------|-------------|
+| `prepare_mol(mol_or_smiles, add_hs, canonicalize)` | Prepare molecule from SMILES or Mol with optional canonicalization and hydrogens |
+| `ensure_3d_conformer(mol, random_seed, optimize)` | Return molecule with 3D conformer (ETKDGv3 + MMFF), generating one if needed |
+| `has_3d(mol)` | Check whether molecule has a 3D conformer (uses `Is3D()` on the conformer, not just conformer existence) |
+| `canonicalize_mol(mol)` | Reorder atoms to canonical order, preserving coordinates |
+| `get_positions(mol)` | Extract 3D coordinates as `(N, 3)` array |
 
 ---
 
@@ -313,7 +366,7 @@ Channels (16): occupancy, atom type (6), charge, hydrophobicity, HBD, HBA, aroma
 
 ### MoleculeFeaturizer
 
-Descriptors and fingerprints.
+Descriptors and fingerprints. Delegates fingerprint generation to `FingerprintGenerator` (`ligand/fingerprint_generator.py`).
 
 ```python
 from plmol import MoleculeFeaturizer
@@ -332,7 +385,7 @@ node, edge, adj = featurizer.get_graph("CCO", distance_cutoff=5.0, knn_cutoff=8)
 
 ### MoleculeGraphFeaturizer
 
-Graph node/edge features (used internally by `MoleculeFeaturizer`).
+Graph node/edge features (used internally by `MoleculeFeaturizer`). Composed of `AtomFeatureMixin` (`graph_atom_features.py`) and `EdgeFeatureMixin` (`graph_edge_features.py`).
 
 ```python
 from plmol import MoleculeGraphFeaturizer

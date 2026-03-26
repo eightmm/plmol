@@ -5,30 +5,32 @@ This module provides ligand-level features (descriptors and fingerprints)
 and graph-level features (node and edge features) from RDKit mol objects or SMILES.
 """
 
+import logging
 import warnings
 from typing import Any, Dict, Iterable, Optional, Tuple, Union
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import torch
 from rdkit import Chem
-from rdkit import DataStructs
 from rdkit.Chem import (
     AllChem,
     Descriptors,
-    MACCSkeys,
     QED,
-    rdReducedGraphs,
     rdFingerprintGenerator,
     rdMolDescriptors,
 )
-from rdkit.Chem.Pharm2D import Generate, Gobbi_Pharm2D
 from rdkit.Chem import FilterCatalog as _FilterCatalogModule
-try:
-    from rdkit.Avalon import pyAvalonTools
-except ImportError:  # pragma: no cover - optional in some RDKit builds
-    pyAvalonTools = None
 
+from .fingerprint_generator import FingerprintGenerator
 from .graph import MoleculeGraphFeaturizer
+from ..rdkit_utils import (
+    canonicalize_mol,
+    prepare_mol,
+    ensure_3d_conformer,
+    has_3d,
+)
 
 
 class MoleculeFeaturizer:
@@ -129,7 +131,7 @@ class MoleculeFeaturizer:
         self.num_atoms = self._mol.GetNumAtoms()
         self.num_bonds = self._mol.GetNumBonds()
         self.num_rings = self._mol.GetRingInfo().NumRings()
-        self.has_3d = self._mol.GetNumConformers() > 0
+        self.has_3d = has_3d(self._mol)
 
     # =========================================================================
     # Molecule Preparation
@@ -137,30 +139,8 @@ class MoleculeFeaturizer:
 
     @staticmethod
     def _canonicalize_mol(mol: Chem.Mol) -> Chem.Mol:
-        """
-        Reorder atoms to canonical order.
-
-        This ensures the same molecule always produces the same atom ordering
-        regardless of the input order. Coordinates are also reordered.
-
-        Args:
-            mol: RDKit mol object
-
-        Returns:
-            RDKit mol object with atoms in canonical order
-        """
-        # Get canonical ranking for each atom
-        ranks = list(Chem.CanonicalRankAtoms(mol, breakTies=True))
-        # Convert ranks to new atom order: newOrder[new_idx] = old_idx
-        # ranks[old_idx] = new_idx, so we need inverse
-        new_order = [0] * len(ranks)
-        for old_idx, new_idx in enumerate(ranks):
-            new_order[new_idx] = old_idx
-        # Renumber atoms (this also reorders coordinates if present)
-        new_mol = Chem.RenumberAtoms(mol, new_order)
-        # Ensure ring info is initialized after renumbering
-        Chem.FastFindRings(new_mol)
-        return new_mol
+        """Reorder atoms to canonical order."""
+        return canonicalize_mol(mol)
 
     @staticmethod
     def _prepare_mol(
@@ -168,46 +148,8 @@ class MoleculeFeaturizer:
         add_hs: bool = False,
         canonicalize: bool = True
     ) -> Chem.Mol:
-        """
-        Prepare molecule from SMILES string or RDKit mol object.
-
-        Always creates a copy to avoid modifying the original molecule.
-        Preserves 3D coordinates when adding hydrogens if the molecule has a conformer.
-
-        Args:
-            mol_or_smiles: RDKit mol object or SMILES string
-            add_hs: Whether to add hydrogens
-            canonicalize: Whether to reorder atoms to canonical order
-
-        Returns:
-            RDKit mol object with optional hydrogens in canonical order
-
-        Raises:
-            ValueError: If SMILES string is invalid
-        """
-        if isinstance(mol_or_smiles, str):
-            mol = Chem.MolFromSmiles(mol_or_smiles)
-            if mol is None:
-                raise ValueError(f"Invalid SMILES: {mol_or_smiles}")
-        else:
-            # Always copy to avoid modifying original
-            mol = Chem.RWMol(mol_or_smiles)
-            mol = mol.GetMol()
-            # Ensure ring info is initialized after copy
-            Chem.FastFindRings(mol)
-
-        # Canonicalize BEFORE adding hydrogens for consistent ordering
-        if canonicalize and mol is not None:
-            mol = MoleculeFeaturizer._canonicalize_mol(mol)
-
-        if add_hs and mol is not None:
-            has_3d_coords = mol.GetNumConformers() > 0
-            if has_3d_coords:
-                mol = Chem.AddHs(mol, addCoords=True)
-            else:
-                mol = Chem.AddHs(mol)
-
-        return mol
+        """Prepare molecule from SMILES string or RDKit mol object."""
+        return prepare_mol(mol_or_smiles, add_hs=add_hs, canonicalize=canonicalize)
 
     # =========================================================================
     # Molecular Descriptor Features
@@ -336,7 +278,7 @@ class MoleculeFeaturizer:
         ring_info = mol.GetRingInfo()
         atom_rings = ring_info.AtomRings()
 
-        features['n_ring_systems'] = min(len(atom_rings) / 8.0, 1.0)
+        features['n_atom_rings'] = min(len(atom_rings) / 8.0, 1.0)
 
         ring_sizes = [len(ring) for ring in atom_rings]
         if ring_sizes:
@@ -375,28 +317,8 @@ class MoleculeFeaturizer:
         random_seed: int = 42,
         optimize: bool = True,
     ) -> Optional[Chem.Mol]:
-        """Return molecule with 3D conformer, generating one if needed.
-
-        Canonical conformer generation used across all ligand modules.
-        Uses ETKDGv3 with MMFF optimization by default, falls back to
-        random coordinates if standard embedding fails.
-        """
-        if mol.GetNumConformers() > 0:
-            return mol
-        mol_3d = Chem.AddHs(Chem.RWMol(mol).GetMol())
-        params = AllChem.ETKDGv3()
-        params.randomSeed = random_seed
-        status = AllChem.EmbedMolecule(mol_3d, params)
-        if status == -1:
-            # Fallback: random coordinates
-            status = AllChem.EmbedMolecule(
-                mol_3d, randomSeed=random_seed, useRandomCoords=True
-            )
-            if status == -1:
-                return None
-        if optimize:
-            AllChem.MMFFOptimizeMolecule(mol_3d, maxIters=200)
-        return mol_3d
+        """Return molecule with 3D conformer, generating one if needed."""
+        return ensure_3d_conformer(mol, random_seed=random_seed, optimize=optimize)
 
     def get_admet_features(self, mol: Chem.Mol) -> Dict[str, float]:
         """
@@ -518,60 +440,22 @@ class MoleculeFeaturizer:
         return features
 
     # =========================================================================
-    # Fingerprint Features
+    # Fingerprint Features (delegated to FingerprintGenerator)
     # =========================================================================
+
+    _fp_generator = FingerprintGenerator()
 
     @classmethod
     def _get_fp_generators(cls) -> Dict[str, Any]:
         """Lazily initialize and cache RDKit fingerprint generators."""
-        if cls._FP_GENERATORS is None:
-            cls._FP_GENERATORS = {
-                "ecfp4": rdFingerprintGenerator.GetMorganGenerator(
-                    radius=2, fpSize=2048, countSimulation=True, includeChirality=True
-                ),
-                "ecfp4_feature": rdFingerprintGenerator.GetMorganGenerator(
-                    radius=2,
-                    fpSize=2048,
-                    atomInvariantsGenerator=rdFingerprintGenerator.GetMorganFeatureAtomInvGen(),
-                    countSimulation=True,
-                ),
-                "ecfp6": rdFingerprintGenerator.GetMorganGenerator(
-                    radius=3, fpSize=2048, countSimulation=True, includeChirality=True
-                ),
-                "ecfp6_feature": rdFingerprintGenerator.GetMorganGenerator(
-                    radius=3,
-                    fpSize=2048,
-                    atomInvariantsGenerator=rdFingerprintGenerator.GetMorganFeatureAtomInvGen(),
-                    countSimulation=True,
-                ),
-                "rdkit": rdFingerprintGenerator.GetRDKitFPGenerator(
-                    minPath=1, maxPath=7, fpSize=2048, countSimulation=True,
-                    branchedPaths=True, useBondOrder=True,
-                ),
-                "atom_pair": rdFingerprintGenerator.GetAtomPairGenerator(
-                    minDistance=1, maxDistance=8, fpSize=2048, countSimulation=True
-                ),
-                "topological_torsion": rdFingerprintGenerator.GetTopologicalTorsionGenerator(
-                    torsionAtomCount=4, fpSize=2048, countSimulation=True
-                ),
-            }
-        return cls._FP_GENERATORS
+        return FingerprintGenerator._get_fp_generators()
 
     @classmethod
     def _normalize_include_fps(
         cls, include_fps: Optional[Iterable[str]]
     ) -> Tuple[str, ...]:
         """Normalize/validate fingerprint selection."""
-        if include_fps is None:
-            return cls._SUPPORTED_FP_NAMES
-        selected_raw = tuple(dict.fromkeys(str(x).lower() for x in include_fps))
-        invalid = [x for x in selected_raw if x not in cls._FP_KEY_ALIASES]
-        if invalid:
-            raise ValueError(
-                f"Unsupported fingerprint names: {invalid}. "
-                f"Supported: {list(cls._SUPPORTED_FP_NAMES)}"
-            )
-        return tuple(dict.fromkeys(cls._FP_KEY_ALIASES[x] for x in selected_raw))
+        return FingerprintGenerator._normalize_include_fps(include_fps)
 
     def get_fingerprints(
         self,
@@ -584,107 +468,7 @@ class MoleculeFeaturizer:
         Returns:
             Dictionary of fingerprint tensors
         """
-        include = set(self._normalize_include_fps(include_fps))
-        gens = self._get_fp_generators()
-        fingerprints = {}
-
-        def _bitvect_to_tensor(bitvect) -> torch.Tensor:
-            arr = np.zeros((bitvect.GetNumBits(),), dtype=np.float32)
-            DataStructs.ConvertToNumpyArray(bitvect, arr)
-            return torch.from_numpy(arr)
-
-        # MACCS keys
-        if 'maccs' in include:
-            fingerprints['maccs'] = _bitvect_to_tensor(MACCSkeys.GenMACCSKeys(mol))
-
-        # ECFP4 fingerprints
-        if 'ecfp4' in include:
-            fingerprints['ecfp4'] = torch.from_numpy(
-                gens['ecfp4'].GetFingerprintAsNumPy(mol)
-            ).float()
-        if 'ecfp4_count' in include:
-            fingerprints['ecfp4_count'] = torch.from_numpy(
-                gens['ecfp4'].GetCountFingerprintAsNumPy(mol)
-            ).float()
-
-        # ECFP4 feature-invariant variant
-        if 'ecfp4_feature' in include:
-            fingerprints['ecfp4_feature'] = torch.from_numpy(
-                gens['ecfp4_feature'].GetFingerprintAsNumPy(mol)
-            ).float()
-
-        # ECFP6 / feature-invariant variants
-        if 'ecfp6' in include:
-            fingerprints['ecfp6'] = torch.from_numpy(
-                gens['ecfp6'].GetFingerprintAsNumPy(mol)
-            ).float()
-        if 'ecfp6_feature' in include:
-            fingerprints['ecfp6_feature'] = torch.from_numpy(
-                gens['ecfp6_feature'].GetFingerprintAsNumPy(mol)
-            ).float()
-
-        # RDKit fingerprint
-        if 'rdkit' in include:
-            fingerprints['rdkit'] = torch.from_numpy(
-                gens['rdkit'].GetFingerprintAsNumPy(mol)
-            ).float()
-
-        # Atom pair fingerprint
-        if 'atom_pair' in include:
-            fingerprints['atom_pair'] = torch.from_numpy(
-                gens['atom_pair'].GetFingerprintAsNumPy(mol)
-            ).float()
-
-        # Topological torsion
-        if 'topological_torsion' in include:
-            fingerprints['topological_torsion'] = torch.from_numpy(
-                gens['topological_torsion'].GetFingerprintAsNumPy(mol)
-            ).float()
-
-        # Pharmacophore 2D
-        if 'pharmacophore2d' in include:
-            pharm_fp = Generate.Gen2DFingerprint(mol, Gobbi_Pharm2D.factory)
-            bit_vector = torch.zeros(1024)
-            for bit_id in pharm_fp.GetOnBits():
-                if bit_id < 1024:
-                    bit_vector[bit_id] = 1.0
-            fingerprints['pharmacophore2d'] = bit_vector.float()
-
-        # Avalon fingerprint (if available in this RDKit build)
-        if 'avalon' in include:
-            if pyAvalonTools is not None:
-                avalon = pyAvalonTools.GetAvalonFP(mol, nBits=2048)
-                fingerprints['avalon'] = _bitvect_to_tensor(avalon)
-            else:
-                fingerprints['avalon'] = torch.zeros(2048, dtype=torch.float32)
-
-        # ErG pharmacophore fingerprint (315 dims in RDKit)
-        if 'erg' in include:
-            fingerprints['erg'] = torch.tensor(
-                rdReducedGraphs.GetErGFingerprint(mol), dtype=torch.float32
-            )
-
-        # MOE-type VSA descriptors (property-partitioned surface area)
-        if 'peoe_vsa' in include:
-            fingerprints['peoe_vsa'] = torch.tensor(
-                rdMolDescriptors.PEOE_VSA_(mol), dtype=torch.float32
-            )
-        if 'slogp_vsa' in include:
-            fingerprints['slogp_vsa'] = torch.tensor(
-                rdMolDescriptors.SlogP_VSA_(mol), dtype=torch.float32
-            )
-        if 'smr_vsa' in include:
-            fingerprints['smr_vsa'] = torch.tensor(
-                rdMolDescriptors.SMR_VSA_(mol), dtype=torch.float32
-            )
-
-        # Molecular Quantum Numbers (42-dim integer fingerprint)
-        if 'mqn' in include:
-            fingerprints['mqn'] = torch.tensor(
-                rdMolDescriptors.MQNs_(mol), dtype=torch.float32
-            )
-
-        return fingerprints
+        return self._fp_generator.get_fingerprints(mol, include_fps=include_fps)
 
     # =========================================================================
     # Custom SMARTS Features
@@ -709,7 +493,7 @@ class MoleculeFeaturizer:
                 # Parse SMARTS pattern
                 smart_mol = Chem.MolFromSmarts(pattern)
                 if smart_mol is None:
-                    print(f"Warning: Invalid SMARTS pattern for '{name}': {pattern}")
+                    logger.warning("Invalid SMARTS pattern for '%s': %s", name, pattern)
                     continue
 
                 # Find matches
@@ -722,7 +506,7 @@ class MoleculeFeaturizer:
                             features[atom_idx, idx] = 1.0
 
             except Exception as e:
-                print(f"Warning: Error processing SMARTS pattern '{name}': {e}")
+                logger.warning("Error processing SMARTS pattern '%s': %s", name, e)
 
         return features
 
@@ -800,7 +584,7 @@ class MoleculeFeaturizer:
         druglike_keys = [
             'lipinski_violations', 'passes_lipinski', 'qed', 'num_heavy_atoms', 'frac_csp3'
         ]
-        structural_keys = ['n_ring_systems', 'max_ring_size', 'avg_ring_size']
+        structural_keys = ['n_atom_rings', 'max_ring_size', 'avg_ring_size']
         admet_keys = [
             'max_partial_charge', 'min_partial_charge',
             'max_abs_partial_charge', 'min_abs_partial_charge',
@@ -1028,36 +812,5 @@ class MoleculeFeaturizer:
         return "MoleculeFeaturizer(no molecule set)"
     _PAINS_CATALOG = None
     _BRENK_CATALOG = None
-    _FP_GENERATORS: Optional[Dict[str, Any]] = None
-    _SUPPORTED_FP_NAMES = (
-        "maccs",
-        "ecfp4",
-        "ecfp4_feature",
-        "ecfp6",
-        "rdkit",
-        "atom_pair",
-        "topological_torsion",
-        "erg",
-    )
-    _FP_KEY_ALIASES = {
-        "maccs": "maccs", "maccs_fp": "maccs",
-        "morgan": "ecfp4", "morgan_fp": "ecfp4", "ecfp4": "ecfp4", "ecfp4_fp": "ecfp4",
-        "morgan_count": "ecfp4_count", "morgan_count_fp": "ecfp4_count",
-        "ecfp4_count": "ecfp4_count", "ecfp4_count_fp": "ecfp4_count",
-        "feature_morgan": "ecfp4_feature", "feature_morgan_fp": "ecfp4_feature",
-        "ecfp4_feature": "ecfp4_feature", "ecfp4_feature_fp": "ecfp4_feature",
-        "ecfp6": "ecfp6", "ecfp6_fp": "ecfp6",
-        "fcfp6": "ecfp6_feature", "fcfp6_fp": "ecfp6_feature",
-        "ecfp6_feature": "ecfp6_feature", "ecfp6_feature_fp": "ecfp6_feature",
-        "rdkit": "rdkit", "rdkit_fp": "rdkit",
-        "atom_pair": "atom_pair", "atom_pair_fp": "atom_pair",
-        "topological_torsion": "topological_torsion",
-        "topological_torsion_fp": "topological_torsion",
-        "pharmacophore2d": "pharmacophore2d", "pharmacophore2d_fp": "pharmacophore2d",
-        "avalon": "avalon", "avalon_fp": "avalon",
-        "erg": "erg", "erg_fp": "erg",
-        "peoe_vsa": "peoe_vsa", "peoe_vsa_fp": "peoe_vsa",
-        "slogp_vsa": "slogp_vsa", "slogp_vsa_fp": "slogp_vsa",
-        "smr_vsa": "smr_vsa", "smr_vsa_fp": "smr_vsa",
-        "mqn": "mqn", "mqn_fp": "mqn",
-    }
+    _SUPPORTED_FP_NAMES = FingerprintGenerator._SUPPORTED_FP_NAMES
+    _FP_KEY_ALIASES = FingerprintGenerator._FP_KEY_ALIASES

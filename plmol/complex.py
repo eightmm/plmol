@@ -41,6 +41,9 @@ class Complex:
     def __post_init__(self) -> None:
         self._cache: LRUCache[Any, Any] = LRUCache(max_size=self.cache_size)
         self._protein_mol_cache: Optional["Chem.Mol"] = None
+        self._ligand_mol_id: Optional[int] = (
+            id(self.ligand_obj._rdmol) if self.ligand_obj is not None else None
+        )
 
     @classmethod
     def from_inputs(
@@ -85,9 +88,18 @@ class Complex:
             cache_size=cache_size,
         )
 
+    def _check_ligand_freshness(self) -> None:
+        """Clear cache if the underlying ligand mol object has changed."""
+        if self.ligand_obj is not None:
+            current_id = id(self.ligand_obj._rdmol)
+            if current_id != self._ligand_mol_id:
+                self._cache.clear()
+                self._ligand_mol_id = current_id
+
     def set_ligand(self, ligand: Union[str, "Chem.Mol", Ligand], *, add_hs: bool = False) -> None:
         self.ligand_obj = load_ligand_input(ligand, add_hs=add_hs)
         self._cache.clear()
+        self._ligand_mol_id = id(self.ligand_obj._rdmol) if self.ligand_obj is not None else None
 
     def set_protein(
         self,
@@ -116,6 +128,7 @@ class Complex:
         if self.ligand_obj is None:
             raise InputError("Ligand is not set in this complex.")
 
+        self._check_ligand_freshness()
         mode = normalize_modes(FEATURE_SPECS["ligand"], mode)
         key = (
             "ligand",
@@ -171,6 +184,7 @@ class Complex:
         if Chem is None:
             raise DependencyError("RDKit is required for interaction featurization.")
 
+        self._check_ligand_freshness()
         key = ("interaction", float(distance_cutoff), pocket_cutoff, knn_cutoff)
         cached = self._cache.get(key)
         if cached is not None:

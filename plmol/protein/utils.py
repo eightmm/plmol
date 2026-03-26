@@ -132,6 +132,7 @@ def parse_pdb_line(line: str) -> ParsedAtom:
     try:
         res_num = int(line[22:26]) if len(line) > 26 else 0
     except ValueError:
+        logger.warning("Malformed residue number in PDB line: %r", line[22:26].strip())
         res_num = 0
 
     # Parse element symbol (columns 77-78)
@@ -150,6 +151,7 @@ def parse_pdb_line(line: str) -> ParsedAtom:
         z = float(line[46:54]) if len(line) > 54 else 0.0
         coords = (x, y, z)
     except (ValueError, IndexError):
+        logger.warning("Malformed coordinates in PDB line: %r", line[30:54].strip())
         coords = (0.0, 0.0, 0.0)
 
     # Parse B-factor (columns 61-66)
@@ -158,6 +160,7 @@ def parse_pdb_line(line: str) -> ParsedAtom:
         try:
             b_factor = float(line[60:66])
         except (ValueError, IndexError):
+            logger.warning("Malformed B-factor in PDB line: %r", line[60:66].strip())
             b_factor = 0.0
 
     return ParsedAtom(

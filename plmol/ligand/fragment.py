@@ -6,6 +6,7 @@ import numpy as np
 from rdkit import Chem
 
 from ..constants import ROTATABLE_BOND_SMARTS
+from .descriptors import MoleculeFeaturizer
 
 _ROTATABLE_PATTERN = Chem.MolFromSmarts(ROTATABLE_BOND_SMARTS)
 
@@ -78,19 +79,35 @@ def fragment_on_rotatable_bonds(
         "fragment_adjacency": adj,
         "num_fragments": num_frags,
         "num_rotatable_bonds": num_rotatable,
+        "fragment_features": _compute_fragment_features(smiles_list),
     }
 
 
 def _single_fragment_result(mol: Chem.Mol, num_atoms: int) -> Dict[str, Any]:
     """Return result when there are no rotatable bonds."""
+    smiles_list = [Chem.MolToSmiles(mol)]
     return {
-        "fragment_smiles": [Chem.MolToSmiles(mol)],
+        "fragment_smiles": smiles_list,
         "atom_to_fragment": np.zeros(num_atoms, dtype=np.int64),
         "fragment_atom_indices": [list(range(num_atoms))],
         "fragment_adjacency": np.zeros((1, 1), dtype=np.int64),
         "num_fragments": 1,
         "num_rotatable_bonds": 0,
+        "fragment_features": _compute_fragment_features(smiles_list),
     }
+
+
+def _compute_fragment_features(fragment_smiles: List[str]) -> np.ndarray:
+    """Compute 62-dim RDKit descriptors for each fragment.
+
+    Uses the same descriptor space as molecule-level ``descriptors`` in
+    ``MoleculeFeaturizer.get_features()``.
+    """
+    feats = []
+    for smi in fragment_smiles:
+        feat = MoleculeFeaturizer(smi)
+        feats.append(feat.get_descriptors().numpy())
+    return np.stack(feats, axis=0).astype(np.float32)
 
 
 def _merge_small_fragments(

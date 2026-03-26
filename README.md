@@ -41,9 +41,9 @@ result = cx.featurize(requests="all")
 
 | Component | Modes | Key Outputs |
 |-----------|-------|-------------|
-| **Protein** | `graph` (residue/atom), `backbone`, `surface`, `voxel`, `sequence` | Residue graph (81-dim nodes, 39-dim edges), atom graph (187 tokens), SE(3)-invariant backbone, MaSIF surface mesh |
+| **Protein** | `graph` (residue/atom), `backbone`, `surface`, `voxel`, `sequence` | Residue graph (12-dim SASA with burial_index), atom graph (187 tokens with burial_index/is_polar_sasa), SE(3)-invariant backbone, dMaSIF point cloud |
 | **Ligand** | `graph`, `fingerprint`, `fragment`, `surface`, `voxel`, `smiles` | Dense adjacency (N, N, 37), node features (N, 98), 62-dim descriptors, ECFP4/6, MACCS, ErG, rotatable-bond fragments |
-| **Interaction** | pharmacophore, contact | Bipartite edges (E, 74), 7 interaction types (H-bond, hydrophobic, pi-stacking, salt bridge, ...) |
+| **Interaction** | pharmacophore, contact | Bipartite edges (E, 79), 7 interaction types (H-bond, hydrophobic, pi-stacking, salt bridge, metal coordination, ...) |
 
 All graph modes support `distance_cutoff` and `knn_cutoff` (union strategy) for flexible edge construction.
 

@@ -9,7 +9,7 @@ Channels:
                    hybridization, ring
     Protein (16ch): occupancy, atom type (6), charge, hydrophobicity,
                     HBD, HBA, aromaticity, pos_ionizable, neg_ionizable,
-                    backbone, b_factor
+                    backbone, burial_index
 
 Functions:
     gaussian_smear_to_grid: Core Gaussian smearing onto a 3D grid
@@ -20,11 +20,19 @@ Functions:
     voxelize_complex: Combined protein + ligand voxelization
 """
 
+import logging
 from typing import Optional
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 from rdkit import Chem
 from rdkit.Chem import AllChem, Crippen, Lipinski
+
+try:
+    import freesasa
+except ImportError:
+    freesasa = None
 
 from ..constants import (
     VDW_RADIUS,
@@ -34,6 +42,11 @@ from ..constants import (
     VOXEL_DEFAULT_PADDING,
     VOXEL_DEFAULT_SIGMA_SCALE,
     VOXEL_DEFAULT_CUTOFF_SIGMA,
+    ATOM_TYPE_MAP,
+    KD_SCALE,
+    CHARGED_RESIDUES,
+    BACKBONE_ATOM_SET,
+    RESIDUE_MAX_SASA,
 )
 
 # Channel name definitions
@@ -58,7 +71,7 @@ PROTEIN_CHANNEL_NAMES = [
     "aromaticity",
     "pos_ionizable", "neg_ionizable",
     "backbone",
-    "b_factor",
+    "burial_index",
 ]
 
 
@@ -193,10 +206,9 @@ def compute_ligand_channels(
     features[:, 0] = 1.0
 
     # 1-6: Atom type one-hot (C, N, O, S, Halogen, Other)
-    atom_type_map = {6: 0, 7: 1, 8: 2, 16: 3, 9: 4, 17: 4, 35: 4, 53: 4}
     for atom in mol.GetAtoms():
         idx = atom.GetIdx()
-        t = atom_type_map.get(atom.GetAtomicNum(), 5)
+        t = ATOM_TYPE_MAP.get(atom.GetAtomicNum(), 5)
         features[idx, 1 + t] = 1.0
 
     # 7: Partial charge
@@ -265,9 +277,50 @@ def compute_ligand_channels(
     return features, list(LIGAND_CHANNEL_NAMES)
 
 
+def _compute_voxel_burial_index(
+    positions: Optional[np.ndarray],
+    res_names: list[str],
+    atom_names: list[str],
+    n_atoms: int,
+) -> np.ndarray:
+    """Compute per-atom burial index from SASA for voxel features.
+
+    Uses freesasa to compute per-atom SASA, normalizes by RESIDUE_MAX_SASA.
+    burial_index = 1.0 - relative_sasa, clamped to [0, 1].
+    Falls back to 0.5 if freesasa is unavailable or positions not provided.
+
+    Returns:
+        Per-atom burial index (N,) in [0, 1].
+    """
+    if freesasa is None or positions is None or n_atoms == 0:
+        return np.full(n_atoms, 0.5, dtype=np.float32)
+
+    try:
+        structure = freesasa.Structure()
+        for i in range(n_atoms):
+            rn = res_names[i] if res_names[i] else "UNK"
+            an = atom_names[i] if atom_names[i] else "X"
+            x, y, z = float(positions[i, 0]), float(positions[i, 1]), float(positions[i, 2])
+            structure.addAtom(an, rn, "1", "A", x, y, z)
+
+        result = freesasa.calc(structure)
+
+        burial = np.full(n_atoms, 0.5, dtype=np.float32)
+        for i in range(n_atoms):
+            atom_sasa = result.atomArea(i)
+            max_sasa = RESIDUE_MAX_SASA.get(res_names[i], 200.0)
+            relative_sasa = atom_sasa / max_sasa if max_sasa > 0 else 0.5
+            burial[i] = np.clip(1.0 - relative_sasa, 0.0, 1.0)
+        return burial
+    except Exception:
+        logger.warning("freesasa computation failed, using default burial_index=0.5")
+        return np.full(n_atoms, 0.5, dtype=np.float32)
+
+
 def compute_protein_channels(
     mol,
     atom_metadata: Optional[list[dict]] = None,
+    positions: Optional[np.ndarray] = None,
 ) -> tuple[np.ndarray, list[str]]:
     """Extract per-atom feature matrix for protein voxelization.
 
@@ -277,6 +330,7 @@ def compute_protein_channels(
     Args:
         mol: RDKit molecule or _SimpleMol with PDB residue info.
         atom_metadata: If mol is None, used to build a _SimpleMol.
+        positions: Atom positions (N, 3) for burial index computation.
 
     Returns:
         (features, channel_names) where features is (N, 16) float32.
@@ -293,40 +347,28 @@ def compute_protein_channels(
     n_atoms = mol.GetNumAtoms()
     features = np.zeros((n_atoms, 16), dtype=np.float32)
 
-    # Kyte-Doolittle hydrophobicity scale
-    _KD_SCALE = {
-        'ILE': 4.5, 'VAL': 4.2, 'LEU': 3.8, 'PHE': 2.8, 'CYS': 2.5,
-        'MET': 1.9, 'ALA': 1.8, 'GLY': -0.4, 'THR': -0.7, 'SER': -0.8,
-        'TRP': -0.9, 'TYR': -1.3, 'PRO': -1.6, 'HIS': -3.2, 'GLU': -3.5,
-        'GLN': -3.5, 'ASP': -3.5, 'ASN': -3.5, 'LYS': -3.9, 'ARG': -4.5,
-    }
-    # Charged residue atoms
-    _CHARGED_RESIDUES = {
-        'ASP': {'OD1': -0.5, 'OD2': -0.5},
-        'GLU': {'OE1': -0.5, 'OE2': -0.5},
-        'LYS': {'NZ': 1.0},
-        'ARG': {'NH1': 0.5, 'NH2': 0.5},
-        'HIS': {'ND1': 0.5, 'NE2': 0.5},
-    }
     # Ionizable residue names
     _POS_RESIDUES = {'LYS', 'ARG', 'HIS'}
     _NEG_RESIDUES = {'ASP', 'GLU'}
 
-    backbone_names = {'N', 'CA', 'C', 'O'}
     # Atom type mapping for protein: C=0, N=1, O=2, S=3, P=4, Other=5
     prot_type_map = {6: 0, 7: 1, 8: 2, 16: 3, 15: 4}
+
+    res_names_list: list[str] = []
+    atom_names_list: list[str] = []
 
     for atom in mol.GetAtoms():
         idx = atom.GetIdx()
         res = atom.GetPDBResidueInfo()
         res_name = ""
         atom_name = ""
-        b_factor = 0.0
 
         if res:
             res_name = res.GetResidueName().strip()
             atom_name = res.GetName().strip()
-            b_factor = res.GetTempFactor()
+
+        res_names_list.append(res_name)
+        atom_names_list.append(atom_name)
 
         # 0: Occupancy
         features[idx, 0] = 1.0
@@ -336,11 +378,11 @@ def compute_protein_channels(
         features[idx, 1 + t] = 1.0
 
         # 7: Partial charge (residue-based)
-        if res_name in _CHARGED_RESIDUES:
-            features[idx, 7] = _CHARGED_RESIDUES[res_name].get(atom_name, 0.0)
+        if res_name in CHARGED_RESIDUES:
+            features[idx, 7] = CHARGED_RESIDUES[res_name].get(atom_name, 0.0)
 
         # 8: Hydrophobicity (Kyte-Doolittle per residue)
-        features[idx, 8] = _KD_SCALE.get(res_name, 0.0)
+        features[idx, 8] = KD_SCALE.get(res_name, 0.0)
 
         # 9: HBD (nitrogen atoms)
         if atom.GetAtomicNum() == 7:
@@ -352,7 +394,7 @@ def compute_protein_channels(
 
         # 11: Aromaticity (PHE, TYR, TRP, HIS aromatic residues)
         if res_name in ('PHE', 'TYR', 'TRP', 'HIS'):
-            if atom_name not in backbone_names:
+            if atom_name not in BACKBONE_ATOM_SET:
                 features[idx, 11] = 1.0
 
         # 12: Positive ionizable
@@ -364,17 +406,13 @@ def compute_protein_channels(
             features[idx, 13] = 1.0
 
         # 14: Backbone
-        if atom_name in backbone_names:
+        if atom_name in BACKBONE_ATOM_SET:
             features[idx, 14] = 1.0
 
-        # 15: B-factor (raw, will be normalized after)
-        features[idx, 15] = b_factor
-
-    # Normalize B-factor to [0, 1] range
-    bf = features[:, 15]
-    bf_min, bf_max = bf.min(), bf.max()
-    if bf_max - bf_min > 1e-6:
-        features[:, 15] = (bf - bf_min) / (bf_max - bf_min)
+    # 15: Burial index (1.0 - relative_sasa, clamped to [0, 1])
+    features[:, 15] = _compute_voxel_burial_index(
+        positions, res_names_list, atom_names_list, n_atoms,
+    )
 
     # Normalize hydrophobicity to [-1, 1] using global Kyte-Doolittle range
     KD_MIN, KD_MAX = -4.5, 4.5
@@ -493,7 +531,7 @@ def voxelize_protein(
     )
 
     features, channel_names = compute_protein_channels(
-        mol, atom_metadata=atom_metadata,
+        mol, atom_metadata=atom_metadata, positions=positions,
     )
 
     voxel = gaussian_smear_to_grid(
@@ -589,7 +627,7 @@ def voxelize_complex(
     prot_pos = np.asarray(protein_positions, dtype=np.float32)
     prot_sigmas = np.asarray(protein_radii, dtype=np.float32) * sigma_scale
     prot_features, prot_names = compute_protein_channels(
-        protein_mol, atom_metadata=protein_atom_metadata,
+        protein_mol, atom_metadata=protein_atom_metadata, positions=prot_pos,
     )
     prot_voxel = gaussian_smear_to_grid(
         prot_pos, prot_features, prot_sigmas, grid_origin, grid_shape,

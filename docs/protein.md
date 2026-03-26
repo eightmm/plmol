@@ -68,7 +68,7 @@ graph = result["graph"]
 
 | Key | Shape | Type | Description |
 |-----|-------|------|-------------|
-| `node_features` | tuple of 8 | `Tensor` | Residue scalar features (total 81-dim) |
+| `node_features` | tuple of 8 | `Tensor` | Residue scalar features (total 83-dim) |
 | `node_vector_features` | tuple of 3 | `Tensor` | Residue vector features (total 31 vectors x 3) |
 | `edge_index` | `(2, E)` | `int64` | Sparse edge pairs (source, target) |
 | `edge_features` | tuple of 2 | `Tensor` | Edge scalar features (total 39-dim) |
@@ -80,7 +80,7 @@ graph = result["graph"]
 
 Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA, SC-SC, CA-SC, SC-CA) < `distance_cutoff`. When `knn_cutoff` is set, kNN edges (based on minimum of 4 distance matrices) are unioned with distance edges.
 
-### Node Scalar Features `(L, 81)` -- tuple of 8 tensors
+### Node Scalar Features `(L, 83)` -- tuple of 8 tensors
 
 | Index | Tensor | Dim | Features |
 |-------|--------|-----|----------|
@@ -89,9 +89,9 @@ Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA,
 | `[23:33]` | self_distance | 10 | Intra-residue pairwise distances among N, CA, C, O, SC (upper triangle) |
 | `[33:53]` | degree_feature | 20 | cos/sin of 10 angles: phi, psi, omega, chi1-chi5, backbone_curvature, backbone_torsion |
 | `[53:58]` | has_chi_angles | 5 | Binary flags: has chi1, chi2, chi3, chi4, chi5 |
-| `[58:68]` | sasa | 10 | SASA: total, polar, apolar, mainchain, sidechain (abs/350 + relative) |
-| `[68:76]` | rf_distance | 8 | Forward/reverse neighbor distances: fwd(CA-CA, SC-SC, CA-SC, SC-CA) + rev(same) |
-| `[76:81]` | physicochemical | 5 | Residue properties: hydrophobicity (Kyte-Doolittle), volume (Zamyatnin), charge, flexibility, polarity |
+| `[58:70]` | sasa | 12 | SASA: total, polar, apolar, mainchain, sidechain (abs/RESIDUE_MAX_SASA + relative), burial_index (1.0 - relativeTotal/100), polar_apolar_ratio |
+| `[70:78]` | rf_distance | 8 | Forward/reverse neighbor distances: fwd(CA-CA, SC-SC, CA-SC, SC-CA) + rev(same) |
+| `[78:83]` | physicochemical | 5 | Residue properties: hydrophobicity (Kyte-Doolittle), volume (Zamyatnin), charge, flexibility, polarity |
 
 ### Node Vector Features `(L, 31, 3)` -- tuple of 3 tensors
 
@@ -158,8 +158,8 @@ Edge construction: all atom pairs within `distance_cutoff`. When `knn_cutoff` is
 |-------|-----|-----|-------|-------------|
 | `[0]` | `sasa` | 1 | [0, ~) | Per-atom absolute SASA (A^2) |
 | `[1]` | `relative_sasa` | 1 | [0, 1] | SASA / residue_max_sasa (Tien et al. 2013) |
-| `[2]` | `b_factor` | 1 | [0, 1] | Normalized B-factor (B / 100, capped at 1.0) |
-| `[3]` | `b_factor_zscore` | 1 | (~) | Per-chain B-factor z-score: (b - chain_mean) / chain_std |
+| `[2]` | `burial_index` | 1 | [0, 1] | Burial index (1.0 = fully buried, 0.0 = fully exposed) |
+| `[3]` | `is_polar_sasa` | 1 | {0, 1} | 1.0 if polar SASA atom (freesasa classifier) |
 | `[4]` | `is_backbone` | 1 | {0, 1} | 1.0 if backbone atom (N, CA, C, O), 0.0 if sidechain |
 | `[5]` | `formal_charge` | 1 | [-0.5, 1] | Partial charge at physiological pH |
 | `[6]` | `is_hbond_donor` | 1 | {0, 1} | 1.0 if H-bond donor |
@@ -252,7 +252,7 @@ surface = result["surface"]
 | `points` | `(V, 3)` | `ndarray` | Surface point positions |
 | `verts` | `(V, 3)` | `ndarray` | Alias for points |
 | `normals` | `(V, 3)` | `ndarray` | Outward surface normals |
-| `features` | `(V, 40)` | `ndarray` | Per-vertex feature vector |
+| `features` | `(V, 39)` | `ndarray` | Per-vertex feature vector |
 | `feature_names` | `list[str]` | -- | Column names for features |
 
 ### Surface Parameters
@@ -275,7 +275,7 @@ result = protein.featurize(mode="voxel", voxel_kwargs={
 voxel = result["voxel"]
 ```
 
-Channels (16): occupancy, atom type (6), charge, hydrophobicity, HBD, HBA, aromaticity, pos/neg ionizable, backbone, b_factor.
+Channels (16): occupancy, atom type (6), charge, hydrophobicity, HBD, HBA, aromaticity, pos/neg ionizable, backbone, burial_index.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|

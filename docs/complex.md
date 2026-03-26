@@ -21,6 +21,10 @@ cx.set_ligand("new_ligand.sdf")
 cx.set_protein("new_protein.pdb")
 ```
 
+### Cache Invalidation
+
+`Complex` tracks the identity of the underlying ligand mol object (`id(ligand_obj._rdmol)`). When `set_ligand()` is called or the ligand mol object is replaced, the cache is automatically cleared. This also detects external mutation of the ligand object between calls.
+
 ## Combined Featurization
 
 ```python
@@ -66,7 +70,7 @@ interaction = cx.interaction(
 | Key | Type | Description |
 |-----|------|-------------|
 | `edges` | `Tensor (2, E)` | Protein-ligand heavy atom pairs (pharmacophore interactions) |
-| `edge_features` | `Tensor (E, 74)` | Interaction feature vectors |
+| `edge_features` | `Tensor (E, 79)` | Interaction feature vectors |
 | `interactions` | `List[Interaction]` | Detailed interaction objects |
 | `num_interactions` | `int` | Total interaction count |
 | `interaction_counts` | `dict` | Per-type interaction counts |
@@ -74,7 +78,7 @@ interaction = cx.interaction(
 | `num_ligand_atoms` | `int` | Number of ligand heavy atoms |
 | `distance_cutoff` | `float` | Distance cutoff used |
 | `knn_cutoff` | `Optional[int]` | kNN cutoff used |
-| `feature_dim` | `int` | Edge feature dimension (74) |
+| `feature_dim` | `int` | Edge feature dimension (79) |
 | `metadata` | `dict` | Interaction type indices, pharmacophore indices, element types, residue types |
 
 ### Interaction Types
@@ -84,12 +88,12 @@ interaction = cx.interaction(
 | `hydrogen_bond` | Donor-acceptor pairs + D-H-A angle | < 3.5 A |
 | `salt_bridge` | Positive-negative charge pairs | < 4.0 A |
 | `pi_stacking` | Aromatic ring pairs + ring angle | < 5.5 A |
-| `cation_pi` | Charged atom + aromatic ring | < 6.0 A |
+| `cation_pi` | Charged atom + aromatic ring + cation-to-ring-normal angle filter (< 30 deg) | < 6.0 A |
 | `hydrophobic` | Hydrophobic atom pairs | < 4.5 A |
 | `halogen_bond` | Halogen + acceptor + C-X-A angle | < 3.5 A |
 | `metal_coordination` | Metal ion + coordinating atom | < 2.8 A |
 
-### Edge Features `(E, 74)`
+### Edge Features `(E, 79)`
 
 | Index | Group | Dim | Features |
 |-------|-------|-----|----------|
@@ -100,9 +104,12 @@ interaction = cx.interaction(
 | `[43:45]` | Formal charges | 2 | Protein charge, ligand charge (normalized) |
 | `[45:47]` | Aromatic | 2 | Protein is_aromatic, ligand is_aromatic |
 | `[47:51]` | Ring/degree | 4 | is_in_ring (2) + degree (2) |
-| `[51:72]` | Residue type | 21 | Protein residue one-hot |
+| `[51:72]` | Residue type | 21 | Protein residue one-hot (20 standard + Other) |
 | `[72]` | Backbone | 1 | Protein atom is_backbone |
 | `[73]` | Strength | 1 | Gaussian decay from ideal distance: exp(-0.5 * ((d - ideal) / 0.5)^2) |
+| `[74:76]` | Cross-contact density | 2 | Number of atoms from the other entity within 4.0 A of each endpoint (protein, ligand), normalized by /10 |
+| `[76:78]` | Endpoint min distance | 2 | Min distance from each endpoint to its nearest partner atom (protein, ligand), normalized by /cutoff |
+| `[78]` | Relative pocket distance | 1 | Interaction distance / max pairwise distance in the pocket |
 
 ### Contact Edges (optional)
 
@@ -167,6 +174,8 @@ print(featurizer.get_interaction_summary())
 
 ## Pocket Extraction
 
+Pocket extraction now preserves metal HETATM records (Zn, Fe, Mg, Ca, Mn, Cu, Co, Ni) that are within the distance cutoff of the ligand.
+
 ```python
 from plmol.interaction import extract_pocket
 
@@ -177,6 +186,8 @@ pocket_list = extract_pocket(
 )
 
 for pocket_info in pocket_list:
-    pocket_mol = pocket_info.pocket_mol    # RDKit Mol of pocket residues
-    residues = pocket_info.residue_ids     # List of (chain, resnum) tuples
+    pocket_mol = pocket_info.pocket_mol    # RDKit Mol of pocket residues + nearby metals
+    residues = pocket_info.pocket_residues # List of (chain, resnum, resname) tuples
+    num_atoms = pocket_info.num_atoms
+    num_residues = pocket_info.num_residues
 ```

@@ -6,6 +6,7 @@ for machine learning applications. It includes geometric features, SASA calculat
 and graph-based interaction features.
 """
 
+import logging
 import os
 import sys
 import warnings
@@ -14,6 +15,8 @@ from io import StringIO
 from typing import Tuple, List, Optional, Dict, Any
 
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import torch
@@ -53,6 +56,7 @@ from ..constants import (
     RESIDUE_PROPERTIES,
     NUM_RESIDUE_PROPERTIES,
     RESIDUE_TYPES,
+    RESIDUE_MAX_SASA,
 )
 
 
@@ -315,19 +319,21 @@ class ResidueFeaturizer:
         Calculate Solvent Accessible Surface Area (SASA) for each residue.
 
         Returns:
-            SASA features tensor of shape [num_residues, 10] with:
-                - total/350, polar/350, apolar/350, mainChain/350, sideChain/350
+            SASA features tensor of shape [num_residues, 12] with:
+                - total/max_sasa, polar/max_sasa, apolar/max_sasa, mainChain/max_sasa, sideChain/max_sasa
                 - relativeTotal, relativePolar, relativeApolar, relativeMainChain, relativeSideChain
-
-        Raises:
-            RuntimeError: If FreeSASA calculation fails unexpectedly
+                - burial_index (1.0 - relativeTotal/100)
+                - polar_apolar_ratio (polar / (polar + apolar + 1e-8))
         """
         num_residues = len(self.get_residues())
-        sasa_dim = 10  # Number of SASA features per residue
+        sasa_dim = 12  # Number of SASA features per residue
 
         if not FREESASA_AVAILABLE:
-            warnings.warn("FreeSASA not available. Returning zeros for SASA features.")
+            logger.warning("FreeSASA not available. Returning zeros for SASA features.")
             return torch.zeros(num_residues, sasa_dim)
+
+        # Build reverse mapping: res_type_int -> 3-letter code for RESIDUE_MAX_SASA lookup
+        int_to_3letter = {v: k for k, v in AMINO_ACID_3_TO_INT.items()}
 
         try:
             with suppress_freesasa_warnings():
@@ -336,26 +342,41 @@ class ResidueFeaturizer:
                 residue_areas = result.residueAreas()
 
                 sasas = []
+                residue_idx = 0
                 for chain, residues in residue_areas.items():
                     for residue, values in residues.items():
+                        # Look up per-residue max SASA for normalization
+                        if residue_idx < num_residues:
+                            _, _, res_type_int = self._residues[residue_idx]
+                            res_name_3 = int_to_3letter.get(res_type_int, 'UNK')
+                            max_sasa = RESIDUE_MAX_SASA.get(res_name_3, 200.0)
+                        else:
+                            max_sasa = 200.0
+                        residue_idx += 1
+
+                        burial_index = 1.0 - (values.relativeTotal / 100.0)
+                        polar_apolar_ratio = values.polar / (values.polar + values.apolar + 1e-8)
+
                         sasas.append([
-                            values.total / 350,
-                            values.polar / 350,
-                            values.apolar / 350,
-                            values.mainChain / 350,
-                            values.sideChain / 350,
+                            values.total / max_sasa,
+                            values.polar / max_sasa,
+                            values.apolar / max_sasa,
+                            values.mainChain / max_sasa,
+                            values.sideChain / max_sasa,
                             values.relativeTotal,
                             values.relativePolar,
                             values.relativeApolar,
                             values.relativeMainChain,
-                            values.relativeSideChain
+                            values.relativeSideChain,
+                            burial_index,
+                            polar_apolar_ratio,
                         ])
 
             sasa_tensor = torch.nan_to_num(torch.as_tensor(sasas))
 
             # Validate dimensions
             if sasa_tensor.shape[0] != num_residues:
-                warnings.warn(
+                logger.warning(
                     f"SASA residue count ({sasa_tensor.shape[0]}) != structure residue count ({num_residues}). "
                     f"This may indicate parsing differences between FreeSASA and internal parser."
                 )
@@ -369,7 +390,7 @@ class ResidueFeaturizer:
             return sasa_tensor
 
         except Exception as e:
-            warnings.warn(f"FreeSASA calculation failed: {e}. Returning zeros for SASA features.")
+            logger.warning(f"FreeSASA calculation failed: {e}. Returning zeros for SASA features.")
             return torch.zeros(num_residues, sasa_dim)
 
     def get_dihedral_angles(self, coords: torch.Tensor, res_types: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:

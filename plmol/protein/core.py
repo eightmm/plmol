@@ -157,8 +157,8 @@ class Protein(BaseMolecule):
             # Node scalar features
             "sasa": node.get("sasa"),
             "relative_sasa": node.get("relative_sasa"),
-            "b_factor": node.get("b_factor"),
-            "b_factor_zscore": node.get("b_factor_zscore"),
+            "burial_index": node.get("burial_index"),
+            "is_polar_sasa": node.get("is_polar_sasa"),
             "is_backbone": node.get("is_backbone"),
             "formal_charge": node.get("formal_charge"),
             "is_hbond_donor": node.get("is_hbond_donor"),

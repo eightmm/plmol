@@ -90,6 +90,16 @@ def build_backbone_knn_graph(
     """
     ca = coords[:, 1]  # (L, 3)
     L = ca.shape[0]
+
+    if L == 0:
+        return {
+            'edge_index': torch.zeros(2, 0, dtype=torch.long),
+            'edge_dist': torch.zeros(0),
+            'edge_unit_vec': torch.zeros(0, 3),
+            'edge_seq_sep': torch.zeros(0, dtype=torch.long),
+            'edge_same_chain': torch.zeros(0, dtype=torch.bool),
+        }
+
     k_eff = min(k, L - 1)
 
     # CA-CA distance matrix

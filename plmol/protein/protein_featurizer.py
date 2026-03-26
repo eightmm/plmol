@@ -89,6 +89,7 @@ class ProteinFeaturizer:
 
         # Cache for computed features
         self._cache = {}
+        self._atom_featurizer_cache: Dict[str, Any] = {}
 
     def _parse_structure(self):
         """Parse structure and cache basic data."""
@@ -479,7 +480,7 @@ class ProteinFeaturizer:
         producing a multi-channel volume suitable for 3D CNNs.
 
         Channels (16): occupancy, atom type (6), charge, hydrophobicity,
-        HBD, HBA, aromaticity, pos/neg ionizable, backbone, b_factor.
+        HBD, HBA, aromaticity, pos/neg ionizable, backbone, burial_index.
 
         Args:
             center: Grid center (3,). None = protein centroid.
@@ -548,6 +549,15 @@ class ProteinFeaturizer:
 
     # ============== ATOM-LEVEL FEATURES ==============
 
+    def _get_atom_featurizer(self):
+        """Get or create a cached AtomFeaturizer instance."""
+        from .atom_featurizer import AtomFeaturizer
+
+        pdb_to_use = self.tmp_pdb if self.tmp_pdb else self.input_file
+        if pdb_to_use not in self._atom_featurizer_cache:
+            self._atom_featurizer_cache[pdb_to_use] = AtomFeaturizer()
+        return self._atom_featurizer_cache[pdb_to_use]
+
     def get_atom_graph(self, distance_cutoff: float = 4.0,
                        knn_cutoff: Optional[int] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
@@ -565,9 +575,7 @@ class ProteinFeaturizer:
         cache_key = ('atom_graph', distance_cutoff, knn_cutoff)
 
         if cache_key not in self._cache:
-            from .atom_featurizer import AtomFeaturizer
-
-            atom_featurizer = AtomFeaturizer()
+            atom_featurizer = self._get_atom_featurizer()
             pdb_to_use = self.tmp_pdb if self.tmp_pdb else self.input_file
 
             # Get atom features with SASA and enriched features
@@ -643,8 +651,8 @@ class ProteinFeaturizer:
                 'residue_count': residue_count,
                 'atom_to_residue': residue_count,
                 'residue_atom_indices': residue_atom_indices,
-                'b_factor': atom_features['b_factor'],
-                'b_factor_zscore': atom_features['b_factor_zscore'],
+                'burial_index': atom_features['burial_index'],
+                'is_polar_sasa': atom_features['is_polar_sasa'],
                 'is_backbone': atom_features['is_backbone'],
                 'formal_charge': atom_features['formal_charge'],
                 'is_hbond_donor': atom_features['is_hbond_donor'],
@@ -681,17 +689,11 @@ class ProteinFeaturizer:
                 - coord: 3D coordinates
         """
         if 'atom_tokens_coords' not in self._cache:
-            from .atom_featurizer import AtomFeaturizer
-            atom_featurizer = AtomFeaturizer()
-
-            # Use the standardized PDB if available
+            atom_featurizer = self._get_atom_featurizer()
             pdb_to_use = self.tmp_pdb if self.tmp_pdb else self.input_file
             token, coord = atom_featurizer.get_protein_atom_features(pdb_to_use)
             self._cache['atom_tokens_coords'] = (token, coord)
         return self._cache['atom_tokens_coords']
-
-    # Alias
-    get_atom_tokens = get_atom_tokens_and_coords
 
     def get_atom_features_with_sasa(self) -> Dict[str, Any]:
         """
@@ -701,17 +703,11 @@ class ProteinFeaturizer:
             Dictionary with atom features and SASA
         """
         if 'atom_features_sasa' not in self._cache:
-            from .atom_featurizer import AtomFeaturizer
-            atom_featurizer = AtomFeaturizer()
-
-            # Use the standardized PDB if available
+            atom_featurizer = self._get_atom_featurizer()
             pdb_to_use = self.tmp_pdb if self.tmp_pdb else self.input_file
             features = atom_featurizer.get_all_atom_features(pdb_to_use)
             self._cache['atom_features_sasa'] = features
         return self._cache['atom_features_sasa']
-
-    # Alias
-    get_atom_sasa = get_atom_features_with_sasa
 
     def get_atom_coordinates(self) -> torch.Tensor:
         """
@@ -732,24 +728,6 @@ class ProteinFeaturizer:
         """
         token, coord = self.get_atom_tokens_and_coords()
         return token
-
-    # ============== RESIDUE-LEVEL ALIASES ==============
-    # Cleaner aliases - removed redundant _level_ variants
-
-    # Sequence
-    get_residue_sequence = get_sequence_features
-
-    # Geometry
-    get_residue_geometry = get_geometric_features
-
-    # SASA
-    get_residue_sasa = get_sasa_features
-
-    # Contact map
-    get_residue_contacts = get_contact_map
-
-    # Graph features
-    get_residue_features = get_features
 
     # ============== SEQUENCE FEATURES ==============
 

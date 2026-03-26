@@ -39,7 +39,7 @@ class TestPLInteractionFeaturizer:
         edge_index, edge_features = plif.get_interaction_edges()
         assert edge_index.shape[0] == 2
         assert edge_features.shape[0] == edge_index.shape[1]
-        assert edge_features.shape[1] == 74
+        assert edge_features.shape[1] == 79
 
     def test_get_interaction_graph(self, protein_ligand_mols):
         protein_mol, ligand_mol = protein_ligand_mols

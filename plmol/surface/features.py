@@ -15,18 +15,32 @@ Functions:
     - compute_all_vertex_features: Extract features at each vertex
 """
 
+import logging
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import AllChem, Crippen, Lipinski
 from scipy.spatial import cKDTree
+try:
+    import freesasa
+except ImportError:
+    freesasa = None
+
 from ..constants import (
     SURFACE_DEFAULT_CURVATURE_SCALES,
     SURFACE_DEFAULT_KNN_ATOMS,
     SURFACE_DEFAULT_POINTS_PER_ATOM,
     SURFACE_DEFAULT_PROBE_RADIUS,
+    ATOM_TYPE_MAP,
+    KD_SCALE,
+    CHARGED_RESIDUES,
+    BACKBONE_ATOM_SET,
+    AMINO_ACID_LETTERS,
+    RESIDUE_MAX_SASA,
 )
 
 # Re-export for convenience
@@ -379,8 +393,7 @@ def compute_pointcloud_geometry(
                     mean_curvatures[:, i] = mc
                     gauss_curvatures[:, i] = gc
                 except Exception as e:
-                    if verbose:
-                        print(f"  PCA curvature at radius={curvature_scales[i]} failed: {e}")
+                    logger.warning("PCA curvature at radius=%s failed: %s", curvature_scales[i], e)
 
     return {
         'mean_curvature': mean_curvatures,
@@ -440,8 +453,7 @@ def compute_chemical_features(
                     dtype=np.float32,
                 )
             else:
-                if verbose:
-                    print("  MMFF94 failed, falling back to Gasteiger")
+                logger.warning("MMFF94 failed, falling back to Gasteiger")
                 AllChem.ComputeGasteigerCharges(mol)
                 charges = np.array(
                     [a.GetDoubleProp('_GasteigerCharge') for a in mol.GetAtoms()],
@@ -455,25 +467,18 @@ def compute_chemical_features(
                 dtype=np.float32,
             )
             bad_mask = ~np.isfinite(charges)
-            if verbose and bad_mask.any():
-                print(f"  Warning: {bad_mask.sum()} atoms had NaN/Inf Gasteiger charges (zeroed)")
+            if bad_mask.any():
+                logger.warning("%d atoms had NaN/Inf Gasteiger charges (zeroed)", bad_mask.sum())
             np.nan_to_num(charges, nan=0.0, posinf=0.0, neginf=0.0, copy=False)
     else:
-        _CHARGED_RESIDUES = {
-            'ASP': {'OD1': -0.5, 'OD2': -0.5},
-            'GLU': {'OE1': -0.5, 'OE2': -0.5},
-            'LYS': {'NZ': 1.0},
-            'ARG': {'NH1': 0.5, 'NH2': 0.5},
-            'HIS': {'ND1': 0.5, 'NE2': 0.5},
-        }
         charges = np.zeros(mol.GetNumAtoms(), dtype=np.float32)
         for atom in mol.GetAtoms():
             res = atom.GetPDBResidueInfo()
             if res:
                 res_name = res.GetResidueName().strip()
                 atom_name = res.GetName().strip()
-                if res_name in _CHARGED_RESIDUES:
-                    charges[atom.GetIdx()] = _CHARGED_RESIDUES[res_name].get(atom_name, 0.0)
+                if res_name in CHARGED_RESIDUES:
+                    charges[atom.GetIdx()] = CHARGED_RESIDUES[res_name].get(atom_name, 0.0)
 
     knn_charges = charges[knn_idx]
     electrostatic_raw = np.sum(knn_charges / knn_dists_clamped, axis=1)
@@ -510,12 +515,6 @@ def compute_chemical_features(
         for match in mol.GetSubstructMatches(neg_smarts):
             neg_atoms[match[0]] = 1.0
     else:
-        _KD_SCALE = {
-            'ILE': 4.5, 'VAL': 4.2, 'LEU': 3.8, 'PHE': 2.8, 'CYS': 2.5,
-            'MET': 1.9, 'ALA': 1.8, 'GLY': -0.4, 'THR': -0.7, 'SER': -0.8,
-            'TRP': -0.9, 'TYR': -1.3, 'PRO': -1.6, 'HIS': -3.2, 'GLU': -3.5,
-            'GLN': -3.5, 'ASP': -3.5, 'ASN': -3.5, 'LYS': -3.9, 'ARG': -4.5,
-        }
         logp_contribs = np.zeros(mol.GetNumAtoms(), dtype=np.float32)
         mr_contribs = np.zeros(mol.GetNumAtoms(), dtype=np.float32)
         hbd_atoms = np.zeros(mol.GetNumAtoms(), dtype=np.float32)
@@ -528,7 +527,7 @@ def compute_chemical_features(
             res = atom.GetPDBResidueInfo()
             if res:
                 res_name = res.GetResidueName().strip()
-                logp_contribs[atom.GetIdx()] = _KD_SCALE.get(res_name, 0.0)
+                logp_contribs[atom.GetIdx()] = KD_SCALE.get(res_name, 0.0)
                 if atom.GetAtomicNum() == 7:
                     hbd_atoms[atom.GetIdx()] = 1.0
                 if atom.GetAtomicNum() == 8:
@@ -590,10 +589,9 @@ def compute_ligand_type_features(
         print("  Computing ligand type features...")
 
     # Atom type one-hot (C, N, O, S, Halogen, Other)
-    atom_type_map = {6: 0, 7: 1, 8: 2, 16: 3, 9: 4, 17: 4, 35: 4, 53: 4}
     n_mol_atoms = mol.GetNumAtoms()
     atom_types = np.array(
-        [atom_type_map.get(a.GetAtomicNum(), 5) for a in mol.GetAtoms()],
+        [ATOM_TYPE_MAP.get(a.GetAtomicNum(), 5) for a in mol.GetAtoms()],
         dtype=np.intp,
     )
     atom_type_onehot = np.zeros((n_mol_atoms, 6), dtype=np.float32)
@@ -638,6 +636,55 @@ def compute_ligand_type_features(
     }
 
 
+def _compute_burial_index(
+    atom_positions: np.ndarray,
+    res_names: list[str],
+    atom_names: list[str],
+    n_atoms: int,
+) -> np.ndarray:
+    """Compute per-atom burial index from SASA.
+
+    Uses freesasa to compute per-atom solvent-accessible surface area,
+    then normalizes by RESIDUE_MAX_SASA to get relative SASA.
+    burial_index = 1.0 - relative_sasa, clamped to [0, 1].
+
+    Falls back to 0.5 if freesasa is unavailable or computation fails.
+
+    Args:
+        atom_positions: Atom coordinates (N, 3).
+        res_names: Residue name per atom.
+        atom_names: Atom name per atom.
+        n_atoms: Number of atoms.
+
+    Returns:
+        Per-atom burial index array (N,) in [0, 1].
+    """
+    if freesasa is None or n_atoms == 0:
+        return np.full(n_atoms, 0.5, dtype=np.float32)
+
+    try:
+        # Build freesasa Structure from atom data
+        structure = freesasa.Structure()
+        for i in range(n_atoms):
+            rn = res_names[i] if res_names[i] else "UNK"
+            an = atom_names[i] if atom_names[i] else "X"
+            x, y, z = float(atom_positions[i, 0]), float(atom_positions[i, 1]), float(atom_positions[i, 2])
+            structure.addAtom(an, rn, "1", "A", x, y, z)
+
+        result = freesasa.calc(structure)
+
+        burial = np.full(n_atoms, 0.5, dtype=np.float32)
+        for i in range(n_atoms):
+            atom_sasa = result.atomArea(i)
+            max_sasa = RESIDUE_MAX_SASA.get(res_names[i], 200.0)
+            relative_sasa = atom_sasa / max_sasa if max_sasa > 0 else 0.5
+            burial[i] = np.clip(1.0 - relative_sasa, 0.0, 1.0)
+        return burial
+    except Exception:
+        logger.warning("freesasa computation failed, using default burial_index=0.5")
+        return np.full(n_atoms, 0.5, dtype=np.float32)
+
+
 def compute_protein_type_features(
     verts: np.ndarray,
     atom_positions: np.ndarray,
@@ -649,7 +696,7 @@ def compute_protein_type_features(
     """Compute protein-specific type features mapped to surface vertices.
 
     Includes residue type one-hot encoding (20 standard amino acids),
-    backbone vs sidechain classification, and B-factor (flexibility).
+    backbone vs sidechain classification, and burial index (solvent exposure).
 
     Can be used independently for protein surface analysis.
 
@@ -663,7 +710,7 @@ def compute_protein_type_features(
 
     Returns:
         Dict with keys: 'residue_type' (N, 20), 'is_backbone' (N,),
-        'b_factor' (N,)
+        'burial_index' (N,)
     """
     if _knn_data is not None:
         knn_idx, knn_weights, _ = _knn_data
@@ -676,24 +723,20 @@ def compute_protein_type_features(
     n_prot_atoms = mol.GetNumAtoms()
     res_names: list[str] = []
     atom_names: list[str] = []
-    b_factors = np.zeros(n_prot_atoms, dtype=np.float32)
     for atom in mol.GetAtoms():
-        idx = atom.GetIdx()
         res = atom.GetPDBResidueInfo()
         if res:
             res_names.append(res.GetResidueName().strip())
             atom_names.append(res.GetName().strip())
-            b_factors[idx] = res.GetTempFactor()
         else:
             res_names.append("")
             atom_names.append("")
 
+    # Burial index: 1.0 - relative_sasa (clamped to [0, 1])
+    burial = _compute_burial_index(atom_positions, res_names, atom_names, n_prot_atoms)
+
     # Residue type one-hot (20 amino acids)
-    AA_LIST = [
-        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-        'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL',
-    ]
-    aa_to_idx = {aa: i for i, aa in enumerate(AA_LIST)}
+    aa_to_idx = {aa: i for i, aa in enumerate(AMINO_ACID_LETTERS)}
     res_indices = np.array(
         [aa_to_idx.get(rn, -1) for rn in res_names], dtype=np.intp,
     )
@@ -703,20 +746,19 @@ def compute_protein_type_features(
     vertex_residue_type = _knn_map_matrix(knn_idx, knn_weights, residue_onehot)
 
     # Backbone vs sidechain
-    backbone_names = {'N', 'CA', 'C', 'O'}
     is_backbone = np.array(
-        [1.0 if an in backbone_names else 0.0 for an in atom_names],
+        [1.0 if an in BACKBONE_ATOM_SET else 0.0 for an in atom_names],
         dtype=np.float32,
     )
     vertex_backbone = np.clip(_knn_map_scalar(knn_idx, knn_weights, is_backbone), 0, 1)
 
-    # B-factor (flexibility)
-    vertex_bfactor = _normalize_to_range(_knn_map_scalar(knn_idx, knn_weights, b_factors))
+    # Burial index mapped to vertices, normalized to [-1, 1]
+    vertex_burial = _normalize_to_range(_knn_map_scalar(knn_idx, knn_weights, burial))
 
     return {
         'residue_type': vertex_residue_type,
         'is_backbone': vertex_backbone,
-        'b_factor': vertex_bfactor,
+        'burial_index': vertex_burial,
     }
 
 
@@ -842,7 +884,7 @@ def compute_all_vertex_features(
         )
         type_feat['residue_type'] = np.zeros((n_verts, 20), dtype=np.float32)
         type_feat['is_backbone'] = np.zeros(n_verts, dtype=np.float32)
-        type_feat['b_factor'] = np.zeros(n_verts, dtype=np.float32)
+        type_feat['burial_index'] = np.zeros(n_verts, dtype=np.float32)
     else:
         type_feat = compute_protein_type_features(
             verts, atom_positions, mol, knn_atoms, verbose, _knn_data=knn_data,
@@ -900,11 +942,7 @@ def _stack_surface_features(
                 _atom_labels = ["C", "N", "O", "S", "Hal", "Other"]
                 names.extend([f"{key}_{l}" for l in _atom_labels])
             elif key == "residue_type":
-                _aa = [
-                    'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-                    'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL',
-                ]
-                names.extend([f"{key}_{aa}" for aa in _aa])
+                names.extend([f"{key}_{aa}" for aa in AMINO_ACID_LETTERS])
             else:
                 names.extend([f"{key}_{i}" for i in range(values.shape[1])])
         else:
@@ -1003,6 +1041,7 @@ class _SimpleAtom:
         try:
             self._atomic_num = Chem.GetPeriodicTable().GetAtomicNumber(element)
         except Exception:
+            logger.warning("Unknown element '%s', defaulting atomic number to 0", element)
             self._atomic_num = 0
 
     def GetIdx(self) -> int:
@@ -1054,7 +1093,7 @@ def compute_protein_surface_features(
     """Compute protein-specific surface features (residue/patch scale).
 
     Features: multi-scale curvature (10D) + normals (3D) + chemical (5D)
-    + residue type (20D) + backbone/bfactor (2D) = 40D total.
+    + residue type (20D) + backbone/burial (2D) = 40D total.
     """
     if mol is None and atom_metadata is not None:
         mol = _build_simple_protein_mol(atom_metadata)
@@ -1081,7 +1120,7 @@ def compute_protein_surface_features(
         "hba",
         "residue_type",
         "is_backbone",
-        "b_factor",
+        "burial_index",
     ]
     if extra_atom_features:
         feature_keys.extend(extra_atom_features.keys())

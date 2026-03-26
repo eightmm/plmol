@@ -56,19 +56,27 @@ plmol/
 │   ├── esm_featurizer.py          # ESM3/ESMC embedding extraction
 │   ├── pdb_standardizer.py        # PDB standardization
 │   └── utils.py                    # PDBParser and utilities
+├── rdkit_utils.py                  # RDKit helper utilities
 ├── ligand/
 │   ├── core.py                     # Ligand class
 │   ├── descriptors.py              # MoleculeFeaturizer (descriptors + fingerprints)
 │   ├── featurizer.py               # LigandFeaturizer
+│   ├── fingerprint_generator.py    # FingerprintGenerator (ECFP, MACCS, RDKit, ERG, etc.)
 │   ├── fragment.py                 # Rotatable-bond fragmentation
-│   └── graph.py                    # MoleculeGraphFeaturizer
+│   ├── graph.py                    # MoleculeGraphFeaturizer
+│   ├── graph_atom_features.py      # AtomFeatureMixin (per-atom node features)
+│   └── graph_edge_features.py      # EdgeFeatureMixin (bond/3D pair edge features)
 ├── interaction/
 │   ├── pli_featurizer.py           # PLInteractionFeaturizer
+│   ├── pli_detectors.py            # InteractionDetector (H-bond, hydrophobic, pi-stacking, etc.)
+│   ├── pli_encoding.py             # InteractionGraphBuilder (bipartite graph encoding)
 │   └── pocket_extractor.py         # Pocket extraction
 ├── surface/
-│   └── __init__.py                 # Surface building (point cloud)
+│   ├── __init__.py                 # Surface building (point cloud)
+│   └── features.py                 # Surface feature computation (curvature, chemical, burial)
 ├── voxel/
-│   └── __init__.py                 # Voxel building (3D grid)
+│   ├── __init__.py                 # Voxel building (3D grid)
+│   └── features.py                 # Voxel feature computation (16-channel grid)
 ├── io/
 │   └── loaders.py                  # load_protein_input, load_ligand_input
 └── cli/                            # Command-line interface

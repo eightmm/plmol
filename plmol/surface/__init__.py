@@ -17,7 +17,6 @@ from .features import (
     compute_extra_features,
     compute_ligand_surface_features,
     compute_protein_surface_features,
-    _build_simple_protein_mol,
 )
 from ..constants import (
     SURFACE_DEFAULT_CURVATURE_SCALES,
@@ -96,7 +95,7 @@ def build_protein_surface(
     Args:
         coords: Atom positions (N, 3).
         radii: VdW radii (N,).
-        atom_metadata: Per-atom dicts with res_name, atom_name, element, b_factor.
+        atom_metadata: Per-atom dicts with res_name, atom_name, element, burial_index.
         include_features: Compute dMaSIF-style features.
         n_points_per_atom: Points per atom (default: 100).
         probe_radius: Solvent probe radius (default: 1.4).
