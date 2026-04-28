@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import torch
 
-from plmol.cli.batch_protein_featurize import process_single_file_shared_featurizer
+from plmol.cli import batch_protein_featurize
+from plmol.cli.batch_protein_featurize import find_protein_files, process_single_file, process_single_file_shared_featurizer
 
 
 class FakeHierarchicalFeaturizer:
@@ -42,6 +43,17 @@ def _copy_as_protein_file(src: str, dst_dir: Path) -> Path:
     dst = dst_dir / "10gs_protein.pdb"
     dst.write_text(Path(src).read_text())
     return dst
+
+
+def test_find_protein_files_supports_custom_pattern(tmp_path):
+    (tmp_path / "plain.pdb").write_text("")
+    (tmp_path / "10gs_protein.pdb").write_text("")
+
+    default_found = find_protein_files(str(tmp_path))
+    all_found = find_protein_files(str(tmp_path), "*.pdb")
+
+    assert [path.name for path in default_found] == ["10gs_protein.pdb"]
+    assert [path.name for path in all_found] == ["10gs_protein.pdb", "plain.pdb"]
 
 
 def test_shared_protein_resume_skips_existing(tmp_path, example_pdb):
@@ -86,3 +98,35 @@ def test_shared_protein_overwrites_existing_without_resume(tmp_path, example_pdb
     saved = torch.load(output_path, weights_only=False)
     assert saved["num_residues"] == 1
     assert saved["pdb_id"] == "10gs"
+
+
+def test_process_single_file_forwards_esm_options(tmp_path, example_pdb, monkeypatch):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    pdb_path = _copy_as_protein_file(example_pdb, input_dir)
+    captured = {}
+
+    class RecordingHierarchicalFeaturizer(FakeHierarchicalFeaturizer):
+        def __init__(self, esmc_model, esm3_model, esm_device):
+            captured["args"] = (esmc_model, esm3_model, esm_device)
+
+    monkeypatch.setattr(batch_protein_featurize, "HierarchicalFeaturizer", RecordingHierarchicalFeaturizer)
+
+    result = process_single_file(
+        (
+            pdb_path,
+            str(input_dir),
+            str(output_dir),
+            False,
+            "unk",
+            False,
+            "custom-esmc",
+            "custom-esm3",
+            "cpu",
+        )
+    )
+
+    assert result == ("10gs", True, "ok (1 residues)")
+    assert captured["args"] == ("custom-esmc", "custom-esm3", "cpu")

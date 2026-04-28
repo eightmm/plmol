@@ -115,9 +115,15 @@ Features are computed lazily and cached. All APIs follow the same `.featurize(mo
 ## Batch Processing
 
 ```bash
-plmol-batch-protein-featurize --input_dir pdbs/ --output_dir features/
-plmol-batch-ligand-featurize --input_dir sdfs/ --output_dir features/
+plmol-batch-protein-featurize --input-dir pdbs/ --output-dir features/
+plmol-batch-ligand-featurize --input-dir sdfs/ --output-dir features/
+
+# Common options
+plmol-batch-protein-featurize --input-dir pdbs/ --output-dir features/ --all-pdb --device auto --resume
+plmol-batch-ligand-featurize --input-dir ligands/ --output-dir features/ --extensions sdf,mol2 --graph-only
 ```
+
+Underscore option names such as `--input_dir` are still accepted for compatibility.
 
 ## Documentation
 

@@ -33,10 +33,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def find_protein_files(input_dir: str) -> List[Path]:
-    """Find all *protein.pdb files recursively."""
+DEFAULT_PROTEIN_PATTERN = "*protein.pdb"
+
+
+def resolve_device(device: str) -> str:
+    """Resolve the ESM device, using CUDA when available for the auto setting."""
+    if device == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    return device
+
+
+def find_protein_files(input_dir: str, pattern: str = DEFAULT_PROTEIN_PATTERN) -> List[Path]:
+    """Find protein PDB files recursively."""
     input_path = Path(input_dir)
-    files = sorted(input_path.rglob("*protein.pdb"))
+    files = sorted(input_path.rglob(pattern))
     return files
 
 
@@ -124,7 +134,23 @@ def process_single_file(args: Tuple) -> Tuple[str, bool, str]:
     Returns:
         Tuple of (pdb_id, success, message)
     """
-    pdb_path, input_dir, output_dir, standardize, ptm_handling, resume = args
+    if len(args) == 6:
+        pdb_path, input_dir, output_dir, standardize, ptm_handling, resume = args
+        esmc_model = "esmc_600m"
+        esm3_model = "esm3-open"
+        device = resolve_device("auto")
+    else:
+        (
+            pdb_path,
+            input_dir,
+            output_dir,
+            standardize,
+            ptm_handling,
+            resume,
+            esmc_model,
+            esm3_model,
+            device,
+        ) = args
     pdb_id = pdb_path.stem.replace('_protein', '')
     tmp_pdb_path = None
 
@@ -146,7 +172,11 @@ def process_single_file(args: Tuple) -> Tuple[str, bool, str]:
             pdb_to_process = str(pdb_path)
 
         # Initialize featurizer (per-process)
-        featurizer = HierarchicalFeaturizer()
+        featurizer = HierarchicalFeaturizer(
+            esmc_model=esmc_model,
+            esm3_model=esm3_model,
+            esm_device=device,
+        )
 
         # Extract features
         data = featurizer.featurize(pdb_to_process)
@@ -216,24 +246,40 @@ def process_single_file_shared_featurizer(
 
 def main():
     parser = argparse.ArgumentParser(description='Batch feature extraction for protein PDB files')
-    parser.add_argument('--input_dir', type=str, required=True, help='Input directory containing PDB files')
-    parser.add_argument('--output_dir', type=str, required=True, help='Output directory for feature files')
-    parser.add_argument('--num_workers', type=int, default=1, help='Number of parallel workers (default: 1)')
+    parser.add_argument('--input-dir', '--input_dir', dest='input_dir', type=str, required=True, help='Input directory containing PDB files')
+    parser.add_argument('--output-dir', '--output_dir', dest='output_dir', type=str, required=True, help='Output directory for feature files')
+    parser.add_argument('--num-workers', '--num_workers', dest='num_workers', type=int, default=1, help='Number of parallel workers (default: 1)')
     parser.add_argument('--resume', action='store_true', help='Skip already processed files')
     parser.add_argument('--limit', type=int, default=None, help='Limit number of files to process')
-    parser.add_argument('--esmc_model', type=str, default='esmc_600m', help='ESMC model name')
-    parser.add_argument('--esm3_model', type=str, default='esm3-open', help='ESM3 model name')
-    parser.add_argument('--device', type=str, default='cuda', help='Device for ESM models')
+    parser.add_argument('--pattern', type=str, default=DEFAULT_PROTEIN_PATTERN, help='Recursive glob pattern for input PDB files (default: *protein.pdb)')
+    parser.add_argument('--all-pdb', action='store_true', help='Scan all *.pdb files instead of only *protein.pdb')
+    parser.add_argument('--esmc-model', '--esmc_model', dest='esmc_model', type=str, default='esmc_600m', help='ESMC model name')
+    parser.add_argument('--esm3-model', '--esm3_model', dest='esm3_model', type=str, default='esm3-open', help='ESM3 model name')
+    parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cuda', 'cpu'], help='Device for ESM models (default: auto)')
     parser.add_argument('--standardize', action='store_true', help='Standardize PDB files before featurization')
-    parser.add_argument('--ptm_handling', type=str, default='unk',
+    parser.add_argument('--ptm-handling', '--ptm_handling', dest='ptm_handling', type=str, default='unk',
                         choices=['base_aa', 'unk', 'preserve', 'remove'],
                         help='PTM handling mode (default: unk)')
     args = parser.parse_args()
 
+    input_path = Path(args.input_dir)
+    if not input_path.is_dir():
+        parser.error(f"input directory does not exist or is not a directory: {args.input_dir}")
+    if args.num_workers < 1:
+        parser.error("--num-workers must be >= 1")
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit must be >= 1")
+    if args.all_pdb and args.pattern != DEFAULT_PROTEIN_PATTERN:
+        parser.error("--all-pdb cannot be combined with --pattern")
+
+    pattern = "*.pdb" if args.all_pdb else args.pattern
+    device = resolve_device(args.device)
+
     # Find all protein files
-    logger.info(f"Scanning {args.input_dir} for protein.pdb files...")
-    pdb_files = find_protein_files(args.input_dir)
+    logger.info(f"Scanning {args.input_dir} for protein files matching {pattern!r}...")
+    pdb_files = find_protein_files(args.input_dir, pattern)
     logger.info(f"Found {len(pdb_files)} protein files")
+    logger.info(f"ESM device: {device} (requested: {args.device})")
 
     if args.standardize:
         logger.info(f"Standardization enabled (ptm_handling: {args.ptm_handling})")
@@ -272,7 +318,7 @@ def main():
         featurizer = HierarchicalFeaturizer(
             esmc_model=args.esmc_model,
             esm3_model=args.esm3_model,
-            esm_device=args.device,
+            esm_device=device,
         )
         logger.info("Featurizer ready")
 
@@ -295,7 +341,17 @@ def main():
         logger.info(f"Using {args.num_workers} workers")
 
         tasks = [
-            (f, args.input_dir, args.output_dir, args.standardize, args.ptm_handling, args.resume)
+            (
+                f,
+                args.input_dir,
+                args.output_dir,
+                args.standardize,
+                args.ptm_handling,
+                args.resume,
+                args.esmc_model,
+                args.esm3_model,
+                device,
+            )
             for f in pdb_files
         ]
 

@@ -4,7 +4,22 @@ from pathlib import Path
 
 import torch
 
-from plmol.cli.batch_ligand_featurize import process_single_ligand
+from plmol.cli.batch_ligand_featurize import find_ligand_files, normalize_extensions, process_single_ligand
+
+
+def test_normalize_extensions_accepts_common_forms():
+    assert normalize_extensions(["sdf", ".MOL", " sdf "]) == [".sdf", ".mol"]
+
+
+def test_find_ligand_files_respects_extension_filter(tmp_path):
+    (tmp_path / "a.SDF").write_text("")
+    (tmp_path / "a.mol2").write_text("")
+    (tmp_path / "b.pdb").write_text("")
+
+    found = find_ligand_files(str(tmp_path), extensions=["sdf"])
+
+    assert set(found) == {"a"}
+    assert [path.suffix for path in found["a"]] == [".SDF"]
 
 
 def test_process_single_ligand_resume_skips_existing(tmp_path, example_sdf):

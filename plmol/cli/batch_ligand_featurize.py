@@ -16,7 +16,7 @@ import argparse
 import logging
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from collections import defaultdict
 
@@ -39,7 +39,32 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Supported file extensions in priority order
-SUPPORTED_EXTENSIONS = IO_SUPPORTED_LIGAND_EXTENSIONS
+SUPPORTED_EXTENSIONS = tuple(IO_SUPPORTED_LIGAND_EXTENSIONS)
+
+
+def normalize_extensions(extensions: Optional[Sequence[str]] = None) -> List[str]:
+    """Normalize and validate ligand extension filters."""
+    if extensions is None:
+        return list(SUPPORTED_EXTENSIONS)
+
+    normalized = []
+    for ext in extensions:
+        ext = ext.strip().lower()
+        if not ext:
+            continue
+        if not ext.startswith("."):
+            ext = f".{ext}"
+        if ext not in SUPPORTED_EXTENSIONS:
+            raise ValueError(
+                f"Unsupported ligand extension: {ext}. "
+                f"Supported: {', '.join(SUPPORTED_EXTENSIONS)}"
+            )
+        if ext not in normalized:
+            normalized.append(ext)
+
+    if not normalized:
+        raise ValueError("At least one ligand extension must be provided.")
+    return normalized
 
 
 def load_ligand(file_path: Path) -> Optional[Chem.Mol]:
@@ -72,7 +97,7 @@ def load_ligand(file_path: Path) -> Optional[Chem.Mol]:
     return mol
 
 
-def find_ligand_files(input_dir: str) -> Dict[str, List[Path]]:
+def find_ligand_files(input_dir: str, extensions: Optional[Sequence[str]] = None) -> Dict[str, List[Path]]:
     """
     Find all ligand files and group by ligand ID.
 
@@ -80,24 +105,27 @@ def find_ligand_files(input_dir: str) -> Dict[str, List[Path]]:
         Dictionary mapping ligand_id -> list of file paths (sorted by extension priority)
     """
     input_path = Path(input_dir)
+    search_extensions = normalize_extensions(extensions)
     ligand_files = defaultdict(list)
 
-    for ext in SUPPORTED_EXTENSIONS:
-        for file_path in input_path.rglob(f"*{ext}"):
-            # Extract ligand ID (filename without extension)
-            ligand_id = file_path.stem
-            # Remove common suffixes like _ligand
-            for suffix in ['_ligand', '_lig', '_mol']:
-                if ligand_id.endswith(suffix):
-                    ligand_id = ligand_id[:-len(suffix)]
-                    break
-            ligand_files[ligand_id].append(file_path)
+    for file_path in input_path.rglob("*"):
+        if not file_path.is_file() or file_path.suffix.lower() not in search_extensions:
+            continue
+
+        # Extract ligand ID (filename without extension)
+        ligand_id = file_path.stem
+        # Remove common suffixes like _ligand
+        for suffix in ['_ligand', '_lig', '_mol']:
+            if ligand_id.endswith(suffix):
+                ligand_id = ligand_id[:-len(suffix)]
+                break
+        ligand_files[ligand_id].append(file_path)
 
     # Sort each ligand's files by extension priority
     for ligand_id in ligand_files:
         ligand_files[ligand_id].sort(
-            key=lambda p: SUPPORTED_EXTENSIONS.index(p.suffix.lower())
-            if p.suffix.lower() in SUPPORTED_EXTENSIONS else 999
+            key=lambda p: search_extensions.index(p.suffix.lower())
+            if p.suffix.lower() in search_extensions else 999
         )
 
     return dict(ligand_files)
@@ -229,15 +257,15 @@ def main():
         description='Batch feature extraction for ligand files'
     )
     parser.add_argument(
-        '--input_dir', type=str, required=True,
+        '--input-dir', '--input_dir', dest='input_dir', type=str, required=True,
         help='Input directory containing ligand files (SDF, MOL2, MOL, PDB)'
     )
     parser.add_argument(
-        '--output_dir', type=str, required=True,
+        '--output-dir', '--output_dir', dest='output_dir', type=str, required=True,
         help='Output directory for feature files'
     )
     parser.add_argument(
-        '--num_workers', type=int, default=1,
+        '--num-workers', '--num_workers', dest='num_workers', type=int, default=1,
         help='Number of parallel workers (default: 1)'
     )
     parser.add_argument(
@@ -249,18 +277,34 @@ def main():
         help='Limit number of ligands to process'
     )
     parser.add_argument(
-        '--add_hydrogens', action='store_true',
+        '--add-hydrogens', '--add_hydrogens', dest='add_hydrogens', action='store_true',
         help='Add explicit hydrogens to ligands (default: heavy atoms only)'
     )
     parser.add_argument(
-        '--no_canonicalize', action='store_true',
+        '--no-canonicalize', '--no_canonicalize', dest='no_canonicalize', action='store_true',
         help='Do not canonicalize atom order (default: canonicalize for ML consistency)'
     )
     parser.add_argument(
-        '--graph_only', action='store_true',
+        '--graph-only', '--graph_only', dest='graph_only', action='store_true',
         help='Extract only graph features (no descriptors/fingerprints)'
     )
+    parser.add_argument(
+        '--extensions', type=str, default=','.join(SUPPORTED_EXTENSIONS),
+        help='Comma-separated ligand extensions to scan (default: .sdf,.mol2,.mol,.pdb)'
+    )
     args = parser.parse_args()
+
+    input_path = Path(args.input_dir)
+    if not input_path.is_dir():
+        parser.error(f"input directory does not exist or is not a directory: {args.input_dir}")
+    if args.num_workers < 1:
+        parser.error("--num-workers must be >= 1")
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit must be >= 1")
+    try:
+        extensions = normalize_extensions(args.extensions.split(','))
+    except ValueError as exc:
+        parser.error(str(exc))
 
     add_hydrogens = args.add_hydrogens
     canonicalize = not args.no_canonicalize
@@ -270,8 +314,8 @@ def main():
     logger.info(f"Options: hydrogen={add_hydrogens}, canonicalize={canonicalize}, graph_only={graph_only}")
 
     # Find all ligand files
-    logger.info(f"Scanning {args.input_dir} for ligand files...")
-    ligand_files = find_ligand_files(args.input_dir)
+    logger.info(f"Scanning {args.input_dir} for ligand files ({', '.join(extensions)})...")
+    ligand_files = find_ligand_files(args.input_dir, extensions)
     logger.info(f"Found {len(ligand_files)} unique ligands")
 
     # Count formats
