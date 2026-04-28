@@ -95,6 +95,8 @@ class TestLigandFeaturize:
     def test_morgan_mode(self, ethanol_smiles):
         lig = Ligand.from_smiles(ethanol_smiles)
         result = lig.featurize(mode="morgan")
+        assert "fingerprint" in result
+        assert "ecfp4" in result["fingerprint"]
         assert "morgan" in result
         assert result["morgan"]["fingerprint"].shape == (2048,)
         assert result["morgan"]["type"] == "morgan"

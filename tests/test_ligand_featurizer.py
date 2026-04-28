@@ -97,8 +97,26 @@ class TestFeaturize:
     def test_morgan_mode(self, ethanol_smiles):
         lf = LigandFeaturizer(ethanol_smiles)
         result = lf.featurize(mode="morgan")
+        assert "fingerprint" in result
+        assert "ecfp4" in result["fingerprint"]
         assert "morgan" in result
         assert result["morgan"]["fingerprint"].shape[0] == 2048
+
+    def test_morgan_include_fps_alias(self, ethanol_smiles):
+        lf = LigandFeaturizer(ethanol_smiles)
+        result = lf.featurize(
+            mode="fingerprint",
+            fingerprint_kwargs={"include_fps": ("morgan",)},
+        )
+        assert set(result["fingerprint"]) == {"descriptors", "ecfp4"}
+
+    def test_brics_fragment_kwargs(self, aspirin_smiles):
+        lf = LigandFeaturizer(aspirin_smiles)
+        result = lf.featurize(
+            mode="fragment",
+            fragment_kwargs={"method": "brics"},
+        )
+        assert result["fragment"]["fragment_method"] == "brics"
 
     def test_invalid_mode_raises(self, ethanol_smiles):
         lf = LigandFeaturizer(ethanol_smiles)

@@ -21,7 +21,7 @@ except ImportError:  # pragma: no cover - optional dependency
 from ..errors import InputError, DependencyError
 from ..specs import LIGAND_SPEC, normalize_modes
 from .descriptors import MoleculeFeaturizer
-from .fragment import fragment_on_rotatable_bonds
+from .fragment import fragment_molecule, fragment_on_rotatable_bonds
 from ..rdkit_utils import ensure_3d_conformer, has_3d, prepare_mol
 from ..surface import build_ligand_surface
 from ..voxel import build_ligand_voxel
@@ -98,6 +98,7 @@ class LigandFeaturizer:
         graph_kwargs: Optional[Dict[str, Any]] = None,
         surface_kwargs: Optional[Dict[str, Any]] = None,
         fingerprint_kwargs: Optional[Dict[str, Any]] = None,
+        fragment_kwargs: Optional[Dict[str, Any]] = None,
         voxel_kwargs: Optional[Dict[str, Any]] = None,
         generate_conformer: bool = False,
     ) -> Dict[str, Any]:
@@ -110,6 +111,7 @@ class LigandFeaturizer:
             graph_kwargs: Optional kwargs for graph featurization.
             surface_kwargs: Optional kwargs for surface extraction.
             fingerprint_kwargs: Optional kwargs for fingerprint extraction.
+            fragment_kwargs: Optional kwargs for fragmentation.
             voxel_kwargs: Optional kwargs for voxel featurization.
             generate_conformer: Whether to generate a 3D conformer if missing
                 (surface/voxel only).
@@ -156,6 +158,8 @@ class LigandFeaturizer:
             results["descriptor"] = descriptor
 
         if "morgan" in modes:
+            if "fingerprint" not in results:
+                results["fingerprint"] = self.get_features(include_fps=("ecfp4",))
             results["morgan"] = self.get_morgan_fingerprint()
 
         if "surface" in modes:
@@ -172,7 +176,8 @@ class LigandFeaturizer:
             )
 
         if "fragment" in modes:
-            results["fragment"] = self.get_fragment()
+            fragment_kwargs = dict(fragment_kwargs or {})
+            results["fragment"] = self.get_fragment(**fragment_kwargs)
 
         return results
 
@@ -404,13 +409,14 @@ class LigandFeaturizer:
     def get_fragment(
         self,
         mol_or_smiles: Optional[Union[str, "Chem.Mol"]] = None,
+        method: str = "rotatable",
         min_fragment_size: int = 1,
     ) -> Dict[str, Any]:
-        """Return rotatable-bond fragmentation result."""
+        """Return a fragmentation result using the requested method."""
         mol = self._resolve_mol(mol_or_smiles)
         if mol is None:
             raise InputError("No ligand set for fragmentation.")
-        return fragment_on_rotatable_bonds(mol, min_fragment_size=min_fragment_size)
+        return fragment_molecule(mol, method=method, min_fragment_size=min_fragment_size)
 
     def _resolve_mol(
         self, mol_or_smiles: Optional[Union[str, "Chem.Mol"]]

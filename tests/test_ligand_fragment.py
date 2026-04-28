@@ -4,7 +4,11 @@ import numpy as np
 import pytest
 from rdkit import Chem
 
-from plmol.ligand.fragment import fragment_on_rotatable_bonds
+from plmol.ligand.fragment import (
+    fragment_by_brics,
+    fragment_molecule,
+    fragment_on_rotatable_bonds,
+)
 from plmol.ligand import Ligand
 
 
@@ -123,6 +127,31 @@ class TestFragmentOnRotatableBonds:
         assert sorted(fai[0]) == list(range(mol.GetNumAtoms()))
 
 
+class TestFragmentByBrics:
+    """Alternative BRICS fragmentation."""
+
+    def test_aspirin_brics_fragments(self):
+        mol = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
+        result = fragment_by_brics(mol)
+        assert result["fragment_method"] == "brics"
+        assert result["num_brics_bonds"] == result["num_cleaved_bonds"]
+        assert result["num_fragments"] >= 2
+        assert result["atom_to_fragment"].shape[0] == mol.GetNumAtoms()
+        assert result["fragment_features"].shape == (result["num_fragments"], 62)
+
+    def test_fragment_molecule_dispatch(self):
+        mol = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
+        rot = fragment_molecule(mol, method="rotatable")
+        brics = fragment_molecule(mol, method="brics")
+        assert rot["fragment_method"] == "rotatable"
+        assert brics["fragment_method"] == "brics"
+
+    def test_invalid_fragment_method_raises(self):
+        mol = Chem.MolFromSmiles("CCO")
+        with pytest.raises(ValueError, match="Unsupported fragment method"):
+            fragment_molecule(mol, method="bad")
+
+
 # ---------------------------------------------------------------------------
 # Integration: Ligand.featurize(mode="fragment")
 # ---------------------------------------------------------------------------
@@ -160,3 +189,12 @@ class TestLigandFragmentIntegration:
         result = ligand.featurize(mode=["smiles", "fragment"])
         assert "smiles" in result
         assert "fragment" in result
+
+    def test_ligand_featurize_brics_fragment(self):
+        ligand = Ligand.from_smiles("CC(=O)Oc1ccccc1C(=O)O")
+        result = ligand.featurize(
+            mode="fragment",
+            fragment_kwargs={"method": "brics"},
+        )
+        assert result["fragment"]["fragment_method"] == "brics"
+        assert "num_brics_bonds" in result["fragment"]

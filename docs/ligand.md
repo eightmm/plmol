@@ -33,12 +33,12 @@ Mode strings are normalized via `normalize_modes()` from `plmol.specs`. Invalid 
 | Mode | Output Key | Description |
 |------|-----------|-------------|
 | `"graph"` | `"graph"` | Dense adjacency graph (node_features, adjacency, bond_mask, ...) |
-| `"fingerprint"` | `"fingerprint"` | Descriptors + ECFP4/6, MACCS, RDKit FP, AtomPair, ErG |
+| `"fingerprint"` | `"fingerprint"` | Descriptors + ECFP/Morgan, MACCS, RDKit FP, AtomPair, ErG |
 | `"descriptor"` | `"descriptor"` | 62-dim normalized descriptor vector + descriptor names |
-| `"fragment"` | `"fragment"` | Rotatable-bond fragmentation (fragment SMILES, adjacency, atom mapping) |
+| `"fragment"` | `"fragment"` | Fragmentation result (rotatable-bond by default; BRICS optional) |
 | `"surface"` | `"surface"` | dMaSIF point cloud surface (requires 3D conformer) |
 | `"voxel"` | `"voxel"` | 16-channel 3D voxel grid (requires 3D conformer) |
-| `"morgan"` | `"morgan"` | Standalone Morgan/ECFP fingerprint dict |
+| `"morgan"` | `"fingerprint"` + `"morgan"` | Backward-compatible alias for Morgan/ECFP4; prefer `fingerprint_kwargs={"include_fps": ["morgan"]}` |
 | `"smiles"` | `"smiles"` | Canonical SMILES string |
 | `"sequence"` | `"sequence"` | Same as SMILES (ligand alias) |
 | `"all"` | graph + fingerprint + smiles + sequence | Default modes. surface/voxel/fragment/descriptor/morgan must be explicitly requested |
@@ -184,6 +184,19 @@ result = ligand.featurize(
 )
 ```
 
+`"morgan"` is accepted as an alias for `"ecfp4"` in `include_fps`:
+
+```python
+result = ligand.featurize(
+    mode="fingerprint",
+    fingerprint_kwargs={"include_fps": ["morgan"]},
+)
+ecfp4 = result["fingerprint"]["ecfp4"]
+```
+
+`mode="morgan"` remains as a legacy convenience mode. It now also returns the
+standard `"fingerprint"` key containing only descriptors + `ecfp4`.
+
 ### Additional Fingerprints (via `include_fps`)
 
 | Key | Shape | Description |
@@ -232,10 +245,17 @@ names = desc["descriptor_names"]      # length 62
 
 ## Fragment Mode
 
-Fragments a molecule by cutting at rotatable bonds (SMARTS: `[!$(*#*)&!D1]-!@[!$(*#*)&!D1]`). Produces a fragment-level graph where each fragment is a rigid substructure connected by rotatable bonds.
+Fragments a molecule into a fragment-level graph. The default method cuts
+rotatable bonds (SMARTS: `[!$(*#*)&!D1]-!@[!$(*#*)&!D1]`) and produces rigid
+substructures connected by flexible bonds. `method="brics"` cuts RDKit BRICS
+retrosynthetic bonds instead, which often gives medicinal-chemistry building
+blocks.
 
 ```python
-result = ligand.featurize(mode="fragment")
+result = ligand.featurize(
+    mode="fragment",
+    fragment_kwargs={"method": "rotatable"},  # or "brics"
+)
 frag = result["fragment"]
 ```
 
@@ -249,12 +269,16 @@ frag = result["fragment"]
 | `fragment_adjacency` | `ndarray (F, F)` int64 | Symmetric binary adjacency between fragments |
 | `fragment_features` | `ndarray (F, 62)` float32 | Per-fragment RDKit descriptors (same 62-dim space as molecule-level `descriptors`) |
 | `num_fragments` | `int` | Number of fragments (F) |
-| `num_rotatable_bonds` | `int` | Number of rotatable bonds detected |
+| `fragment_method` | `str` | Fragmentation method used: `"rotatable"` or `"brics"` |
+| `num_cleaved_bonds` | `int` | Number of bonds cut by the selected method |
+| `num_rotatable_bonds` | `int` | Number of rotatable bonds detected (`method="rotatable"`) |
+| `num_brics_bonds` | `int` | Number of BRICS bonds detected (`method="brics"`) |
 
 ### Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
+| `method` | `str` | `"rotatable"` | Fragmentation method: `"rotatable"` or `"brics"` |
 | `min_fragment_size` | `int` | `1` | Fragments smaller than this are merged into their largest neighbour |
 
 `min_fragment_size` is available through `LigandFeaturizer` or the low-level function:
@@ -262,17 +286,18 @@ frag = result["fragment"]
 ```python
 from plmol import LigandFeaturizer
 featurizer = LigandFeaturizer(mol)
-frag = featurizer.get_fragment(min_fragment_size=3)
+frag = featurizer.get_fragment(method="brics", min_fragment_size=3)
 ```
 
 ### Low-Level Function
 
 ```python
 from rdkit import Chem
-from plmol.ligand import fragment_on_rotatable_bonds
+from plmol.ligand import fragment_by_brics, fragment_on_rotatable_bonds
 
 mol = Chem.MolFromSmiles("CC(=O)Oc1ccccc1C(=O)O")
-result = fragment_on_rotatable_bonds(mol, min_fragment_size=1)
+rotatable = fragment_on_rotatable_bonds(mol, min_fragment_size=1)
+brics = fragment_by_brics(mol, min_fragment_size=1)
 ```
 
 Fragment uses `rdkit_utils.prepare_mol` for molecule preparation and computes per-fragment descriptors via `MoleculeFeaturizer.get_descriptors()`.
@@ -350,7 +375,7 @@ featurizer = LigandFeaturizer("CCO")
 # Individual representations
 graph = featurizer.get_graph(standardized=True)
 fp = featurizer.get_morgan_fingerprint()
-frag = featurizer.get_fragment(min_fragment_size=1)
+frag = featurizer.get_fragment(method="brics", min_fragment_size=1)
 surface = featurizer.get_surface(generate_conformer=True)
 voxel = featurizer.get_voxel(generate_conformer=True)
 

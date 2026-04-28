@@ -14,6 +14,7 @@ from .ligand.core import Ligand
 from .ligand.descriptors import MoleculeFeaturizer
 from .ligand.graph import MoleculeGraphFeaturizer
 from .ligand.featurizer import LigandFeaturizer
+from .ligand.fragment import fragment_by_brics, fragment_molecule, fragment_on_rotatable_bonds
 
 # --- Nucleic Acid ---
 from .nucleic_acid.core import NucleicAcid
@@ -39,6 +40,7 @@ __all__ = [
     "Protein", "ProteinFeaturizer", "PDBStandardizer", "ResidueFeaturizer", "AtomFeaturizer",
     "HierarchicalFeaturizer", "HierarchicalProteinData", "ESMFeaturizer",
     "Ligand", "MoleculeFeaturizer", "MoleculeGraphFeaturizer", "LigandFeaturizer",
+    "fragment_by_brics", "fragment_molecule", "fragment_on_rotatable_bonds",
     "NucleicAcid", "NucleicFeaturizer",
     "StructureParser", "MMCIFParser",
     "PLInteractionFeaturizer", "Complex", "MolecularComplex",

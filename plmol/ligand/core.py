@@ -245,6 +245,7 @@ class Ligand(BaseMolecule):
         graph_kwargs: Optional[Dict[str, Any]] = None,
         surface_kwargs: Optional[Dict[str, Any]] = None,
         fingerprint_kwargs: Optional[Dict[str, Any]] = None,
+        fragment_kwargs: Optional[Dict[str, Any]] = None,
         voxel_kwargs: Optional[Dict[str, Any]] = None,
         generate_conformer: bool = False,
         add_hs: Optional[bool] = None,
@@ -259,6 +260,7 @@ class Ligand(BaseMolecule):
             graph_kwargs: Optional kwargs for graph featurization.
             surface_kwargs: Optional kwargs for surface extraction.
             fingerprint_kwargs: Optional kwargs for fingerprint extraction.
+            fragment_kwargs: Optional kwargs for fragmentation.
             voxel_kwargs: Optional kwargs for voxel featurization.
             generate_conformer: Whether to generate a 3D conformer if missing
                 for surface/voxel.
@@ -313,6 +315,10 @@ class Ligand(BaseMolecule):
             results["descriptor"] = descriptor
 
         if "morgan" in modes:
+            if "fingerprint" not in results:
+                morgan_features = featurizer.get_features(include_fps=("ecfp4",))
+                self._fingerprint = self._to_numpy_tree(morgan_features)
+                results["fingerprint"] = self._fingerprint
             results["morgan"] = self._to_numpy_tree(featurizer.get_morgan_fingerprint())
 
         if "surface" in modes:
@@ -332,7 +338,8 @@ class Ligand(BaseMolecule):
             results["voxel"] = voxel
 
         if "fragment" in modes:
-            self._fragment = featurizer.get_fragment()
+            fragment_kwargs = dict(fragment_kwargs or {})
+            self._fragment = featurizer.get_fragment(**fragment_kwargs)
             results["fragment"] = self._fragment
 
         return results
