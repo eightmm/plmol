@@ -3,7 +3,7 @@ Protein/Ligand demo showing shared surface + graph interfaces.
 """
 from pathlib import Path
 
-from plmol import Ligand, Protein
+from plmol import Complex, Ligand, Protein
 
 
 def main() -> None:
@@ -19,6 +19,13 @@ def main() -> None:
     ligand_graph = ligand.graph
     print(f"Protein graph keys: {sorted(protein_graph.keys())}")
     print(f"Ligand graph keys: {sorted(ligand_graph.keys())}")
+
+    print("\n--- Interaction Interface ---")
+    complex_obj = Complex.from_inputs(protein=protein, ligand=ligand)
+    interaction = complex_obj.interaction(include_contacts=True, contact_cutoff=4.5, knn_cutoff=4)
+    print(f"Interaction keys: {sorted(interaction.keys())}")
+    print(f"Interaction feature dim: {interaction['feature_dim']}")
+    print(f"Contacts: {interaction['num_contacts']}")
 
     print("\n--- Surface Interfaces ---")
     try:

@@ -7,11 +7,7 @@ and graph-based interaction features.
 """
 
 import logging
-import os
-import sys
-import warnings
 import contextlib
-from io import StringIO
 from typing import Tuple, List, Optional, Dict, Any
 
 from collections import defaultdict
@@ -31,6 +27,7 @@ from .geometry import (
 )
 try:
     import freesasa as fs
+    fs.setVerbosity(fs.nowarnings)
     FREESASA_AVAILABLE = True
 except ImportError:
     FREESASA_AVAILABLE = False
@@ -81,14 +78,10 @@ def suppress_freesasa_warnings():
     """
     Context manager to suppress FreeSASA warnings about unknown atoms.
     """
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        old_stderr = sys.stderr
-        sys.stderr = StringIO()
-        try:
-            yield
-        finally:
-            sys.stderr = old_stderr
+    from ..utils import suppress_freesasa_warnings as _suppress_freesasa_warnings
+
+    with _suppress_freesasa_warnings():
+        yield
 
 
 class ResidueFeaturizer:
@@ -683,5 +676,3 @@ class ResidueFeaturizer:
         }
 
         return node, edge
-
-

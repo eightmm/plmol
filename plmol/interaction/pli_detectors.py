@@ -10,7 +10,14 @@ from typing import Dict, List, Tuple, Optional, Any, Set
 import numpy as np
 from rdkit import Chem
 
-from ..constants import INTERACTION_TYPES
+from ..constants import (
+    INTERACTION_TYPES,
+    PI_STACK_PARALLEL_MAX,
+    PI_STACK_PARALLEL_MIN_ANTI,
+    PI_STACK_PERP_MIN,
+    PI_STACK_PERP_MAX,
+    CATION_PI_MAX_OFFSET_ANGLE,
+)
 from ..utils import knn_mask_bipartite_numpy
 from .pli_featurizer import Interaction
 
@@ -341,8 +348,8 @@ class InteractionDetector:
                     cos_angle = abs(np.dot(p_ring['normal'], l_ring['normal']))
                     angle = np.degrees(np.arccos(np.clip(cos_angle, -1, 1)))
 
-                    is_parallel = angle < 30 or angle > 150
-                    is_perpendicular = 60 < angle < 120
+                    is_parallel = angle < PI_STACK_PARALLEL_MAX or angle > PI_STACK_PARALLEL_MIN_ANTI
+                    is_perpendicular = PI_STACK_PERP_MIN < angle < PI_STACK_PERP_MAX
 
                     if is_parallel or is_perpendicular:
                         interactions.append(Interaction(
@@ -383,7 +390,7 @@ class InteractionDetector:
                     angle = np.degrees(np.arccos(np.clip(
                         abs(np.dot(vec_to_center, l_ring['normal'])), -1, 1
                     )))
-                    if angle > 30.0:
+                    if angle > CATION_PI_MAX_OFFSET_ANGLE:
                         continue
 
                     interactions.append(Interaction(
@@ -409,7 +416,7 @@ class InteractionDetector:
                     angle = np.degrees(np.arccos(np.clip(
                         abs(np.dot(vec_to_center, p_ring['normal'])), -1, 1
                     )))
-                    if angle > 30.0:
+                    if angle > CATION_PI_MAX_OFFSET_ANGLE:
                         continue
 
                     interactions.append(Interaction(

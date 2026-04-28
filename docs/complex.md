@@ -3,49 +3,74 @@
 ## Initialization
 
 ```python
-from plmol import Complex
+from plmol import MolecularComplex
+
+# Alias for backward compatibility
+Complex = MolecularComplex
 
 # From files
-cx = Complex.from_files("protein.pdb", "ligand.sdf")
+cx = MolecularComplex.from_files("protein.pdb", "ligand.sdf")
 
 # From objects/mixed inputs
-cx = Complex.from_inputs(
+cx = MolecularComplex.from_inputs(
     protein="protein.pdb",       # path or Protein object
     ligand="CCO",                # SMILES, path, RDKit Mol, or Ligand object
     standardize=True,
     add_hs=False,
 )
 
+# From mmCIF file (auto-detects protein, nucleic acid, and ligand residues)
+cx = MolecularComplex.from_mmcif(
+    "structure.cif",
+    standardize=True,
+    extract_ligands=True,
+    ligand_resname=None,
+    ligand_chain=None,
+)
+
+# Arbitrary molecule combinations
+cx = MolecularComplex(molecules={
+    "protein": protein_obj,
+    "ligand": ligand_obj,
+    "nucleic_acid": nucleic_acid_obj,
+})
+
 # Swap components
-cx.set_ligand("new_ligand.sdf")
-cx.set_protein("new_protein.pdb")
+cx.molecules["ligand"] = new_ligand
+cx.molecules["protein"] = new_protein
 ```
 
 ### Cache Invalidation
 
-`Complex` tracks the identity of the underlying ligand mol object (`id(ligand_obj._rdmol)`). When `set_ligand()` is called or the ligand mol object is replaced, the cache is automatically cleared. This also detects external mutation of the ligand object between calls.
+`MolecularComplex` tracks the identity of the underlying ligand mol object (`id(ligand_obj._rdmol)`). When the ligand in `molecules["ligand"]` is replaced or the ligand mol object is mutated, the cache is automatically cleared on the next featurization call.
 
 ## Combined Featurization
 
 ```python
 result = cx.featurize(
-    requests="all",  # "ligand", "protein", "interaction", or "all"
+    requests="all",  # present components among "ligand", "protein", "nucleic_acid", "interaction"
     ligand_kwargs={"mode": ["graph", "fingerprint"]},
     protein_kwargs={"mode": ["graph", "sequence"]},
+    nucleic_acid_kwargs={"mode": ["sequence", "graph"]},
     interaction_kwargs={"distance_cutoff": 6.0, "knn_cutoff": None},
 )
-# result["ligand"]      -> ligand features
-# result["protein"]     -> protein features
-# result["interaction"] -> interaction graph
+# result["ligand"]           -> ligand features
+# result["protein"]          -> protein features
+# result["nucleic_acid"]     -> nucleic acid features (if present)
+# result["interaction"]      -> protein-ligand interaction graph
 ```
 
 Individual access:
 
 ```python
-cx.ligand(mode="graph")
-cx.protein(mode="backbone")
+cx.molecules["ligand"].featurize(mode="graph")
+cx.molecules["protein"].featurize(mode="backbone")
+cx.molecules["nucleic_acid"].featurize(mode="sequence")
 cx.interaction(distance_cutoff=6.0, pocket_cutoff=8.0, knn_cutoff=None)
 ```
+
+`requests="all"` featurizes only components that are present. Interaction features
+are included when both a ligand and structure-backed protein are available.
 
 ---
 
@@ -56,6 +81,10 @@ interaction = cx.interaction(
     distance_cutoff=6.0,     # Max distance for interaction detection (A)
     pocket_cutoff=None,      # Optional pocket extraction cutoff
     knn_cutoff=None,         # Optional bipartite kNN for contact edges
+    include_contacts=False,  # Include raw distance/contact edges
+    contact_cutoff=None,     # Optional cutoff for contact edges
+    include_coords=True,     # Include protein/ligand heavy atom coordinates
+    include_metal_sites=True,# Include metal-site summary arrays
 )
 ```
 
@@ -64,6 +93,10 @@ interaction = cx.interaction(
 | `distance_cutoff` | `float` | `4.5` | Max distance for interaction detection |
 | `pocket_cutoff` | `Optional[float]` | `None` | If set, extract pocket first, then detect interactions |
 | `knn_cutoff` | `Optional[int]` | `None` | Bipartite kNN: each protein atom's k nearest ligand atoms + each ligand atom's k nearest protein atoms. Unioned with distance-based edges |
+| `include_contacts` | `bool` | `False` | Add raw protein-ligand contact edges and distances |
+| `contact_cutoff` | `Optional[float]` | `None` | Contact-edge cutoff. Defaults to `distance_cutoff` when omitted |
+| `include_coords` | `bool` | `True` | Add heavy-atom coordinate arrays for protein and ligand |
+| `include_metal_sites` | `bool` | `True` | Add detected protein metal sites and encoded metal summary arrays |
 
 ### Output
 
@@ -80,6 +113,10 @@ interaction = cx.interaction(
 | `knn_cutoff` | `Optional[int]` | kNN cutoff used |
 | `feature_dim` | `int` | Edge feature dimension (79) |
 | `metadata` | `dict` | Interaction type indices, pharmacophore indices, element types, residue types |
+| `protein_coords` | `Tensor (P, 3)` | Protein heavy atom coordinates, when `include_coords=True` |
+| `ligand_coords` | `Tensor (L, 3)` | Ligand heavy atom coordinates, when `include_coords=True` |
+| `metal_sites` | `List[MetalSite]` | Detected protein metal coordination sites, when `include_metal_sites=True` |
+| `metal_features` | `dict` | Encoded metal-site arrays from `encode_metal_features()` |
 
 ### Interaction Types
 
@@ -91,7 +128,12 @@ interaction = cx.interaction(
 | `cation_pi` | Charged atom + aromatic ring + cation-to-ring-normal angle filter (< 30 deg) | < 6.0 A |
 | `hydrophobic` | Hydrophobic atom pairs | < 4.5 A |
 | `halogen_bond` | Halogen + acceptor + C-X-A angle | < 3.5 A |
-| `metal_coordination` | Metal ion + coordinating atom | < 2.8 A |
+| `metal_coordination` | Metal ion (from protein pocket HETATM) + coordinating ligand atom | < 2.8 A |
+
+Metal coordination interactions are detected by `PLInteractionFeaturizer`.
+`MolecularComplex.interaction()` also returns a separate metal-site summary using
+`detect_metal_sites()` and `encode_metal_features()` when metal atoms are present
+in the protein/pocket molecule.
 
 ### Edge Features `(E, 79)`
 
@@ -135,6 +177,7 @@ Direct access to the interaction featurizer for fine-grained control.
 
 ```python
 from plmol import PLInteractionFeaturizer
+from plmol.interaction import detect_metal_sites, encode_metal_features
 
 featurizer = PLInteractionFeaturizer(
     protein_mol=protein_mol,
@@ -166,6 +209,10 @@ protein_pharm, ligand_pharm = featurizer.get_atom_pharmacophore_features()
 protein_chem, ligand_chem = featurizer.get_atom_chemical_features()
 protein_coords, ligand_coords = featurizer.get_heavy_atom_coords()
 
+# Metal-site summaries (requires metal atoms in protein_mol metadata)
+metal_sites = detect_metal_sites(atom_coords, atom_metadata, metal_indices)
+metal_features = encode_metal_features(metal_sites, n_residues=num_residues)
+
 # Summary
 print(featurizer.get_interaction_summary())
 ```
@@ -174,7 +221,7 @@ print(featurizer.get_interaction_summary())
 
 ## Pocket Extraction
 
-Pocket extraction now preserves metal HETATM records (Zn, Fe, Mg, Ca, Mn, Cu, Co, Ni) that are within the distance cutoff of the ligand.
+Pocket extraction preserves metal HETATM records (Zn, Fe, Mg, Ca, Mn, Cu, Co, Ni) that are within the distance cutoff of the ligand. This enables accurate metal coordination detection in interaction featurization.
 
 ```python
 from plmol.interaction import extract_pocket
@@ -188,6 +235,7 @@ pocket_list = extract_pocket(
 for pocket_info in pocket_list:
     pocket_mol = pocket_info.pocket_mol    # RDKit Mol of pocket residues + nearby metals
     residues = pocket_info.pocket_residues # List of (chain, resnum, resname) tuples
+    metals = pocket_info.metal_records     # List of metal HETATM records within cutoff
     num_atoms = pocket_info.num_atoms
     num_residues = pocket_info.num_residues
 ```

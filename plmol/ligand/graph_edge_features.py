@@ -12,6 +12,7 @@ from rdkit import Chem
 from rdkit.Chem import rdDistGeom
 from typing import Dict
 
+from ..errors import InputError
 from ..constants import (
     BOND_TYPES, BOND_STEREOS, BOND_DIRS,
     NORM_CONSTANTS,
@@ -337,7 +338,7 @@ class EdgeFeatureMixin:
         try:
             bounds = np.asarray(rdDistGeom.GetMoleculeBoundsMatrix(mol), dtype=np.float32)
         except Exception as exc:
-            raise ValueError("Failed to compute RDKit distance-geometry bounds matrix.") from exc
+            raise InputError("Failed to compute RDKit distance-geometry bounds matrix.") from exc
 
         upper = np.zeros((num_atoms, num_atoms), dtype=np.float32)
         lower = np.zeros((num_atoms, num_atoms), dtype=np.float32)

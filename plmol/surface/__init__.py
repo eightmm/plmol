@@ -6,14 +6,12 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-from .features import (
-    create_surface_points,
-    build_surface_dict,
+from .point_cloud import create_surface_points, build_surface_dict
+from .geometry import compute_pointcloud_geometry
+from .chemical import compute_chemical_features
+from .type_features import compute_ligand_type_features, compute_protein_type_features
+from .orchestrator import (
     compute_all_vertex_features,
-    compute_pointcloud_geometry,
-    compute_chemical_features,
-    compute_ligand_type_features,
-    compute_protein_type_features,
     compute_extra_features,
     compute_ligand_surface_features,
     compute_protein_surface_features,

@@ -143,8 +143,13 @@ class MoleculeGraphFeaturizer(AtomFeatureMixin, EdgeFeatureMixin):
     # Main Entry Point
     # =========================================================================
 
-    def featurize(self, mol, distance_cutoff: Optional[float] = None,
-                  knn_cutoff: Optional[int] = None) -> Tuple[Dict, Dict, torch.Tensor]:
+    def featurize(
+        self,
+        mol,
+        distance_cutoff: Optional[float] = None,
+        knn_cutoff: Optional[int] = None,
+        generate_conformer: bool = True,
+    ) -> Tuple[Dict, Dict, torch.Tensor]:
         """
         Extract complete graph representation with separate bond and distance edges.
 
@@ -152,6 +157,7 @@ class MoleculeGraphFeaturizer(AtomFeatureMixin, EdgeFeatureMixin):
             mol: RDKit mol object
             distance_cutoff: Optional 3D distance cutoff for spatial edges.
             knn_cutoff: Optional k-nearest neighbors cutoff for spatial edges.
+            generate_conformer: Whether to generate 3D coordinates if missing.
 
         Returns:
             Tuple of (node_dict, edge_dict, adjacency_matrix):
@@ -171,7 +177,10 @@ class MoleculeGraphFeaturizer(AtomFeatureMixin, EdgeFeatureMixin):
         # Suppress RDKit warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            node_features, coords = self.get_atom_features(mol)
+            node_features, coords = self.get_atom_features(
+                mol,
+                generate_conformer=generate_conformer,
+            )
             bond_adj = self.get_bond_features(mol)
 
         # 1. Bond edges (RDKit Bond 기반)

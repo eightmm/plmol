@@ -16,6 +16,7 @@ from ..constants import (
     NUCLEIC_ACID_RESIDUES,
     BACKBONE_ATOMS_WITH_CB,
     PTM_HANDLING_MODES,
+    STANDARD_NUCLEOTIDE_ATOMS,
 )
 
 
@@ -35,7 +36,8 @@ class PDBStandardizer:
     # Backbone atoms to keep for UNK residues
     BACKBONE_ATOMS = BACKBONE_ATOMS_WITH_CB
 
-    def __init__(self, remove_hydrogens: bool = True, ptm_handling: str = 'base_aa'):
+    def __init__(self, remove_hydrogens: bool = True, ptm_handling: str = 'base_aa',
+                 include_nucleic_acids: bool = False):
         """
         Initialize the PDB standardizer.
 
@@ -55,9 +57,13 @@ class PDBStandardizer:
                               Use for: Protein-ligand modeling, structural analysis
                 - 'remove': Remove all PTM residues from the structure
                             Use for: Cleaning structures for standard-AA-only analysis
+            include_nucleic_acids: If True, retain nucleic acid residues instead of
+                                   filtering them out. Default False for backward
+                                   compatibility.
         """
         self.remove_hydrogens = remove_hydrogens
         self.ptm_handling = ptm_handling
+        self.include_nucleic_acids = include_nucleic_acids
 
         # Validate ptm_handling parameter
         valid_modes = PTM_HANDLING_MODES
@@ -67,8 +73,8 @@ class PDBStandardizer:
                 f"Must be one of: {', '.join(valid_modes)}"
             )
 
-        # Use centralized constants (combine standard + PTM atoms for preserve mode)
-        self.standard_atoms = {**STANDARD_ATOMS, **STANDARD_ATOMS_PTM}
+        # Use centralized constants (combine standard + PTM + nucleotide atoms)
+        self.standard_atoms = {**STANDARD_ATOMS, **STANDARD_ATOMS_PTM, **STANDARD_NUCLEOTIDE_ATOMS}
         self.nucleic_acid_residues = NUCLEIC_ACID_RESIDUES
         self.residue_name_mapping = RESIDUE_NAME_MAPPING
         self.ptm_residues = PTM_RESIDUES
@@ -177,8 +183,8 @@ class PDBStandardizer:
         if res_name in ['HOH', 'WAT']:
             return
 
-        # Skip nucleic acid residues
-        if res_name in self.nucleic_acid_residues:
+        # Skip nucleic acid residues (unless opted in)
+        if not self.include_nucleic_acids and res_name in self.nucleic_acid_residues:
             return
 
         # Handle PTM removal if requested
@@ -373,7 +379,8 @@ class PDBStandardizer:
 
 
 def standardize_pdb(input_pdb_path: str, output_pdb_path: str,
-                     remove_hydrogens: bool = True, ptm_handling: str = 'base_aa') -> str:
+                     remove_hydrogens: bool = True, ptm_handling: str = 'base_aa',
+                     include_nucleic_acids: bool = False) -> str:
     """
     Convenience function to standardize a PDB file.
 
@@ -386,10 +393,15 @@ def standardize_pdb(input_pdb_path: str, output_pdb_path: str,
             - 'unk': Convert PTMs to UNK with backbone only (recommended for ML)
             - 'preserve': Keep PTMs intact
             - 'remove': Remove PTM residues entirely
+        include_nucleic_acids: If True, retain nucleic acid residues
 
     Returns:
         Path to the standardized PDB file
     """
-    standardizer = PDBStandardizer(remove_hydrogens=remove_hydrogens, ptm_handling=ptm_handling)
+    standardizer = PDBStandardizer(
+        remove_hydrogens=remove_hydrogens,
+        ptm_handling=ptm_handling,
+        include_nucleic_acids=include_nucleic_acids,
+    )
     return standardizer.standardize(input_pdb_path, output_pdb_path)
 

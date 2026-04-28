@@ -8,8 +8,14 @@ from plmol import Protein
 # From PDB file (recommended)
 protein = Protein.from_pdb("protein.pdb", standardize=True, keep_hydrogens=False)
 
+# From mmCIF/PDBx file
+protein = Protein.from_mmcif("protein.cif", standardize=True, keep_hydrogens=False)
+
 # From sequence (ESM/Foldseek style - no structure)
 protein = Protein.from_sequence("MKFLILLFNILCLFPVLAADNHGVS...")
+
+# Auto-detect PDB vs mmCIF from file extension
+protein = Protein.from_structure("protein.cif", chain_id="A")
 ```
 
 | Parameter | Type | Default | Description |
@@ -24,6 +30,7 @@ result = protein.featurize(
     mode="all",                              # str or list of modes
     graph_kwargs={"level": "residue"},       # graph options
     surface_kwargs={},                       # surface options
+    voxel_kwargs={},                         # voxel options
     backbone_kwargs={"k_neighbors": 30},     # backbone options
 )
 ```
@@ -33,6 +40,7 @@ result = protein.featurize(
 | `"graph"` | `"graph"` | Residue/atom-level graph (node_features, edge_index, ...) |
 | `"backbone"` | `"backbone"` | Backbone features for inverse folding (dihedrals, kNN, local frames) |
 | `"surface"` | `"surface"` | dMaSIF point cloud with per-vertex features |
+| `"voxel"` | `"voxel"` | 16-channel 3D voxel grid |
 | `"sequence"` | `"sequence"` | Amino acid sequence string or chain dict |
 | `"all"` | all above | All modes combined |
 
@@ -318,7 +326,7 @@ pocket = protein.featurize_pocket(
 ## Low-Level Featurizers
 
 ```python
-from plmol import (
+from plmol.protein import (
     ProteinFeaturizer,         # Main protein featurizer (PDB parse + cache)
     ResidueFeaturizer,         # Residue-level features
     AtomFeaturizer,            # Atom-level features
@@ -326,6 +334,7 @@ from plmol import (
     ESMFeaturizer,             # ESM3/ESMC embeddings
     PDBStandardizer,           # PDB cleanup
 )
+from plmol.parsers import PDBParser  # Low-level PDB parsing
 ```
 
 ### ESMFeaturizer

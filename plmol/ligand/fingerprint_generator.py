@@ -10,6 +10,8 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 
 import numpy as np
 import torch
+
+from ..errors import InputError
 from rdkit import Chem, DataStructs
 from rdkit.Chem import (
     AllChem,
@@ -114,7 +116,7 @@ class FingerprintGenerator:
         selected_raw = tuple(dict.fromkeys(str(x).lower() for x in include_fps))
         invalid = [x for x in selected_raw if x not in cls._FP_KEY_ALIASES]
         if invalid:
-            raise ValueError(
+            raise InputError(
                 f"Unsupported fingerprint names: {invalid}. "
                 f"Supported: {list(cls._SUPPORTED_FP_NAMES)}"
             )

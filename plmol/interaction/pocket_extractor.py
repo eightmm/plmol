@@ -12,6 +12,7 @@ from scipy.spatial.distance import cdist
 from rdkit import Chem
 from ..constants import POCKET_MAX_ATOMS_PER_RESIDUE
 from ..rdkit_utils import has_3d
+from ..errors import InputError
 
 
 # Maximum heavy atoms per residue (covers all standard amino acids)
@@ -92,7 +93,7 @@ def _extract_for_ligand_input(
         supplier = Chem.SDMolSupplier(ligand, removeHs=True)
         mols = [mol for mol in supplier if mol is not None]
         if not mols:
-            raise ValueError(f"No valid molecules in {ligand}")
+            raise InputError(f"No valid molecules in {ligand}")
         return [extractor.extract_for_ligand(mol, distance_cutoff) for mol in mols]
 
     # Other file formats (single molecule)
@@ -218,9 +219,9 @@ class PocketExtractor:
             self._ligand_mol = ligand
 
         if self._ligand_mol is None:
-            raise ValueError("Failed to load ligand molecule")
+            raise InputError("Failed to load ligand molecule")
         if not has_3d(self._ligand_mol):
-            raise ValueError("Ligand must have a 3D conformer required for pocket extraction")
+            raise InputError("Ligand must have a 3D conformer required for pocket extraction")
 
         # Extract ligand coordinates (heavy atoms only)
         self._ligand_coords = self._get_ligand_coords(self._ligand_mol)
@@ -456,7 +457,7 @@ class PocketExtractor:
             PocketInfo with extracted pocket molecule and metadata
         """
         if self._ligand_coords is None:
-            raise ValueError(
+            raise InputError(
                 "No ligand set. Use set_ligand() first or use extract_for_ligand()."
             )
 
@@ -495,9 +496,9 @@ class PocketExtractor:
             ligand_mol = ligand
 
         if ligand_mol is None:
-            raise ValueError("Failed to load ligand molecule")
+            raise InputError("Failed to load ligand molecule")
         if not has_3d(ligand_mol):
-            raise ValueError("Ligand must have a 3D conformer required for pocket extraction")
+            raise InputError("Ligand must have a 3D conformer required for pocket extraction")
 
         # Get ligand coordinates
         ligand_coords = self._get_ligand_coords(ligand_mol)
@@ -547,7 +548,7 @@ class PocketExtractor:
             PDB format string containing only pocket residues
         """
         if self._ligand_coords is None:
-            raise ValueError("No ligand set. Use set_ligand() first.")
+            raise InputError("No ligand set. Use set_ligand() first.")
 
         distance_cutoff = distance_cutoff if distance_cutoff is not None else self.distance_cutoff
         pocket_mask = self._compute_pocket_mask(self._ligand_coords, distance_cutoff)
@@ -582,7 +583,7 @@ class PocketExtractor:
             Boolean array [num_residue]
         """
         if self._ligand_coords is None:
-            raise ValueError("No ligand set. Use set_ligand() first.")
+            raise InputError("No ligand set. Use set_ligand() first.")
 
         distance_cutoff = distance_cutoff if distance_cutoff is not None else self.distance_cutoff
         return self._compute_pocket_mask(self._ligand_coords, distance_cutoff)
@@ -606,7 +607,7 @@ class PocketExtractor:
         elif self._ligand_coords is not None:
             ligand_coords = self._ligand_coords
         else:
-            raise ValueError("No ligand provided or set.")
+            raise InputError("No ligand provided or set.")
 
         num_res = self._num_residues
         coords_flat = self._residue_coords.reshape(-1, 3)

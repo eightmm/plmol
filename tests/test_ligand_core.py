@@ -83,6 +83,47 @@ class TestLigandFeaturize:
         assert "descriptors" in result["fingerprint"]
         assert "ecfp4" in result["fingerprint"]
 
+    def test_descriptor_mode(self, aspirin_smiles):
+        lig = Ligand.from_smiles(aspirin_smiles)
+        result = lig.featurize(mode="descriptor")
+        assert "descriptor" in result
+        assert "descriptors" in result["descriptor"]
+        assert "ecfp4" not in result["descriptor"]
+        assert result["descriptor"]["descriptors"].shape == (62,)
+        assert len(result["descriptor"]["descriptor_names"]) == 62
+
+    def test_morgan_mode(self, ethanol_smiles):
+        lig = Ligand.from_smiles(ethanol_smiles)
+        result = lig.featurize(mode="morgan")
+        assert "morgan" in result
+        assert result["morgan"]["fingerprint"].shape == (2048,)
+        assert result["morgan"]["type"] == "morgan"
+
+    def test_voxel_mode(self, ethanol_smiles):
+        lig = Ligand.from_smiles(ethanol_smiles)
+        result = lig.featurize(
+            mode="voxel",
+            generate_conformer=True,
+            voxel_kwargs={"box_size": 8},
+        )
+        assert "voxel" in result
+        assert result["voxel"]["voxel"].shape[0] == 16
+        assert result["voxel"]["grid_shape"] == (8, 8, 8)
+
+    def test_voxel_invalid_charge_method_raises(self, ethanol_smiles):
+        lig = Ligand.from_smiles(ethanol_smiles)
+        with pytest.raises(ValueError, match="charge_method"):
+            lig.featurize(
+                mode="voxel",
+                generate_conformer=True,
+                voxel_kwargs={"charge_method": "bad"},
+            )
+
+    def test_all_uses_default_modes(self, ethanol_smiles):
+        lig = Ligand.from_smiles(ethanol_smiles)
+        result = lig.featurize(mode="all")
+        assert set(result) == {"graph", "fingerprint", "smiles", "sequence"}
+
     def test_smiles_mode(self, ethanol_smiles):
         lig = Ligand.from_smiles(ethanol_smiles)
         result = lig.featurize(mode="smiles")

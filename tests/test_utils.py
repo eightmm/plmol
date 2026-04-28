@@ -78,3 +78,16 @@ class TestKnnMaskBipartiteNumpy:
         mask = knn_mask_bipartite_numpy(dm, k=1)
         assert mask.shape == (2, 3)
         assert mask.sum(axis=1).min() >= 1
+
+    def test_rectangular_many_rows(self):
+        dm = np.arange(20, dtype=np.float32).reshape(5, 4)
+        mask = knn_mask_bipartite_numpy(dm, k=2)
+        assert mask.shape == (5, 4)
+        assert mask.sum(axis=1).min() >= 2
+        assert mask.sum(axis=0).min() >= 2
+
+    def test_zero_k(self):
+        dm = np.ones((3, 2), dtype=np.float32)
+        mask = knn_mask_bipartite_numpy(dm, k=0)
+        assert mask.shape == (3, 2)
+        assert not mask.any()

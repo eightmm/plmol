@@ -671,7 +671,11 @@ class AtomFeatureMixin:
     # Main Atom Feature Assembly
     # =========================================================================
 
-    def get_atom_features(self, mol) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_atom_features(
+        self,
+        mol,
+        generate_conformer: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Extract all atom features.
 
@@ -753,7 +757,7 @@ class AtomFeatureMixin:
             dim=1,
         )
 
-        coords = self.get_3d_coordinates(mol)
+        coords = self.get_3d_coordinates(mol, generate_if_missing=generate_conformer)
         self._cache['coords'] = coords
 
         return node_features, coords

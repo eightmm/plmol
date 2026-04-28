@@ -13,6 +13,8 @@ except ImportError:
 
 from ..rdkit_utils import has_3d, ensure_3d_conformer
 from .featurizer import LigandFeaturizer
+from ..errors import InputError, DependencyError
+from ..specs import LIGAND_SPEC, normalize_modes
 
 class Ligand(BaseMolecule):
     """
@@ -36,7 +38,7 @@ class Ligand(BaseMolecule):
         self._featurizer_variants: Dict[bool, LigandFeaturizer] = {}
         if rdmol:
             if Chem is None:
-                raise ImportError(
+                raise DependencyError(
                     "RDKit is required to initialize Ligand from an RDKit molecule."
                 )
             self._smiles = Chem.MolToSmiles(rdmol)
@@ -57,10 +59,10 @@ class Ligand(BaseMolecule):
             add_hs: Whether to add explicit hydrogens (default: False)
         """
         if not Chem:
-            raise ImportError("RDKit is required to create a Ligand from SMILES.")
+            raise DependencyError("RDKit is required to create a Ligand from SMILES.")
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
-            raise ValueError(f"Invalid SMILES string: '{smiles}'")
+            raise InputError(f"Invalid SMILES string: '{smiles}'")
         if add_hs:
             mol = Chem.AddHs(mol)
         return cls(mol)
@@ -69,11 +71,11 @@ class Ligand(BaseMolecule):
     def from_sdf(cls, path: str) -> "Ligand":
         """Load from SDF file."""
         if not Chem:
-            raise ImportError("RDKit is required to load a Ligand from SDF.")
+            raise DependencyError("RDKit is required to load a Ligand from SDF.")
         suppl = Chem.SDMolSupplier(path)
         mol = next(suppl)
         if mol is None:
-            raise ValueError(f"Failed to parse molecule from SDF: '{path}'")
+            raise InputError(f"Failed to parse molecule from SDF: '{path}'")
         return cls(mol)
 
     def generate_conformer(self):
@@ -96,7 +98,7 @@ class Ligand(BaseMolecule):
         """Return SMILES string (sequence alias for ligands)."""
         if self._smiles is None and self._rdmol is not None:
             if Chem is None:
-                raise ImportError(
+                raise DependencyError(
                     "RDKit is required to generate SMILES from an RDKit molecule."
                 )
             self._smiles = Chem.MolToSmiles(self._rdmol)
@@ -106,10 +108,10 @@ class Ligand(BaseMolecule):
     @smiles.setter
     def smiles(self, value: str) -> None:
         if Chem is None:
-            raise ImportError("RDKit is required to set SMILES.")
+            raise DependencyError("RDKit is required to set SMILES.")
         mol = Chem.MolFromSmiles(value)
         if mol is None:
-            raise ValueError(f"Invalid SMILES string: '{value}'")
+            raise InputError(f"Invalid SMILES string: '{value}'")
         self._rdmol = mol
         self._smiles = Chem.MolToSmiles(mol)
         self._sequence = self._smiles
@@ -138,7 +140,7 @@ class Ligand(BaseMolecule):
         """Return graph representation, computing lazily if needed."""
         if self._graph is None:
             if self._rdmol is None:
-                raise ValueError(
+                raise InputError(
                     "Ligand has no RDKit molecule. Initialize from SMILES/SDF before requesting graph features."
                 )
             self.featurize(mode="graph")
@@ -156,7 +158,7 @@ class Ligand(BaseMolecule):
         """
         if self._surface is None:
             if self._rdmol is None:
-                raise ValueError(
+                raise InputError(
                     "Ligand has no RDKit molecule. Initialize from SMILES/SDF before requesting surface features."
                 )
             self.featurize(mode="surface")
@@ -167,7 +169,7 @@ class Ligand(BaseMolecule):
         """Return fingerprint representation, computing lazily if needed."""
         if self._fingerprint is None:
             if self._rdmol is None:
-                raise ValueError(
+                raise InputError(
                     "Ligand has no RDKit molecule. Initialize from SMILES/SDF before requesting fingerprints."
                 )
             self.featurize(mode="fingerprint")
@@ -178,7 +180,7 @@ class Ligand(BaseMolecule):
         """Return fragment representation, computing lazily if needed."""
         if self._fragment is None:
             if self._rdmol is None:
-                raise ValueError(
+                raise InputError(
                     "Ligand has no RDKit molecule. Initialize from SMILES/SDF before requesting fragments."
                 )
             self.featurize(mode="fragment")
@@ -196,7 +198,7 @@ class Ligand(BaseMolecule):
 
     def _get_featurizer(self, add_hs: Optional[bool] = None) -> LigandFeaturizer:
         if self._rdmol is None:
-            raise ValueError("Ligand has no RDKit molecule. Initialize from SMILES/SDF first.")
+            raise InputError("Ligand has no RDKit molecule. Initialize from SMILES/SDF first.")
         if add_hs is None:
             if self._featurizer is None or self._featurizer_mol is not self._rdmol:
                 self._featurizer = LigandFeaturizer(self._rdmol)
@@ -205,7 +207,7 @@ class Ligand(BaseMolecule):
             return self._featurizer
 
         if Chem is None:
-            raise ImportError("RDKit is required for hydrogen variant featurization.")
+            raise DependencyError("RDKit is required for hydrogen variant featurization.")
 
         key = bool(add_hs)
         cached = self._featurizer_variants.get(key)
@@ -243,6 +245,7 @@ class Ligand(BaseMolecule):
         graph_kwargs: Optional[Dict[str, Any]] = None,
         surface_kwargs: Optional[Dict[str, Any]] = None,
         fingerprint_kwargs: Optional[Dict[str, Any]] = None,
+        voxel_kwargs: Optional[Dict[str, Any]] = None,
         generate_conformer: bool = False,
         add_hs: Optional[bool] = None,
     ) -> Dict[str, Any]:
@@ -251,29 +254,33 @@ class Ligand(BaseMolecule):
 
         Args:
             mode: "all" or a single mode or list of modes.
-                Supported: graph, surface, fingerprint, smiles, sequence
+                Supported: graph, surface, voxel, fingerprint, descriptor,
+                smiles, sequence, fragment, morgan
             graph_kwargs: Optional kwargs for graph featurization.
             surface_kwargs: Optional kwargs for surface extraction.
             fingerprint_kwargs: Optional kwargs for fingerprint extraction.
-            generate_conformer: Whether to generate a 3D conformer if missing (surface only).
+            voxel_kwargs: Optional kwargs for voxel featurization.
+            generate_conformer: Whether to generate a 3D conformer if missing
+                for surface/voxel.
             add_hs: Optional override for hydrogen handling.
         """
         if self._rdmol is None:
-            raise ValueError("Ligand has no RDKit molecule. Initialize from SMILES/SDF first.")
+            raise InputError("Ligand has no RDKit molecule. Initialize from SMILES/SDF first.")
 
-        if isinstance(mode, str):
-            modes = ["graph", "surface", "fingerprint", "smiles", "sequence"] if mode == "all" else [mode]
+        if (
+            (isinstance(mode, str) and mode.lower() == "all")
+            or (not isinstance(mode, str) and any(str(m).lower() == "all" for m in mode))
+        ):
+            modes = list(LIGAND_SPEC.default_modes)
         else:
-            modes = list(mode)
-
-        modes = [m.lower() for m in modes]
+            modes = normalize_modes(LIGAND_SPEC, mode)
         results: Dict[str, Any] = {}
         
         featurizer = self._get_featurizer(add_hs=add_hs)
 
         if "smiles" in modes or "sequence" in modes:
             if Chem is None:
-                raise ImportError(
+                raise DependencyError(
                     "RDKit is required to generate SMILES. Install RDKit to use this feature."
                 )
             self._smiles = Chem.MolToSmiles(self._rdmol)
@@ -288,7 +295,7 @@ class Ligand(BaseMolecule):
             )
             results["graph"] = self._graph
 
-        if "fingerprint" in modes or "morgan" in modes:
+        if "fingerprint" in modes:
             fingerprint_kwargs = fingerprint_kwargs or {}
             include_fps = fingerprint_kwargs.get("include_fps")
             # Return descriptor + selected fingerprint dictionary.
@@ -299,6 +306,15 @@ class Ligand(BaseMolecule):
             self._fingerprint = self._to_numpy_tree(features)
             results["fingerprint"] = self._fingerprint
 
+        if "descriptor" in modes:
+            descriptor = featurizer.get_features(include_fps=())
+            descriptor = self._to_numpy_tree(descriptor)
+            descriptor["descriptor_names"] = list(featurizer.descriptor_names())
+            results["descriptor"] = descriptor
+
+        if "morgan" in modes:
+            results["morgan"] = self._to_numpy_tree(featurizer.get_morgan_fingerprint())
+
         if "surface" in modes:
             surface_kwargs = surface_kwargs or {}
             surface = self._to_numpy_tree(featurizer.get_surface(
@@ -307,6 +323,13 @@ class Ligand(BaseMolecule):
             if surface is not None:
                 self._surface = surface
             results["surface"] = surface
+
+        if "voxel" in modes:
+            voxel_kwargs = voxel_kwargs or {}
+            voxel = self._to_numpy_tree(featurizer.get_voxel(
+                generate_conformer=generate_conformer, **voxel_kwargs
+            ))
+            results["voxel"] = voxel
 
         if "fragment" in modes:
             self._fragment = featurizer.get_fragment()

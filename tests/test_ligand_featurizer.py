@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from plmol.ligand.featurizer import LigandFeaturizer
+from plmol.errors import InputError
 
 
 class TestLigandFeaturizerInit:
@@ -80,6 +81,36 @@ class TestFeaturize:
         assert "graph" in result
         assert "fingerprint" in result
         assert "smiles" in result
+
+    def test_all_uses_default_modes(self, ethanol_smiles):
+        lf = LigandFeaturizer(ethanol_smiles)
+        result = lf.featurize(mode="all")
+        assert set(result) == {"graph", "fingerprint", "smiles", "sequence"}
+
+    def test_descriptor_mode(self, ethanol_smiles):
+        lf = LigandFeaturizer(ethanol_smiles)
+        result = lf.featurize(mode="descriptor")
+        assert "descriptor" in result
+        assert result["descriptor"]["descriptors"].shape[0] == 62
+        assert len(result["descriptor"]["descriptor_names"]) == 62
+
+    def test_morgan_mode(self, ethanol_smiles):
+        lf = LigandFeaturizer(ethanol_smiles)
+        result = lf.featurize(mode="morgan")
+        assert "morgan" in result
+        assert result["morgan"]["fingerprint"].shape[0] == 2048
+
+    def test_invalid_mode_raises(self, ethanol_smiles):
+        lf = LigandFeaturizer(ethanol_smiles)
+        with pytest.raises(InputError):
+            lf.featurize(mode="bad_mode")
+
+    def test_fingerprint_kwargs_not_mutated(self, ethanol_smiles):
+        lf = LigandFeaturizer(ethanol_smiles)
+        kwargs = {"include_fps": ("ecfp4",)}
+        result = lf.featurize(mode="fingerprint", fingerprint_kwargs=kwargs)
+        assert kwargs == {"include_fps": ("ecfp4",)}
+        assert set(result["fingerprint"]) == {"descriptors", "ecfp4"}
 
     def test_smiles_mode(self, ethanol_smiles):
         lf = LigandFeaturizer(ethanol_smiles)

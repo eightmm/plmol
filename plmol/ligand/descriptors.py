@@ -23,6 +23,7 @@ from rdkit.Chem import (
 )
 from rdkit.Chem import FilterCatalog as _FilterCatalogModule
 
+from ..errors import InputError
 from .fingerprint_generator import FingerprintGenerator
 from .graph import MoleculeGraphFeaturizer
 from ..rdkit_utils import (
@@ -65,6 +66,33 @@ class MoleculeFeaturizer:
         >>>     featurizer = MoleculeFeaturizer(mol)
         >>>     features = featurizer.get_features()
     """
+
+    _DESCRIPTOR_NAMES = (
+        'mw', 'logp', 'tpsa', 'n_rotatable_bonds', 'flexibility',
+        'hbd', 'hba', 'n_atoms', 'n_bonds', 'n_rings', 'n_aromatic_rings',
+        'heteroatom_ratio', 'balaban_j', 'bertz_ct', 'chi0', 'chi1',
+        'hall_kier_alpha', 'kappa1', 'kappa2', 'kappa3', 'mol_mr',
+        'labute_asa', 'num_radical_electrons', 'num_valence_electrons',
+        'num_saturated_rings', 'num_aliphatic_rings', 'num_saturated_heterocycles',
+        'num_aliphatic_heterocycles', 'num_aromatic_heterocycles',
+        'num_heteroatoms', 'formal_charge', 'chi0n',
+        'lipinski_violations', 'passes_lipinski', 'qed', 'num_heavy_atoms', 'frac_csp3',
+        'n_atom_rings', 'max_ring_size', 'avg_ring_size',
+        'max_partial_charge', 'min_partial_charge',
+        'max_abs_partial_charge', 'min_abs_partial_charge',
+        'veber_violations', 'ghose_violations', 'egan_violations',
+        'muegge_violations', 'pfizer_375_alert', 'gsk_4400_pass',
+        'pains_alert_count', 'brenk_alert_count',
+        'num_amide_bonds', 'num_stereocenters',
+        'num_spiro_atoms', 'num_bridgehead_atoms',
+        'esol_logs',
+        'npr1', 'npr2', 'asphericity', 'eccentricity', 'radius_of_gyration',
+    )
+
+    @classmethod
+    def descriptor_names(cls) -> Tuple[str, ...]:
+        """Return descriptor names in the same order as the descriptor vector."""
+        return cls._DESCRIPTOR_NAMES
 
     def __init__(
         self,
@@ -117,7 +145,7 @@ class MoleculeFeaturizer:
             self.input_smiles = mol_or_smiles
             self.input_mol = Chem.MolFromSmiles(mol_or_smiles)
             if self.input_mol is None:
-                raise ValueError(f"Invalid SMILES: {mol_or_smiles}")
+                raise InputError(f"Invalid SMILES: {mol_or_smiles}")
         else:
             self.input_mol = mol_or_smiles
             self.input_smiles = Chem.MolToSmiles(mol_or_smiles) if mol_or_smiles else None
@@ -125,7 +153,7 @@ class MoleculeFeaturizer:
         # Prepare molecule (canonicalize and add hydrogens if requested)
         self._mol = self._prepare_mol(self.input_mol, self.add_hs, self.canonicalize)
         if self._mol is None:
-            raise ValueError(f"Failed to prepare molecule: {mol_or_smiles}")
+            raise InputError(f"Failed to prepare molecule: {mol_or_smiles}")
 
         # Cache basic info
         self.num_atoms = self._mol.GetNumAtoms()
@@ -547,7 +575,7 @@ class MoleculeFeaturizer:
         # Object-oriented mode with caching
         if mol_or_smiles is None:
             if self._mol is None:
-                raise ValueError("No molecule provided. Either initialize with a molecule or pass one to this method.")
+                raise InputError("No molecule provided. Either initialize with a molecule or pass one to this method.")
             include_key = self._normalize_include_fps(include_fps)
             cache_key = ('features', include_key)
             if cache_key not in self._cache:
@@ -622,6 +650,7 @@ class MoleculeFeaturizer:
         distance_cutoff: Optional[float] = None,
         include_custom_smarts: bool = True,
         knn_cutoff: Optional[int] = None,
+        generate_conformer: bool = True,
     ) -> Tuple[Dict, Dict, torch.Tensor]:
         """
         New interface for featurization.
@@ -629,14 +658,16 @@ class MoleculeFeaturizer:
         # Object-oriented mode with caching
         if mol_or_smiles is None:
             if self._mol is None:
-                raise ValueError("No molecule provided.")
+                raise InputError("No molecule provided.")
             return self._compute_graph(self._mol, distance_cutoff, include_custom_smarts,
-                                       knn_cutoff=knn_cutoff)
+                                       knn_cutoff=knn_cutoff,
+                                       generate_conformer=generate_conformer)
 
         # Functional mode
         mol = self._prepare_mol(mol_or_smiles, add_hs, self.canonicalize)
         return self._compute_graph(mol, distance_cutoff, include_custom_smarts,
-                                   knn_cutoff=knn_cutoff)
+                                   knn_cutoff=knn_cutoff,
+                                   generate_conformer=generate_conformer)
 
     def get_graph(
         self,
@@ -645,12 +676,14 @@ class MoleculeFeaturizer:
         distance_cutoff: Optional[float] = None,
         include_custom_smarts: bool = True,
         knn_cutoff: Optional[int] = None,
+        generate_conformer: bool = True,
     ) -> Tuple[Dict, Dict, torch.Tensor]:
         """
         Create molecular graph with node and edge features.
         """
         return self.featurize(mol_or_smiles, add_hs, distance_cutoff, include_custom_smarts,
-                              knn_cutoff=knn_cutoff)
+                              knn_cutoff=knn_cutoff,
+                              generate_conformer=generate_conformer)
 
     def _compute_graph(
         self,
@@ -658,10 +691,14 @@ class MoleculeFeaturizer:
         distance_cutoff: Optional[float] = None,
         include_custom_smarts: bool = True,
         knn_cutoff: Optional[int] = None,
+        generate_conformer: bool = True,
     ) -> Tuple[Dict, Dict, torch.Tensor]:
         """Compute graph representation for a prepared molecule."""
         node, edge, adj = self._graph_featurizer.featurize(
-            mol, distance_cutoff=distance_cutoff, knn_cutoff=knn_cutoff
+            mol,
+            distance_cutoff=distance_cutoff,
+            knn_cutoff=knn_cutoff,
+            generate_conformer=generate_conformer,
         )
 
         # Add custom SMARTS features if requested
@@ -699,7 +736,7 @@ class MoleculeFeaturizer:
             torch.Tensor: Morgan fingerprint of shape [n_bits]
         """
         if self._mol is None:
-            raise ValueError("No molecule set. Initialize with a molecule first.")
+            raise InputError("No molecule set. Initialize with a molecule first.")
 
         # Use cached value for default parameters
         if radius == 2 and n_bits == 2048:
@@ -723,7 +760,7 @@ class MoleculeFeaturizer:
             return None
 
         if self._mol is None:
-            raise ValueError("No molecule set. Initialize with a molecule first.")
+            raise InputError("No molecule set. Initialize with a molecule first.")
 
         cache_key = 'custom_smarts_result'
         if cache_key not in self._cache:
@@ -746,7 +783,7 @@ class MoleculeFeaturizer:
             torch.Tensor or None: 3D coordinates [n_atoms, 3]
         """
         if self._mol is None:
-            raise ValueError("No molecule set. Initialize with a molecule first.")
+            raise InputError("No molecule set. Initialize with a molecule first.")
 
         if not self.has_3d:
             return None
@@ -765,7 +802,7 @@ class MoleculeFeaturizer:
             Dictionary containing all features and metadata
         """
         if self._mol is None:
-            raise ValueError("No molecule set. Initialize with a molecule first.")
+            raise InputError("No molecule set. Initialize with a molecule first.")
 
         features = self.get_features()
         node, edge, adj = self.get_graph()
@@ -797,7 +834,7 @@ class MoleculeFeaturizer:
             RDKit mol object used internally for featurization.
         """
         if self._mol is None:
-            raise ValueError("No molecule set. Initialize with a molecule first.")
+            raise InputError("No molecule set. Initialize with a molecule first.")
         return self._mol
 
     # Aliases for consistency

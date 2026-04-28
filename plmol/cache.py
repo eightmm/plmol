@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Dict, Generic, Iterator, MutableMapping, TypeVar
+from typing import Dict, Generic, TypeVar
 
 K = TypeVar("K")
 V = TypeVar("V")

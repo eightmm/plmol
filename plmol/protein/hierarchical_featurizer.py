@@ -9,7 +9,7 @@ Uses AtomFeaturizer for protein-specific atom tokens, ResidueFeaturizer for
 residue features, and DualESMFeaturizer for ESMC + ESM3 embeddings.
 
 Usage:
-    from plmol.protein import HierarchicalFeaturizer
+    from plmol.protein.hierarchical_featurizer import HierarchicalFeaturizer
 
     featurizer = HierarchicalFeaturizer()
     data = featurizer.featurize("protein.pdb")
@@ -49,6 +49,7 @@ from ..constants import (
     CYSTEINE_VARIANTS,
     AMINO_ACID_LETTERS,
     MAX_ATOMS_PER_RESIDUE,
+    RESIDUE_TYPES,
     # Element types for hierarchical models
     SIMPLIFIED_ELEMENT_TYPES,
     NUM_SIMPLIFIED_ELEMENT_TYPES,
@@ -478,14 +479,10 @@ class HierarchicalFeaturizer:
         # Residue info
         residue_names = []
         residue_ids = []
-        INT_TO_3LETTER = {
-            0: 'ALA', 1: 'ARG', 2: 'ASN', 3: 'ASP', 4: 'CYS',
-            5: 'GLN', 6: 'GLU', 7: 'GLY', 8: 'HIS', 9: 'ILE',
-            10: 'LEU', 11: 'LYS', 12: 'MET', 13: 'PHE', 14: 'PRO',
-            15: 'SER', 16: 'THR', 17: 'TRP', 18: 'TYR', 19: 'VAL', 20: 'UNK'
-        }
+        _int_to_3letter = {i: r for i, r in enumerate(RESIDUE_TYPES[:20])}
+        _int_to_3letter[20] = 'UNK'
         for chain, resnum, restype in residues:
-            residue_names.append(INT_TO_3LETTER.get(restype, 'UNK'))
+            residue_names.append(_int_to_3letter.get(restype, 'UNK'))
             residue_ids.append((chain, resnum))
 
         # Residue vector features [N_res, 31, 3]

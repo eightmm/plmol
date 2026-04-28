@@ -12,6 +12,7 @@ from .pli_featurizer import PLInteractionFeaturizer, Interaction
 from .pli_detectors import InteractionDetector
 from .pli_encoding import InteractionGraphBuilder
 from .pocket_extractor import extract_pocket, PocketExtractor, PocketInfo, ParsedProtein
+from .metal_coordination import MetalSite, detect_metal_sites, classify_coordination_geometry, encode_metal_features
 from ..constants import (
     # Primary pharmacophore patterns
     PHARMACOPHORE_SMARTS,
@@ -34,4 +35,8 @@ __all__ = [
     'PocketInfo',
     'ParsedProtein',
     'extract_pocket',
+    'MetalSite',
+    'detect_metal_sites',
+    'classify_coordination_geometry',
+    'encode_metal_features',
 ]

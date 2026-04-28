@@ -9,6 +9,7 @@ import numpy as np
 from typing import Dict, Tuple, Optional, List
 try:
     import freesasa
+    freesasa.setVerbosity(freesasa.nowarnings)
 except ImportError:
     freesasa = None
 
@@ -36,6 +37,7 @@ from ..constants import (
     HBOND_ACCEPTOR_ATOMS,
     BACKBONE_ATOM_SET,
 )
+from ..utils import suppress_freesasa_warnings
 
 
 class AtomFeaturizer:
@@ -189,8 +191,9 @@ class AtomFeaturizer:
                 'radius': torch.zeros(0, dtype=torch.float32),
             }
             return empty_sasa, empty_info
-        structure = freesasa.Structure(pdb_file)
-        result = freesasa.calc(structure)
+        with suppress_freesasa_warnings():
+            structure = freesasa.Structure(pdb_file)
+            result = freesasa.calc(structure)
 
         n_atoms = result.nAtoms()
 
@@ -530,5 +533,3 @@ def get_atom_features_with_sasa(pdb_file: str) -> Dict[str, torch.Tensor]:
     """
     featurizer = AtomFeaturizer()
     return featurizer.get_all_atom_features(pdb_file)
-
-

@@ -29,10 +29,7 @@ logger = logging.getLogger(__name__)
 from rdkit import Chem
 from rdkit.Chem import AllChem, Crippen, Lipinski
 
-try:
-    import freesasa
-except ImportError:
-    freesasa = None
+from ..errors import InputError
 
 from ..constants import (
     VDW_RADIUS,
@@ -46,8 +43,8 @@ from ..constants import (
     KD_SCALE,
     CHARGED_RESIDUES,
     BACKBONE_ATOM_SET,
-    RESIDUE_MAX_SASA,
 )
+from ..utils import compute_burial_index
 
 # Channel name definitions
 LIGAND_CHANNEL_NAMES = [
@@ -199,6 +196,12 @@ def compute_ligand_channels(
     Returns:
         (features, channel_names) where features is (N, 16) float32.
     """
+    if charge_method not in {"gasteiger", "mmff94"}:
+        raise InputError(
+            f"Unsupported charge_method: {charge_method!r}. "
+            "Allowed: ['gasteiger', 'mmff94']"
+        )
+
     n_atoms = mol.GetNumAtoms()
     features = np.zeros((n_atoms, 16), dtype=np.float32)
 
@@ -277,46 +280,6 @@ def compute_ligand_channels(
     return features, list(LIGAND_CHANNEL_NAMES)
 
 
-def _compute_voxel_burial_index(
-    positions: Optional[np.ndarray],
-    res_names: list[str],
-    atom_names: list[str],
-    n_atoms: int,
-) -> np.ndarray:
-    """Compute per-atom burial index from SASA for voxel features.
-
-    Uses freesasa to compute per-atom SASA, normalizes by RESIDUE_MAX_SASA.
-    burial_index = 1.0 - relative_sasa, clamped to [0, 1].
-    Falls back to 0.5 if freesasa is unavailable or positions not provided.
-
-    Returns:
-        Per-atom burial index (N,) in [0, 1].
-    """
-    if freesasa is None or positions is None or n_atoms == 0:
-        return np.full(n_atoms, 0.5, dtype=np.float32)
-
-    try:
-        structure = freesasa.Structure()
-        for i in range(n_atoms):
-            rn = res_names[i] if res_names[i] else "UNK"
-            an = atom_names[i] if atom_names[i] else "X"
-            x, y, z = float(positions[i, 0]), float(positions[i, 1]), float(positions[i, 2])
-            structure.addAtom(an, rn, "1", "A", x, y, z)
-
-        result = freesasa.calc(structure)
-
-        burial = np.full(n_atoms, 0.5, dtype=np.float32)
-        for i in range(n_atoms):
-            atom_sasa = result.atomArea(i)
-            max_sasa = RESIDUE_MAX_SASA.get(res_names[i], 200.0)
-            relative_sasa = atom_sasa / max_sasa if max_sasa > 0 else 0.5
-            burial[i] = np.clip(1.0 - relative_sasa, 0.0, 1.0)
-        return burial
-    except Exception:
-        logger.warning("freesasa computation failed, using default burial_index=0.5")
-        return np.full(n_atoms, 0.5, dtype=np.float32)
-
-
 def compute_protein_channels(
     mol,
     atom_metadata: Optional[list[dict]] = None,
@@ -336,11 +299,11 @@ def compute_protein_channels(
         (features, channel_names) where features is (N, 16) float32.
     """
     if mol is None and atom_metadata is not None:
-        from ..surface.features import _build_simple_protein_mol
+        from ..surface._protein_adapter import _build_simple_protein_mol
         mol = _build_simple_protein_mol(atom_metadata)
 
     if mol is None:
-        raise ValueError(
+        raise InputError(
             "compute_protein_channels requires either 'mol' or 'atom_metadata'."
         )
 
@@ -410,7 +373,7 @@ def compute_protein_channels(
             features[idx, 14] = 1.0
 
     # 15: Burial index (1.0 - relative_sasa, clamped to [0, 1])
-    features[:, 15] = _compute_voxel_burial_index(
+    features[:, 15] = compute_burial_index(
         positions, res_names_list, atom_names_list, n_atoms,
     )
 

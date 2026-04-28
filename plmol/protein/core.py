@@ -9,7 +9,9 @@ from typing import Any, Dict, Iterable, Optional, Union
 import numpy as np
 import torch
 
-from .protein_featurizer import ProteinFeaturizer
+from .featurizer import ProteinFeaturizer
+from ..errors import InputError, DependencyError
+from ..specs import PROTEIN_SPEC, is_all_mode, normalize_modes
 from ..constants import (
     DEFAULT_ATOM_GRAPH_DISTANCE_CUTOFF,
     DEFAULT_BACKBONE_KNN_NEIGHBORS,
@@ -47,6 +49,7 @@ class Protein(BaseMolecule):
         self._featurizer_path: Optional[str] = None
         self._graph_level: Optional[str] = None
         self._graph_distance_cutoff: Optional[float] = None
+        self._owned_temp_paths: list[str] = []
 
     @classmethod
     def from_pdb(
@@ -65,6 +68,75 @@ class Protein(BaseMolecule):
         return obj
 
     @classmethod
+    def from_mmcif(
+        cls,
+        path: str,
+        chain_id: Optional[str] = None,
+        standardize: bool = True,
+        keep_hydrogens: bool = False,
+    ) -> "Protein":
+        """
+        Load protein from an mmCIF/PDBx file.
+
+        Requires the gemmi optional dependency (pip install 'plmol[mmcif]').
+
+        Args:
+            path: Path to .cif or .mmcif file
+            chain_id: If given, restrict to this chain (written to PDB tmp file)
+            standardize: Whether to standardize the resulting PDB
+            keep_hydrogens: Whether to keep hydrogen atoms
+        """
+        from ..parsers.mmcif_parser import MMCIFParser
+        import tempfile
+
+        parser = MMCIFParser(path, include_nucleic_acids=False)
+        with tempfile.NamedTemporaryFile(suffix=".pdb", delete=False, mode="w") as f:
+            f.write(parser.to_pdb_string())
+            tmp_path = f.name
+
+        obj = cls(
+            pdb_path=tmp_path,
+            standardize=standardize,
+            keep_hydrogens=keep_hydrogens,
+        )
+        obj.metadata["source"] = path
+        obj.metadata["mmcif_chain_id"] = chain_id
+        obj._owned_temp_paths.append(tmp_path)
+        return obj
+
+    def cleanup(self) -> None:
+        """Remove temporary files created by constructors such as from_mmcif()."""
+        for path in self._owned_temp_paths:
+            try:
+                if os.path.exists(path):
+                    os.unlink(path)
+            except OSError:
+                pass
+        self._owned_temp_paths.clear()
+
+    def __del__(self) -> None:
+        try:
+            self.cleanup()
+        except Exception:
+            pass
+
+    @classmethod
+    def from_structure(
+        cls,
+        path: str,
+        chain_id: Optional[str] = None,
+        standardize: bool = True,
+        keep_hydrogens: bool = False,
+    ) -> "Protein":
+        """Load protein from any supported structure file (PDB or mmCIF).
+
+        Auto-detects format from file extension.
+        """
+        if path.endswith(('.cif', '.mmcif')):
+            return cls.from_mmcif(path, chain_id=chain_id, standardize=standardize, keep_hydrogens=keep_hydrogens)
+        return cls.from_pdb(path, standardize=standardize, keep_hydrogens=keep_hydrogens)
+
+    @classmethod
     def from_sequence(cls, sequence: str) -> "Protein":
         """Initialize from amino acid sequence (Foldseek/ESM style)."""
         obj = cls()
@@ -73,7 +145,7 @@ class Protein(BaseMolecule):
 
     def _get_featurizer(self) -> ProteinFeaturizer:
         if self._pdb_path is None:
-            raise ValueError("Protein has no PDB path. Initialize from PDB first.")
+            raise InputError("Protein has no PDB path. Initialize from PDB first.")
 
         if (
             self._featurizer is None
@@ -94,7 +166,7 @@ class Protein(BaseMolecule):
         if self._sequence is not None or self._sequence_by_chain is not None:
             return
         if self._pdb_path is None:
-            raise ValueError("Protein has no PDB path. Initialize from PDB first.")
+            raise InputError("Protein has no PDB path. Initialize from PDB first.")
 
         featurizer = self._get_featurizer()
         sequence_by_chain = featurizer.get_sequence_by_chain()
@@ -115,7 +187,7 @@ class Protein(BaseMolecule):
         """Return residue-level graph representation, computing lazily if needed."""
         if self._graph is None or self._graph_level != "residue":
             if self._pdb_path is None:
-                raise ValueError(
+                raise InputError(
                     "Protein has no PDB path. Initialize from PDB before requesting graph features."
                 )
             self.featurize(mode="graph", graph_kwargs={"level": "residue"})
@@ -133,7 +205,7 @@ class Protein(BaseMolecule):
         """
         if self._surface is None:
             if self._pdb_path is None:
-                raise ValueError(
+                raise InputError(
                     "Protein has no PDB path. Initialize from PDB before requesting surface features."
                 )
             self.featurize(mode="surface")
@@ -230,6 +302,7 @@ class Protein(BaseMolecule):
         mode: Union[str, Iterable[str]] = "all",
         graph_kwargs: Optional[Dict[str, Any]] = None,
         surface_kwargs: Optional[Dict[str, Any]] = None,
+        voxel_kwargs: Optional[Dict[str, Any]] = None,
         backbone_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
@@ -241,6 +314,7 @@ class Protein(BaseMolecule):
             graph_kwargs: Optional kwargs for graph featurization.
                 Use {"level": "residue"} (default) or {"level": "atom"}.
             surface_kwargs: Optional kwargs for surface extraction.
+            voxel_kwargs: Optional kwargs for voxel featurization.
             backbone_kwargs: Optional kwargs for backbone featurization.
                 Supports {"k_neighbors": int} (default: 30).
 
@@ -249,12 +323,12 @@ class Protein(BaseMolecule):
             output includes Torch Geometric-friendly keys such as
             "node_features", "edge_index", and "edge_features".
         """
-        if isinstance(mode, str):
-            modes = ["graph", "surface", "sequence", "backbone"] if mode == "all" else [mode]
+        if is_all_mode(mode):
+            modes = list(PROTEIN_SPEC.output_keys) if self._pdb_path is not None else ["sequence"]
+        elif mode is None and self._pdb_path is None:
+            modes = ["sequence"]
         else:
-            modes = list(mode)
-
-        modes = [m.lower() for m in modes]
+            modes = normalize_modes(PROTEIN_SPEC, mode)
         results: Dict[str, Any] = {}
 
         if "sequence" in modes:
@@ -298,6 +372,11 @@ class Protein(BaseMolecule):
                 self._surface = surface
             results["surface"] = surface
 
+        if "voxel" in modes:
+            voxel_kwargs = voxel_kwargs or {}
+            featurizer = self._get_featurizer()
+            results["voxel"] = featurizer.get_voxel(**voxel_kwargs)
+
         if "backbone" in modes:
             backbone_kwargs = backbone_kwargs or {}
             featurizer = self._get_featurizer()
@@ -325,15 +404,15 @@ class Protein(BaseMolecule):
             surface_kwargs: Optional surface kwargs passed to pocket Protein object.
         """
         if self._pdb_path is None:
-            raise ValueError("Protein has no PDB path. Initialize from PDB first.")
+            raise InputError("Protein has no PDB path. Initialize from PDB first.")
         if Chem is None:
-            raise ImportError("RDKit is required for pocket featurization.")
+            raise DependencyError("RDKit is required for pocket featurization.")
 
         from ..interaction import extract_pocket
 
         pocket_list = extract_pocket(self._pdb_path, ligand, distance_cutoff=distance_cutoff)
         if not pocket_list:
-            raise ValueError("Pocket extraction returned no pocket molecules.")
+            raise InputError("Pocket extraction returned no pocket molecules.")
         pocket_info = pocket_list[0]
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".pdb", delete=False) as f:

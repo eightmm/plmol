@@ -153,3 +153,77 @@ STACKING_TYPES = {
 DEFAULT_DISTANCE_CUTOFF = 4.5  # General PLI distance cutoff
 POCKET_EXTRACTION_CUTOFF = 6.0  # Residue-wise pocket extraction
 CLOSE_CONTACT_CUTOFF = 2.5      # Very close contacts (potential clashes)
+
+# =============================================================================
+# Pi-Stacking Angle Thresholds
+# =============================================================================
+
+# Parallel (face-to-face) stacking: angle < PI_STACK_PARALLEL_MAX or > PI_STACK_PARALLEL_MIN_ANTI
+PI_STACK_PARALLEL_MAX = 30.0       # degrees — ring normals nearly parallel
+PI_STACK_PARALLEL_MIN_ANTI = 150.0 # degrees — antiparallel normals also count as parallel
+# Perpendicular (T-shaped) stacking: PI_STACK_PERP_MIN < angle < PI_STACK_PERP_MAX
+PI_STACK_PERP_MIN = 60.0           # degrees
+PI_STACK_PERP_MAX = 120.0          # degrees
+
+# Cation-pi: cation must lie within this angle of the ring normal (projection check)
+CATION_PI_MAX_OFFSET_ANGLE = 30.0  # degrees
+
+# =============================================================================
+# Interaction Strength (Gaussian decay) Parameters
+# =============================================================================
+
+INTERACTION_STRENGTH_SIGMA = 0.5   # Angstroms — width of Gaussian decay
+IDEAL_DISTANCE_FALLBACK = 3.0      # Angstroms — default ideal distance if type unknown
+
+# =============================================================================
+# Cross-Contact Density Parameters (edge features)
+# =============================================================================
+
+CROSS_CONTACT_DENSITY_CUTOFF = 4.0  # Angstroms — radius for counting cross-contacts
+CROSS_CONTACT_DENSITY_NORM = 10.0   # normalizer: contacts / NORM -> [0,1]
+
+# =============================================================================
+# Atom Feature Normalization
+# =============================================================================
+
+FORMAL_CHARGE_OFFSET = 2    # shift before dividing: (charge + offset) / scale
+FORMAL_CHARGE_SCALE = 4.0   # divisor for formal charge normalization
+DEGREE_SCALE = 4.0          # divisor for heavy-atom degree normalization
+NUM_HS_SCALE = 4.0          # divisor for attached-hydrogen count normalization
+
+# =============================================================================
+# Metal Coordination Geometry Angle Thresholds
+# =============================================================================
+
+# Angles above these thresholds indicate near-linear (trans) bonds
+SQUARE_PLANAR_LINEAR_ANGLE = 150.0       # degrees — used to detect square planar (4-coord)
+TRIGONAL_BIPYRAMIDAL_LINEAR_ANGLE = 160.0  # degrees — used to detect trigonal bipyramidal (5-coord)
+
+# =============================================================================
+# Metal Coordination Constants
+# =============================================================================
+
+METAL_COORDINATION_CUTOFF = 2.8  # Angstroms
+
+COMMON_COORDINATION_GEOMETRIES = [
+    "linear",
+    "trigonal_planar",
+    "tetrahedral",
+    "square_planar",
+    "trigonal_bipyramidal",
+    "square_pyramidal",
+    "octahedral",
+]
+
+METAL_PREFERRED_DONORS = {
+    'ZN': {'N', 'O', 'S'},
+    'MG': {'O'},
+    'CA': {'O'},
+    'FE': {'N', 'O', 'S'},
+    'CU': {'N', 'O', 'S'},
+    'MN': {'N', 'O'},
+    'CO': {'N', 'O', 'S'},
+    'NI': {'N', 'O', 'S'},
+    'NA': {'O'},
+    'K':  {'O'},
+}

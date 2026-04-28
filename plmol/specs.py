@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping
+from typing import Iterable, List, Mapping
 
 from .errors import InputError
 
@@ -18,9 +18,15 @@ class FeatureSpec:
 
 LIGAND_SPEC = FeatureSpec(
     name="ligand",
-    allowed_modes=("graph", "surface", "voxel", "fingerprint", "smiles", "sequence", "fragment", "all"),
+    allowed_modes=(
+        "graph", "surface", "voxel", "fingerprint", "descriptor",
+        "smiles", "sequence", "fragment", "morgan", "all",
+    ),
     default_modes=("graph", "fingerprint", "smiles", "sequence"),
-    output_keys=("graph", "surface", "voxel", "fingerprint", "smiles", "sequence", "fragment"),
+    output_keys=(
+        "graph", "surface", "voxel", "fingerprint", "descriptor",
+        "smiles", "sequence", "fragment", "morgan",
+    ),
 )
 
 PROTEIN_SPEC = FeatureSpec(
@@ -34,14 +40,49 @@ INTERACTION_SPEC = FeatureSpec(
     name="interaction",
     allowed_modes=("graph",),
     default_modes=("graph",),
-    output_keys=("edges", "edge_features", "interactions", "metadata"),
+    output_keys=(
+        "edges",
+        "edge_features",
+        "interactions",
+        "num_interactions",
+        "interaction_counts",
+        "num_protein_atoms",
+        "num_ligand_atoms",
+        "distance_cutoff",
+        "knn_cutoff",
+        "feature_dim",
+        "metadata",
+        "protein_coords",
+        "ligand_coords",
+        "metal_sites",
+        "metal_features",
+        "contact_edges",
+        "contact_distances",
+        "num_contacts",
+    ),
+)
+
+NUCLEIC_ACID_SPEC = FeatureSpec(
+    name="nucleic_acid",
+    allowed_modes=("sequence", "graph", "backbone", "atom_graph", "all"),
+    default_modes=("sequence", "graph"),
+    output_keys=("sequence", "graph", "backbone", "atom_graph"),
 )
 
 FEATURE_SPECS: Mapping[str, FeatureSpec] = {
     "ligand": LIGAND_SPEC,
     "protein": PROTEIN_SPEC,
     "interaction": INTERACTION_SPEC,
+    "nucleic_acid": NUCLEIC_ACID_SPEC,
 }
+
+
+def is_all_mode(mode: str | Iterable[str] | None) -> bool:
+    if mode is None:
+        return False
+    if isinstance(mode, str):
+        return mode.lower() == "all"
+    return any(str(m).lower() == "all" for m in mode)
 
 
 def normalize_modes(spec: FeatureSpec, mode: str | Iterable[str] | None) -> List[str]:
@@ -52,7 +93,7 @@ def normalize_modes(spec: FeatureSpec, mode: str | Iterable[str] | None) -> List
     else:
         modes = [str(m).lower() for m in mode]
     if any(m == "all" for m in modes):
-        return list(spec.allowed_modes[:-1])
+        return list(spec.default_modes)
     invalid = [m for m in modes if m not in spec.allowed_modes]
     if invalid:
         raise InputError(
@@ -68,7 +109,7 @@ def normalize_requests(requests: str | Iterable[str]) -> List[str]:
     else:
         reqs = [str(r).lower() for r in requests]
     if any(r == "all" for r in reqs):
-        return ["ligand", "protein", "interaction"]
+        return ["ligand", "protein", "nucleic_acid", "interaction"]
     invalid = [r for r in reqs if r not in FEATURE_SPECS]
     if invalid:
         raise InputError(f"Unsupported request(s): {invalid}. Allowed: {list(FEATURE_SPECS)}")

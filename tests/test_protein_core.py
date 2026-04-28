@@ -22,6 +22,11 @@ class TestProteinFromSequence:
         assert "sequence" in result
         assert result["sequence"] == "ACDEFG"
 
+    def test_featurize_all_sequence_only(self):
+        p = Protein.from_sequence("ACDEFG")
+        result = p.featurize(mode="all")
+        assert result == {"sequence": "ACDEFG"}
+
     def test_graph_without_pdb_raises(self):
         p = Protein.from_sequence("ACDEFG")
         with pytest.raises(ValueError, match="PDB"):
@@ -89,6 +94,25 @@ class TestProteinFromPDB:
         bb = result["backbone"]
         assert "backbone_coords" in bb
         assert "edge_index" in bb
+
+    def test_featurize_voxel(self, mini_pdb):
+        PDBParser.clear_cache()
+        p = Protein.from_pdb(mini_pdb, standardize=False)
+        result = p.featurize(mode="voxel", voxel_kwargs={"box_size": 8})
+        assert "voxel" in result
+        assert result["voxel"]["voxel"].shape[0] == 16
+        assert result["voxel"]["grid_shape"] == (8, 8, 8)
+
+    def test_featurize_all_structure_backed(self, mini_pdb):
+        PDBParser.clear_cache()
+        p = Protein.from_pdb(mini_pdb, standardize=False)
+        result = p.featurize(
+            mode="all",
+            surface_kwargs={"n_points_per_atom": 5},
+            voxel_kwargs={"box_size": 8},
+            backbone_kwargs={"k_neighbors": 3},
+        )
+        assert {"sequence", "graph", "surface", "voxel", "backbone"}.issubset(result)
 
     def test_featurize_multiple_modes(self, mini_pdb):
         PDBParser.clear_cache()

@@ -261,6 +261,14 @@ ATOMIC_MASS = {
 # Atom type index for 6-class scheme: C, N, O, S, Halogen, Other
 # Keys are atomic numbers; value is 0-indexed class (Other = 5, used as default)
 ATOM_TYPE_MAP = {6: 0, 7: 1, 8: 2, 16: 3, 9: 4, 17: 4, 35: 4, 53: 4}
+ATOM_TYPE_LABELS = ("C", "N", "O", "S", "Hal", "Other")
+NUM_ATOM_TYPES = len(ATOM_TYPE_LABELS)
+
+# =============================================================================
+# Atomic Molar Refractivity (heavy atoms, for surface features)
+# =============================================================================
+# Crippen-style per-element atomic refractivity contributions.
+ATOMIC_MOLAR_REFRACTIVITY = {6: 2.418, 7: 2.713, 8: 1.764, 16: 7.400}
 
 # Kyte-Doolittle hydrophobicity scale (per residue name)
 KD_SCALE = {

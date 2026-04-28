@@ -22,7 +22,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import torch
 from tqdm import tqdm
 
-from plmol.protein import HierarchicalFeaturizer
+from plmol.protein.hierarchical_featurizer import HierarchicalFeaturizer
 from plmol import PDBStandardizer
 
 logging.basicConfig(
@@ -124,15 +124,15 @@ def process_single_file(args: Tuple) -> Tuple[str, bool, str]:
     Returns:
         Tuple of (pdb_id, success, message)
     """
-    pdb_path, input_dir, output_dir, standardize, ptm_handling = args
+    pdb_path, input_dir, output_dir, standardize, ptm_handling, resume = args
     pdb_id = pdb_path.stem.replace('_protein', '')
     tmp_pdb_path = None
 
     try:
         output_path = get_output_path(pdb_path, input_dir, output_dir)
 
-        # Skip if already processed
-        if output_path.exists():
+        # Skip if already processed and resume mode is enabled
+        if resume and output_path.exists():
             return (pdb_id, True, "skipped (exists)")
 
         # Create output directory
@@ -172,6 +172,7 @@ def process_single_file_shared_featurizer(
     featurizer: HierarchicalFeaturizer,
     standardize: bool = False,
     ptm_handling: str = 'unk',
+    resume: bool = False,
 ) -> Tuple[str, bool, str]:
     """
     Process a single PDB file with shared featurizer (for single-process mode).
@@ -182,9 +183,9 @@ def process_single_file_shared_featurizer(
     try:
         output_path = get_output_path(pdb_path, input_dir, output_dir)
 
-        # Skip if already processed
-        if output_path.exists():
-            return (pdb_id, True, "skipped")
+        # Skip if already processed and resume mode is enabled
+        if resume and output_path.exists():
+            return (pdb_id, True, "skipped (exists)")
 
         # Create output directory
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -279,7 +280,7 @@ def main():
             for pdb_path in pbar:
                 pdb_id, success, msg = process_single_file_shared_featurizer(
                     pdb_path, args.input_dir, args.output_dir, featurizer,
-                    args.standardize, args.ptm_handling
+                    args.standardize, args.ptm_handling, args.resume
                 )
 
                 if success:
@@ -294,7 +295,7 @@ def main():
         logger.info(f"Using {args.num_workers} workers")
 
         tasks = [
-            (f, args.input_dir, args.output_dir, args.standardize, args.ptm_handling)
+            (f, args.input_dir, args.output_dir, args.standardize, args.ptm_handling, args.resume)
             for f in pdb_files
         ]
 

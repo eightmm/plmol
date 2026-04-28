@@ -18,6 +18,8 @@ except ImportError:  # pragma: no cover - optional dependency
     Chem = None
     AllChem = None
 
+from ..errors import InputError, DependencyError
+from ..specs import LIGAND_SPEC, normalize_modes
 from .descriptors import MoleculeFeaturizer
 from .fragment import fragment_on_rotatable_bonds
 from ..rdkit_utils import ensure_3d_conformer, has_3d, prepare_mol
@@ -62,7 +64,7 @@ class LigandFeaturizer:
         custom_smarts: Optional[Dict[str, str]] = None,
     ):
         if Chem is None:
-            raise ImportError("RDKit is required for LigandFeaturizer.")
+            raise DependencyError("RDKit is required for LigandFeaturizer.")
 
         self._add_hs = add_hs
         self._canonicalize = canonicalize
@@ -118,22 +120,23 @@ class LigandFeaturizer:
             plus "node_features", "distance_matrix", "distance_bounds",
             and optional "coords".
         """
-        if isinstance(mode, str):
-            modes = ["graph", "surface", "voxel", "fingerprint", "smiles", "sequence"] if mode == "all" else [mode]
+        if (
+            (isinstance(mode, str) and mode.lower() == "all")
+            or (not isinstance(mode, str) and any(str(m).lower() == "all" for m in mode))
+        ):
+            modes = list(LIGAND_SPEC.default_modes)
         else:
-            modes = list(mode)
-
-        modes = [m.lower() for m in modes]
+            modes = normalize_modes(LIGAND_SPEC, mode)
         results: Dict[str, Any] = {}
 
         if "smiles" in modes or "sequence" in modes:
             if Chem is None:
-                raise ImportError(
+                raise DependencyError(
                     "RDKit is required to generate SMILES. Install RDKit to use this feature."
                 )
             mol = self._resolve_mol(None)
             if mol is None:
-                raise ValueError("No ligand set for SMILES/sequence generation.")
+                raise InputError("No ligand set for SMILES/sequence generation.")
             smiles = Chem.MolToSmiles(mol)
             results["smiles"] = smiles
             results["sequence"] = smiles
@@ -142,10 +145,18 @@ class LigandFeaturizer:
             graph_kwargs = graph_kwargs or {}
             results["graph"] = self.get_graph(standardized=True, **graph_kwargs)
 
-        if "fingerprint" in modes or "morgan" in modes:
-            fingerprint_kwargs = fingerprint_kwargs or {}
-            include_fps = fingerprint_kwargs.pop("include_fps", None)
+        if "fingerprint" in modes:
+            fingerprint_kwargs = dict(fingerprint_kwargs or {})
+            include_fps = fingerprint_kwargs.get("include_fps")
             results["fingerprint"] = self.get_features(include_fps=include_fps)
+
+        if "descriptor" in modes:
+            descriptor = self.get_features(include_fps=())
+            descriptor["descriptor_names"] = list(self._ligand_base_featurizer.descriptor_names())
+            results["descriptor"] = descriptor
+
+        if "morgan" in modes:
+            results["morgan"] = self.get_morgan_fingerprint()
 
         if "surface" in modes:
             surface_kwargs = surface_kwargs or {}
@@ -170,7 +181,7 @@ class LigandFeaturizer:
     ) -> MoleculeFeaturizer:
         if mol_or_smiles is None:
             if self._mol is None:
-                raise ValueError("No ligand set for featurization.")
+                raise InputError("No ligand set for featurization.")
             return self._ligand_base_featurizer
         return MoleculeFeaturizer(
             mol_or_smiles,
@@ -187,6 +198,7 @@ class LigandFeaturizer:
         include_custom_smarts: bool = True,
         standardized: bool = False,
         knn_cutoff: Optional[int] = None,
+        generate_conformer: bool = True,
     ) -> Union[Dict[str, Any], Tuple[Dict[str, Any], Dict[str, Any], Any]]:
         """
         Return standardized graph representation suitable for GNNs.
@@ -207,6 +219,7 @@ class LigandFeaturizer:
             distance_cutoff=distance_cutoff,
             include_custom_smarts=include_custom_smarts,
             knn_cutoff=knn_cutoff,
+            generate_conformer=generate_conformer,
         )
         if standardized:
             return self._standardize_graph(node, edge, adj, featurizer)
@@ -267,17 +280,17 @@ class LigandFeaturizer:
             ligand-tailored atomic features when include_features is True.
         """
         if Chem is None:
-            raise ImportError(
+            raise DependencyError(
                 "RDKit is required for surface extraction. Install RDKit to use this feature."
             )
 
         mol = self._resolve_mol(mol_or_smiles)
         if mol is None:
-            raise ValueError("No ligand provided for surface extraction.")
+            raise InputError("No ligand provided for surface extraction.")
 
         if mol.GetNumConformers() == 0:
             if not generate_conformer:
-                raise ValueError("No 3D conformer found. Set generate_conformer=True.")
+                raise InputError("No 3D conformer found. Set generate_conformer=True.")
             self._generate_conformer(mol)
 
         conformer = mol.GetConformer()
@@ -318,7 +331,7 @@ class LigandFeaturizer:
                 probe_radius=probe_radius,
             )
         except ImportError as exc:  # pragma: no cover - optional dependency
-            raise ImportError(
+            raise DependencyError(
                 "Surface featurization requires scipy. "
                 "Install it to enable surface features."
             ) from exc
@@ -366,15 +379,15 @@ class LigandFeaturizer:
             "grid_shape", "resolution".
         """
         if Chem is None:
-            raise ImportError("RDKit is required for voxel featurization.")
+            raise DependencyError("RDKit is required for voxel featurization.")
 
         mol = self._resolve_mol(mol_or_smiles)
         if mol is None:
-            raise ValueError("No ligand provided for voxel featurization.")
+            raise InputError("No ligand provided for voxel featurization.")
 
         if mol.GetNumConformers() == 0:
             if not generate_conformer:
-                raise ValueError("No 3D conformer found. Set generate_conformer=True.")
+                raise InputError("No 3D conformer found. Set generate_conformer=True.")
             self._generate_conformer(mol)
 
         return build_ligand_voxel(
@@ -396,7 +409,7 @@ class LigandFeaturizer:
         """Return rotatable-bond fragmentation result."""
         mol = self._resolve_mol(mol_or_smiles)
         if mol is None:
-            raise ValueError("No ligand set for fragmentation.")
+            raise InputError("No ligand set for fragmentation.")
         return fragment_on_rotatable_bonds(mol, min_fragment_size=min_fragment_size)
 
     def _resolve_mol(
@@ -473,7 +486,7 @@ class LigandFeaturizer:
             adjacency = torch.from_numpy(adjacency)
 
         if adjacency.dim() != 3 or adjacency.size(-1) < 4:
-            raise ValueError("adjacency must be [N, N, C] with C >= 4")
+            raise InputError("adjacency must be [N, N, C] with C >= 4")
 
         bond_mask = adjacency[..., :4].sum(dim=-1) > 0
         bond_mask.fill_diagonal_(False)
@@ -484,9 +497,14 @@ class LigandFeaturizer:
 
     def _generate_conformer(self, mol: "Chem.Mol") -> None:
         if AllChem is None:
-            raise ImportError("RDKit AllChem is required to generate conformers.")
+            raise DependencyError("RDKit AllChem is required to generate conformers.")
+        orig_num_atoms = mol.GetNumAtoms()
         mol_3d = ensure_3d_conformer(mol)
         if mol_3d is not None and has_3d(mol_3d):
+            if mol_3d.GetNumAtoms() != orig_num_atoms:
+                mol_3d = Chem.RemoveHs(mol_3d)
+            if mol_3d.GetNumAtoms() != orig_num_atoms:
+                raise InputError("Generated conformer atom count does not match ligand.")
             mol.RemoveAllConformers()
             mol.AddConformer(mol_3d.GetConformer(), assignId=True)
 
@@ -537,3 +555,7 @@ class LigandFeaturizer:
     @property
     def input_smiles(self) -> Optional[str]:
         return self._ligand_base_featurizer.input_smiles
+
+    @staticmethod
+    def descriptor_names() -> Tuple[str, ...]:
+        return MoleculeFeaturizer.descriptor_names()

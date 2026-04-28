@@ -56,6 +56,14 @@ class TestAtomFeatures:
         n = aspirin_mol.GetNumAtoms()
         assert coords.shape == (n, 3)
 
+    def test_can_skip_conformer_generation(self, graph_featurizer, aspirin_mol):
+        feats, coords = graph_featurizer.get_atom_features(
+            aspirin_mol,
+            generate_conformer=False,
+        )
+        assert coords.shape == (aspirin_mol.GetNumAtoms(), 3)
+        assert torch.count_nonzero(coords) == 0
+
 
 class TestBondFeatures:
     def test_shape(self, graph_featurizer, ethanol_mol):

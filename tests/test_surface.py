@@ -3,10 +3,9 @@
 import numpy as np
 import pytest
 
-from plmol.surface.features import (
-    create_surface_points,
-    compute_pointcloud_geometry,
-)
+from plmol.errors import InputError
+from plmol.surface.point_cloud import create_surface_points
+from plmol.surface.geometry import compute_pointcloud_geometry
 from plmol.surface import build_ligand_surface, build_protein_surface
 
 
@@ -122,6 +121,22 @@ class TestBuildLigandSurface:
         assert "faces" not in surface  # point cloud only
         assert "features" in surface
         assert surface["features"].shape[0] == surface["points"].shape[0]
+        assert len(surface["feature_names"]) == surface["features"].shape[1]
+        assert surface["features"].shape[1] == 30
+
+    def test_invalid_charge_method_raises(self, ethanol_mol):
+        from plmol.constants import VDW_RADIUS, DEFAULT_VDW_RADIUS
+
+        mol = ethanol_mol
+        coords = mol.GetConformer().GetPositions().astype(np.float32)
+        radii = np.array(
+            [VDW_RADIUS.get(a.GetAtomicNum(), DEFAULT_VDW_RADIUS) for a in mol.GetAtoms()],
+            dtype=np.float32,
+        )
+        with pytest.raises(InputError, match="charge_method"):
+            build_ligand_surface(
+                coords, radii, mol, n_points_per_atom=30, charge_method="bad"
+            )
 
 
 class TestBuildProteinSurface:
@@ -136,6 +151,8 @@ class TestBuildProteinSurface:
         assert "faces" not in surface
         assert "features" in surface
         assert surface["features"].shape[0] == surface["points"].shape[0]
+        assert len(surface["feature_names"]) == surface["features"].shape[1]
+        assert surface["features"].shape[1] == 39
 
 
 # ---------------------------------------------------------------------------
@@ -144,20 +161,11 @@ class TestBuildProteinSurface:
 
 class TestLigandSurfaceViaFeaturizer:
     def test_featurize_surface(self):
-        from rdkit import Chem
-        from rdkit.Chem import AllChem
         from plmol import Ligand
 
-        # Build mol with conformer manually (avoid generate_conformer bug)
-        mol = Chem.MolFromSmiles("CCO")
-        mol_h = Chem.AddHs(mol)
-        AllChem.EmbedMolecule(mol_h, randomSeed=42)
-        mol_noh = Chem.RemoveHs(mol_h)
-
         ligand = Ligand.from_smiles("CCO")
-        ligand._rdmol = mol_noh  # inject conformer
 
-        result = ligand.featurize(mode="surface")
+        result = ligand.featurize(mode="surface", generate_conformer=True)
         surface = result["surface"]
         assert surface is not None
         assert "points" in surface

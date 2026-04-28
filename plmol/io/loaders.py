@@ -25,7 +25,7 @@ def load_protein_input(
         return protein_input
     if not isinstance(protein_input, str):
         raise InputError(f"Unsupported protein input type: {type(protein_input)!r}")
-    return Protein.from_pdb(
+    return Protein.from_structure(
         protein_input,
         standardize=standardize,
         keep_hydrogens=keep_hydrogens,

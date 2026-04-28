@@ -23,6 +23,8 @@ import logging
 from typing import Dict, Literal, Optional, Union
 from pathlib import Path
 
+from ..errors import DependencyError, InputError
+
 logger = logging.getLogger(__name__)
 
 
@@ -99,12 +101,12 @@ class ESMFeaturizer:
                         f"Error: {e}"
                     )
             else:
-                raise ValueError(f"Unknown model_type: {self.model_type}")
+                raise InputError(f"Unknown model_type: {self.model_type}")
 
             logger.debug(f"Model loaded on {self.device}")
 
         except ImportError as e:
-            raise ImportError(
+            raise DependencyError(
                 f"Failed to import ESM models.\n"
                 f"Install: pip install esm\n"
                 f"Error: {e}"

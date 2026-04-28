@@ -20,6 +20,10 @@ from ..constants import (
     NUM_HYBRIDIZATION_TYPES,
     RESIDUE_TYPES,
     NUM_RESIDUE_TYPES,
+    INTERACTION_STRENGTH_SIGMA,
+    IDEAL_DISTANCE_FALLBACK,
+    CROSS_CONTACT_DENSITY_CUTOFF,
+    CROSS_CONTACT_DENSITY_NORM,
 )
 from ..utils import knn_mask_bipartite_numpy
 from .pli_featurizer import Interaction
@@ -171,26 +175,24 @@ class InteractionGraphBuilder:
             offset += 1
 
             # 10. Interaction strength: Gaussian decay from ideal distance (1 dim)
-            ideal = IDEAL_DISTANCES.get(inter.interaction_type, 3.0)
-            sigma = 0.5
-            strength = math.exp(-0.5 * ((inter.distance - ideal) / sigma) ** 2)
+            ideal = IDEAL_DISTANCES.get(inter.interaction_type, IDEAL_DISTANCE_FALLBACK)
+            strength = math.exp(-0.5 * ((inter.distance - ideal) / INTERACTION_STRENGTH_SIGMA) ** 2)
             features[i, offset] = strength
             offset += 1
 
             # --- Complex-only edge features ---
 
             # 11. Cross-contact density (2 dims)
-            # Number of atoms from the other entity within 4.0 Å of each endpoint
+            # Number of atoms from the other entity within CROSS_CONTACT_DENSITY_CUTOFF of each endpoint
             p_idx = inter.protein_atom_idx
             l_idx = inter.ligand_atom_idx
-            contact_cutoff = 4.0
             if p_idx < self._distance_matrix.shape[0]:
-                p_contacts = int((self._distance_matrix[p_idx, :] < contact_cutoff).sum())
-                features[i, offset] = min(p_contacts / 10.0, 1.0)
+                p_contacts = int((self._distance_matrix[p_idx, :] < CROSS_CONTACT_DENSITY_CUTOFF).sum())
+                features[i, offset] = min(p_contacts / CROSS_CONTACT_DENSITY_NORM, 1.0)
             offset += 1
             if l_idx < self._distance_matrix.shape[1]:
-                l_contacts = int((self._distance_matrix[:, l_idx] < contact_cutoff).sum())
-                features[i, offset] = min(l_contacts / 10.0, 1.0)
+                l_contacts = int((self._distance_matrix[:, l_idx] < CROSS_CONTACT_DENSITY_CUTOFF).sum())
+                features[i, offset] = min(l_contacts / CROSS_CONTACT_DENSITY_NORM, 1.0)
             offset += 1
 
             # 12. Endpoint min cross-distance (2 dims)

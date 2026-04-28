@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any, Tuple
 import torch
 import numpy as np
 
+from ..errors import DependencyError
 from .pdb_standardizer import PDBStandardizer
 from .residue_featurizer import ResidueFeaturizer
 from .utils import calculate_sidechain_centroid, normalize_residue_name
@@ -454,7 +455,7 @@ class ProteinFeaturizer:
                 probe_radius=probe_radius,
             )
         except Exception as exc:  # pragma: no cover - optional dependency
-            raise ImportError(
+            raise DependencyError(
                 "Surface featurization requires scipy. "
                 "Install it to enable surface features."
             ) from exc

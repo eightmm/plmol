@@ -1,3 +1,6 @@
+# Claude Code state
+.omc/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -33,7 +36,7 @@ MANIFEST
 
 # PDB files (except example directory)
 *.pdb
-!example/*.pdb
+!examples/*.pdb
 
 # Temporary files
 *.tmp

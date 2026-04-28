@@ -6,7 +6,7 @@ Designed to hold multi-view data (Sequence, Graph, 3D, Surface).
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union, Iterable
 import numpy as np
 
 class BaseMolecule(ABC):
@@ -71,6 +71,6 @@ class BaseMolecule(ABC):
         return self._surface
 
     @abstractmethod
-    def featurize(self, mode: str = "all"):
+    def featurize(self, mode: Union[str, Iterable[str]] = "all", **kwargs) -> Dict[str, Any]:
         """Generate features for the molecule."""
         pass

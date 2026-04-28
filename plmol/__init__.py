@@ -2,7 +2,7 @@
 
 # --- Protein ---
 from .protein.core import Protein
-from .protein.protein_featurizer import ProteinFeaturizer
+from .protein.featurizer import ProteinFeaturizer
 from .protein.pdb_standardizer import PDBStandardizer
 from .protein.residue_featurizer import ResidueFeaturizer
 from .protein.atom_featurizer import AtomFeaturizer
@@ -15,11 +15,18 @@ from .ligand.descriptors import MoleculeFeaturizer
 from .ligand.graph import MoleculeGraphFeaturizer
 from .ligand.featurizer import LigandFeaturizer
 
+# --- Nucleic Acid ---
+from .nucleic_acid.core import NucleicAcid
+from .nucleic_acid.featurizer import NucleicFeaturizer
+
+# --- Parsers ---
+from .parsers import StructureParser, MMCIFParser
+
 # --- Interaction ---
 from .interaction.pli_featurizer import PLInteractionFeaturizer
 
 # --- Complex ---
-from .complex import Complex
+from .complex import Complex, MolecularComplex
 
 # --- Infrastructure ---
 from .errors import PlmolError, InputError, DependencyError, FeatureError
@@ -32,7 +39,9 @@ __all__ = [
     "Protein", "ProteinFeaturizer", "PDBStandardizer", "ResidueFeaturizer", "AtomFeaturizer",
     "HierarchicalFeaturizer", "HierarchicalProteinData", "ESMFeaturizer",
     "Ligand", "MoleculeFeaturizer", "MoleculeGraphFeaturizer", "LigandFeaturizer",
-    "PLInteractionFeaturizer", "Complex",
+    "NucleicAcid", "NucleicFeaturizer",
+    "StructureParser", "MMCIFParser",
+    "PLInteractionFeaturizer", "Complex", "MolecularComplex",
     "PlmolError", "InputError", "DependencyError", "FeatureError",
     "FeatureSpec", "FEATURE_SPECS",
     "constants",

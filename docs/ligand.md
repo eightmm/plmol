@@ -19,7 +19,7 @@ ligand.generate_conformer()
 
 ```python
 result = ligand.featurize(
-    mode="all",                    # str or list of modes
+    mode="all",                    # str or list of modes; "all" uses default modes
     graph_kwargs={},               # graph options
     surface_kwargs={},             # surface options
     fingerprint_kwargs={},         # fingerprint options
@@ -28,17 +28,22 @@ result = ligand.featurize(
 )
 ```
 
+Mode strings are normalized via `normalize_modes()` from `plmol.specs`. Invalid modes raise `InputError`.
+
 | Mode | Output Key | Description |
 |------|-----------|-------------|
 | `"graph"` | `"graph"` | Dense adjacency graph (node_features, adjacency, bond_mask, ...) |
 | `"fingerprint"` | `"fingerprint"` | Descriptors + ECFP4/6, MACCS, RDKit FP, AtomPair, ErG |
+| `"descriptor"` | `"descriptor"` | 62-dim normalized descriptor vector + descriptor names |
 | `"fragment"` | `"fragment"` | Rotatable-bond fragmentation (fragment SMILES, adjacency, atom mapping) |
 | `"surface"` | `"surface"` | dMaSIF point cloud surface (requires 3D conformer) |
+| `"voxel"` | `"voxel"` | 16-channel 3D voxel grid (requires 3D conformer) |
+| `"morgan"` | `"morgan"` | Standalone Morgan/ECFP fingerprint dict |
 | `"smiles"` | `"smiles"` | Canonical SMILES string |
 | `"sequence"` | `"sequence"` | Same as SMILES (ligand alias) |
-| `"all"` | graph + fingerprint + surface + smiles + sequence | Default modes (fragment must be explicitly requested) |
+| `"all"` | graph + fingerprint + smiles + sequence | Default modes. surface/voxel/fragment/descriptor/morgan must be explicitly requested |
 
-> **Note**: Voxel mode is available through `LigandFeaturizer` (see [Low-Level Featurizers](#low-level-featurizers)).
+`LigandFeaturizer` follows the same mode names and also exposes lower-level getters for direct graph, surface, voxel, descriptor, and fingerprint calls.
 
 Lazy properties:
 
@@ -71,6 +76,7 @@ graph = result["graph"]
 |-----|------|---------|-------------|
 | `distance_cutoff` | `Optional[float]` | `None` | 3D distance cutoff for spatial edges. None = bond edges only |
 | `knn_cutoff` | `Optional[int]` | `None` | k-nearest neighbors for spatial edges. Unioned with distance edges |
+| `generate_conformer` | `bool` | `True` | Generate transient 3D coordinates for graph pair features when missing. Set `False` for zero coords |
 
 ### Output
 
@@ -195,6 +201,14 @@ result = ligand.featurize(
 
 All values normalized to [0, 1].
 
+For descriptors without fingerprints:
+
+```python
+desc = ligand.featurize(mode="descriptor")["descriptor"]
+values = desc["descriptors"]          # (62,)
+names = desc["descriptor_names"]      # length 62
+```
+
 | Index | Group | Dim | Features |
 |-------|-------|-----|----------|
 | `[0:5]` | Basic properties | 5 | mw, logp, tpsa, n_rotatable_bonds, flexibility |
@@ -303,7 +317,7 @@ surface = result["surface"]
 |-----|-------|-------------|
 | `points` | `(V, 3)` | Surface point positions |
 | `normals` | `(V, 3)` | Outward surface normals |
-| `features` | `(V, 31)` | Per-vertex chemical features |
+| `features` | `(V, 30)` | Per-vertex chemical features |
 | `feature_names` | `list[str]` | Column names for features |
 
 ---
@@ -340,7 +354,7 @@ frag = featurizer.get_fragment(min_fragment_size=1)
 surface = featurizer.get_surface(generate_conformer=True)
 voxel = featurizer.get_voxel(generate_conformer=True)
 
-# Batch featurize (supports voxel via voxel_kwargs)
+# Batch featurize (mode="all" uses graph + fingerprint + smiles + sequence)
 result = featurizer.featurize(
     mode=["graph", "fingerprint", "voxel"],
     voxel_kwargs={"resolution": 1.0, "box_size": 24},

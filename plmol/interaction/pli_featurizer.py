@@ -32,8 +32,14 @@ from ..constants import (
     # Residue types
     RESIDUE_TYPES,
     NUM_RESIDUE_TYPES,
+    # Feature normalization
+    FORMAL_CHARGE_OFFSET,
+    FORMAL_CHARGE_SCALE,
+    DEGREE_SCALE,
+    NUM_HS_SCALE,
 )
 from ..rdkit_utils import has_3d, get_positions
+from ..errors import InputError
 
 
 # =============================================================================
@@ -132,9 +138,9 @@ class PLInteractionFeaturizer:
 
         # Validate 3D coordinates
         if not has_3d(self._protein_with_h):
-            raise ValueError("Protein molecule must have a 3D conformer required for interaction detection")
+            raise InputError("Protein molecule must have a 3D conformer required for interaction detection")
         if not has_3d(self._ligand_with_h):
-            raise ValueError("Ligand molecule must have a 3D conformer required for interaction detection")
+            raise InputError("Ligand molecule must have a 3D conformer required for interaction detection")
 
         # Build heavy atom index mappings
         self._build_heavy_atom_mappings()
@@ -172,7 +178,7 @@ class PLInteractionFeaturizer:
     def _prepare_mol_with_hydrogens(self, mol: Chem.Mol) -> Chem.Mol:
         """Prepare molecule with explicit hydrogens and 3D coordinates."""
         if mol is None:
-            raise ValueError("Molecule cannot be None")
+            raise InputError("Molecule cannot be None")
 
         mol = Chem.Mol(mol)  # Copy to avoid modifying original
 
@@ -589,11 +595,11 @@ class PLInteractionFeaturizer:
             offset += NUM_ELEMENT_TYPES
             protein_feats[idx, offset + feats['hybridization_idx']] = 1.0
             offset += NUM_HYBRIDIZATION_TYPES
-            protein_feats[idx, offset] = (feats['formal_charge'] + 2) / 4.0
-            protein_feats[idx, offset + 1] = feats['num_hs'] / 4.0
+            protein_feats[idx, offset] = (feats['formal_charge'] + FORMAL_CHARGE_OFFSET) / FORMAL_CHARGE_SCALE
+            protein_feats[idx, offset + 1] = feats['num_hs'] / NUM_HS_SCALE
             protein_feats[idx, offset + 2] = float(feats['is_aromatic'])
             protein_feats[idx, offset + 3] = float(feats['is_in_ring'])
-            protein_feats[idx, offset + 4] = feats['degree'] / 4.0
+            protein_feats[idx, offset + 4] = feats['degree'] / DEGREE_SCALE
 
         for idx, feats in self._ligand_atom_features.items():
             if idx >= self.num_ligand_atoms:
@@ -603,11 +609,11 @@ class PLInteractionFeaturizer:
             offset += NUM_ELEMENT_TYPES
             ligand_feats[idx, offset + feats['hybridization_idx']] = 1.0
             offset += NUM_HYBRIDIZATION_TYPES
-            ligand_feats[idx, offset] = (feats['formal_charge'] + 2) / 4.0
-            ligand_feats[idx, offset + 1] = feats['num_hs'] / 4.0
+            ligand_feats[idx, offset] = (feats['formal_charge'] + FORMAL_CHARGE_OFFSET) / FORMAL_CHARGE_SCALE
+            ligand_feats[idx, offset + 1] = feats['num_hs'] / NUM_HS_SCALE
             ligand_feats[idx, offset + 2] = float(feats['is_aromatic'])
             ligand_feats[idx, offset + 3] = float(feats['is_in_ring'])
-            ligand_feats[idx, offset + 4] = feats['degree'] / 4.0
+            ligand_feats[idx, offset + 4] = feats['degree'] / DEGREE_SCALE
 
         return protein_feats, ligand_feats
 

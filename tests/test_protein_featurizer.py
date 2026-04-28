@@ -3,7 +3,7 @@
 import torch
 import pytest
 
-from plmol.protein.protein_featurizer import ProteinFeaturizer
+from plmol.protein.featurizer import ProteinFeaturizer
 from plmol.protein.utils import PDBParser
 
 

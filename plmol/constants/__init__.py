@@ -89,7 +89,16 @@ from .amino_acids import (
     FORMAL_CHARGE_MAP,
     HBOND_DONOR_ATOMS,
     HBOND_ACCEPTOR_ATOMS,
+    HBOND_DONOR_ATOMS_BY_RESIDUE,
+    HBOND_ACCEPTOR_ATOMS_BY_RESIDUE,
     BACKBONE_ATOM_SET,
+
+    # Aromatic and ionizable atoms
+    AROMATIC_RING_ATOMS,
+    POS_IONIZABLE_ATOMS,
+    HIS_POS_IONIZABLE_ATOMS,
+    HIS_PARTIAL_CHARGE,
+    NEG_IONIZABLE_ATOMS,
 
     # Residue physicochemical properties
     RESIDUE_PROPERTIES,
@@ -144,6 +153,36 @@ from .interactions import (
     DEFAULT_DISTANCE_CUTOFF,
     POCKET_EXTRACTION_CUTOFF,
     CLOSE_CONTACT_CUTOFF,
+
+    # Pi-stacking angle thresholds
+    PI_STACK_PARALLEL_MAX,
+    PI_STACK_PARALLEL_MIN_ANTI,
+    PI_STACK_PERP_MIN,
+    PI_STACK_PERP_MAX,
+    CATION_PI_MAX_OFFSET_ANGLE,
+
+    # Interaction strength parameters
+    INTERACTION_STRENGTH_SIGMA,
+    IDEAL_DISTANCE_FALLBACK,
+
+    # Cross-contact density parameters
+    CROSS_CONTACT_DENSITY_CUTOFF,
+    CROSS_CONTACT_DENSITY_NORM,
+
+    # Atom feature normalization
+    FORMAL_CHARGE_OFFSET,
+    FORMAL_CHARGE_SCALE,
+    DEGREE_SCALE,
+    NUM_HS_SCALE,
+
+    # Metal coordination geometry angle thresholds
+    SQUARE_PLANAR_LINEAR_ANGLE,
+    TRIGONAL_BIPYRAMIDAL_LINEAR_ANGLE,
+
+    # Metal coordination
+    METAL_COORDINATION_CUTOFF,
+    COMMON_COORDINATION_GEOMETRIES,
+    METAL_PREFERRED_DONORS,
 )
 
 # =============================================================================
@@ -175,8 +214,53 @@ from .physical_properties import (
 
     # Surface/voxel feature constants
     ATOM_TYPE_MAP,
+    ATOM_TYPE_LABELS,
+    NUM_ATOM_TYPES,
+    ATOMIC_MOLAR_REFRACTIVITY,
     KD_SCALE,
     CHARGED_RESIDUES,
+)
+
+# =============================================================================
+# Nucleic Acid Constants
+# =============================================================================
+from .nucleic_acids import (
+    # Nucleotide mappings
+    NUCLEOTIDE_3TO1,
+
+    # Tokens
+    NUCLEOTIDE_TYPES,
+    NUM_NUCLEOTIDE_TYPES,
+    NUCLEOTIDE_TOKEN,
+
+    # Backbone atoms
+    DNA_BACKBONE_ATOMS,
+    RNA_BACKBONE_ATOMS,
+    NUCLEOTIDE_BACKBONE_SET,
+
+    # Base atoms
+    BASE_ATOMS,
+
+    # Standard atoms per nucleotide
+    STANDARD_NUCLEOTIDE_ATOMS,
+
+    # SASA
+    NUCLEOTIDE_MAX_SASA,
+
+    # Base pairing
+    WC_BASE_PAIRS,
+    BASE_PAIR_PATTERNS,
+
+    # Classification
+    PURINES,
+    PYRIMIDINES,
+    IS_PURINE,
+    IS_PYRIMIDINE,
+    DNA_RESIDUES,
+    RNA_RESIDUES,
+
+    # Properties
+    NUCLEOTIDE_PROPERTIES,
 )
 
 # =============================================================================
@@ -192,6 +276,9 @@ from .runtime import (
     SURFACE_DEFAULT_KNN_ATOMS,
     SURFACE_DEFAULT_POINTS_PER_ATOM,
     SURFACE_DEFAULT_PROBE_RADIUS,
+    SURFACE_MIN_POINTS_PER_ATOM,
+    SURFACE_MAX_POINTS_RATIO,
+    SURFACE_BURIAL_KNN,
     VOXEL_DEFAULT_RESOLUTION,
     VOXEL_DEFAULT_BOX_SIZE,
     VOXEL_DEFAULT_PADDING,
@@ -255,7 +342,14 @@ __all__ = [
     'FORMAL_CHARGE_MAP',
     'HBOND_DONOR_ATOMS',
     'HBOND_ACCEPTOR_ATOMS',
+    'HBOND_DONOR_ATOMS_BY_RESIDUE',
+    'HBOND_ACCEPTOR_ATOMS_BY_RESIDUE',
     'BACKBONE_ATOM_SET',
+    'AROMATIC_RING_ATOMS',
+    'POS_IONIZABLE_ATOMS',
+    'HIS_POS_IONIZABLE_ATOMS',
+    'HIS_PARTIAL_CHARGE',
+    'NEG_IONIZABLE_ATOMS',
     'RESIDUE_PROPERTIES',
     'NUM_RESIDUE_PROPERTIES',
 
@@ -282,6 +376,21 @@ __all__ = [
     'DEFAULT_DISTANCE_CUTOFF',
     'POCKET_EXTRACTION_CUTOFF',
     'CLOSE_CONTACT_CUTOFF',
+    'PI_STACK_PARALLEL_MAX',
+    'PI_STACK_PARALLEL_MIN_ANTI',
+    'PI_STACK_PERP_MIN',
+    'PI_STACK_PERP_MAX',
+    'CATION_PI_MAX_OFFSET_ANGLE',
+    'INTERACTION_STRENGTH_SIGMA',
+    'IDEAL_DISTANCE_FALLBACK',
+    'CROSS_CONTACT_DENSITY_CUTOFF',
+    'CROSS_CONTACT_DENSITY_NORM',
+    'FORMAL_CHARGE_OFFSET',
+    'FORMAL_CHARGE_SCALE',
+    'DEGREE_SCALE',
+    'NUM_HS_SCALE',
+    'SQUARE_PLANAR_LINEAR_ANGLE',
+    'TRIGONAL_BIPYRAMIDAL_LINEAR_ANGLE',
 
     # Physical properties
     'VDW_RADIUS',
@@ -298,8 +407,32 @@ __all__ = [
     'TYPICAL_BOND_LENGTHS',
     'NORM_CONSTANTS',
     'ATOM_TYPE_MAP',
+    'ATOM_TYPE_LABELS',
+    'NUM_ATOM_TYPES',
+    'ATOMIC_MOLAR_REFRACTIVITY',
     'KD_SCALE',
     'CHARGED_RESIDUES',
+
+    # Nucleic acids
+    'NUCLEOTIDE_3TO1',
+    'NUCLEOTIDE_TYPES',
+    'NUM_NUCLEOTIDE_TYPES',
+    'NUCLEOTIDE_TOKEN',
+    'DNA_BACKBONE_ATOMS',
+    'RNA_BACKBONE_ATOMS',
+    'NUCLEOTIDE_BACKBONE_SET',
+    'BASE_ATOMS',
+    'STANDARD_NUCLEOTIDE_ATOMS',
+    'NUCLEOTIDE_MAX_SASA',
+    'WC_BASE_PAIRS',
+    'BASE_PAIR_PATTERNS',
+    'PURINES',
+    'PYRIMIDINES',
+    'IS_PURINE',
+    'IS_PYRIMIDINE',
+    'DNA_RESIDUES',
+    'RNA_RESIDUES',
+    'NUCLEOTIDE_PROPERTIES',
 
     # Runtime defaults
     'IO_SUPPORTED_LIGAND_EXTENSIONS',
@@ -310,6 +443,9 @@ __all__ = [
     'SURFACE_DEFAULT_KNN_ATOMS',
     'SURFACE_DEFAULT_POINTS_PER_ATOM',
     'SURFACE_DEFAULT_PROBE_RADIUS',
+    'SURFACE_MIN_POINTS_PER_ATOM',
+    'SURFACE_MAX_POINTS_RATIO',
+    'SURFACE_BURIAL_KNN',
     'VOXEL_DEFAULT_RESOLUTION',
     'VOXEL_DEFAULT_BOX_SIZE',
     'VOXEL_DEFAULT_PADDING',

@@ -438,6 +438,55 @@ HBOND_ACCEPTOR_ATOMS = {
 BACKBONE_ATOM_SET = frozenset({'N', 'CA', 'C', 'O'})
 
 # =============================================================================
+# Aromatic Ring Atoms (per residue)
+# =============================================================================
+# Atoms that are part of aromatic ring systems in each aromatic residue.
+AROMATIC_RING_ATOMS = {
+    'PHE': frozenset({'CG', 'CD1', 'CD2', 'CE1', 'CE2', 'CZ'}),
+    'TYR': frozenset({'CG', 'CD1', 'CD2', 'CE1', 'CE2', 'CZ'}),
+    'TRP': frozenset({'CG', 'CD1', 'CD2', 'NE1', 'CE2', 'CE3', 'CZ2', 'CZ3', 'CH2'}),
+    'HIS': frozenset({'CG', 'ND1', 'CD2', 'CE1', 'NE2'}),
+}
+
+# =============================================================================
+# Ionizable Atoms at Physiological pH
+# =============================================================================
+# Atoms carrying positive charge at pH ~7.4
+POS_IONIZABLE_ATOMS = {
+    'LYS': frozenset({'NZ'}),
+    'ARG': frozenset({'NH1', 'NH2', 'NE', 'CZ'}),
+}
+# HIS is partially protonated at pH 7.4 (pKa ~6.0)
+HIS_POS_IONIZABLE_ATOMS = frozenset({'ND1', 'NE2'})
+HIS_PARTIAL_CHARGE = 0.5
+
+# Atoms carrying negative charge at pH ~7.4
+NEG_IONIZABLE_ATOMS = {
+    'ASP': frozenset({'OD1', 'OD2'}),
+    'GLU': frozenset({'OE1', 'OE2'}),
+}
+
+# =============================================================================
+# H-Bond Donor/Acceptor Atoms (by residue, dict format)
+# =============================================================================
+# Same data as HBOND_DONOR_ATOMS/HBOND_ACCEPTOR_ATOMS above, grouped by residue
+# for efficient per-atom lookup.
+HBOND_DONOR_ATOMS_BY_RESIDUE = {
+    'SER': frozenset({'OG'}), 'THR': frozenset({'OG1'}), 'TYR': frozenset({'OH'}),
+    'ASN': frozenset({'ND2'}), 'GLN': frozenset({'NE2'}),
+    'HIS': frozenset({'ND1', 'NE2'}), 'LYS': frozenset({'NZ'}),
+    'ARG': frozenset({'NH1', 'NH2', 'NE'}), 'TRP': frozenset({'NE1'}),
+    'CYS': frozenset({'SG'}),
+}
+
+HBOND_ACCEPTOR_ATOMS_BY_RESIDUE = {
+    'SER': frozenset({'OG'}), 'THR': frozenset({'OG1'}), 'TYR': frozenset({'OH'}),
+    'ASN': frozenset({'OD1'}), 'GLN': frozenset({'OE1'}),
+    'ASP': frozenset({'OD1', 'OD2'}), 'GLU': frozenset({'OE1', 'OE2'}),
+    'HIS': frozenset({'ND1', 'NE2'}), 'MET': frozenset({'SD'}),
+}
+
+# =============================================================================
 # Residue Physicochemical Properties
 # =============================================================================
 # Per-residue properties for residue-level graph features.
