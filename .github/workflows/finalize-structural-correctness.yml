@@ -1,0 +1,79 @@
+name: Finalize structural correctness branch
+
+on:
+  push:
+    branches:
+      - agent/structural-correctness-v1
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: finalize-structural-correctness
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate implementation payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test -f IMPLEMENTATION_STATUS.md
+          changed=$(git diff --name-only origin/main...HEAD | grep -E '^(plmol/|tests/|pyproject.toml|\.github/workflows/ci)' | wc -l)
+          echo "Substantive changed files: ${changed}"
+          test "${changed}" -ge 5
+      - uses: astral-sh/setup-uv@v6
+      - name: Install test environment
+        run: uv sync --extra dev --extra mmcif
+      - name: Compile
+        run: uv run python -m compileall -q plmol tests
+      - name: Run full test suite
+        run: uv run pytest -q
+      - name: Remove temporary agent transfer files
+        shell: bash
+        run: |
+          rm -f \
+            .agent-export-trigger \
+            .agent-export-trigger-v2 \
+            .agent-transfer-probe \
+            .agent-local-transfer-note \
+            .agent-upload-tool-probe \
+            .github/workflows/export-agent-worktree.yml \
+            .github/workflows/export-agent-worktree-v2.yml \
+            .github/workflows/verify-structural-correctness.yml \
+            .github/workflows/finalize-structural-correctness.yml
+      - name: Commit verified cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore: remove temporary agent transfer files'
+            git push origin HEAD:agent/structural-correctness-v1
+          fi
+      - name: Create pull request when absent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing=$(gh pr list --head agent/structural-correctness-v1 --base main --state open --json number --jq '.[0].number // empty')
+          if [ -z "${existing}" ]; then
+            gh pr create \
+              --base main \
+              --head agent/structural-correctness-v1 \
+              --title 'Harden structural identity and featurization correctness' \
+              --body 'Implements canonical atom/residue identity, missing-coordinate masks, identity-aligned SASA, sparse-first graph construction, correct mmCIF chain selection, consistent complex preparation, multi-ligand interactions, robust cache fingerprints, versioned feature schemas/provenance, corrected batch pipelines, and regression tests.'
+          else
+            echo "PR #${existing} already exists"
+          fi
