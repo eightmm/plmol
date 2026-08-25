@@ -1,0 +1,38 @@
+name: Verify structural correctness implementation
+
+on:
+  push:
+    branches:
+      - agent/structural-correctness-v1
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Validate implementation presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f IMPLEMENTATION_STATUS.md
+          changed=$(git diff --name-only origin/main...HEAD | grep -E '^(plmol/|tests/|pyproject.toml|\.github/workflows/ci)' | wc -l)
+          test "$changed" -ge 5
+      - name: Install
+        run: uv sync --extra dev --extra mmcif
+      - name: Test
+        run: uv run pytest -q
+      - name: Open pull request if needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh pr list --head agent/structural-correctness-v1 --base main --json number --jq '.[0].number' | grep -q '[0-9]' || \
+          gh pr create --base main --head agent/structural-correctness-v1 \
+            --title 'Harden structural identity and featurization correctness' \
+            --body 'Canonical structural identity, mask-aware geometry, aligned SASA, sparse graphs, consistent complex preparation, robust caching, versioned schemas, corrected batch pipelines, and regression tests.'
