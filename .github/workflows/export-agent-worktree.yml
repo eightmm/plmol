@@ -16,11 +16,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Package repository
         run: |
-          tar --exclude=.git --exclude=plmol-worktree.tar.gz -czf plmol-worktree.tar.gz .
+          tar --exclude=.git -czf /tmp/plmol-worktree.tar.gz .
       - name: Upload repository snapshot
         uses: actions/upload-artifact@v4
         with:
           name: plmol-worktree
-          path: plmol-worktree.tar.gz
+          path: /tmp/plmol-worktree.tar.gz
           if-no-files-found: error
           retention-days: 1
