@@ -1,0 +1,26 @@
+name: Export agent worktree
+
+on:
+  push:
+    branches:
+      - agent/structural-correctness-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package repository
+        run: |
+          tar --exclude=.git --exclude=plmol-worktree.tar.gz -czf plmol-worktree.tar.gz .
+      - name: Upload repository snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: plmol-worktree
+          path: plmol-worktree.tar.gz
+          if-no-files-found: error
+          retention-days: 1
