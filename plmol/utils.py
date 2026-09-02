@@ -67,6 +67,20 @@ _SASA_RESULT_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()
 _SASA_RESULT_CACHE_MAX = 4
 
 
+def sasa_structure_result(pdb_file: str):
+    """Return a ``(structure, result)`` SASA pair from the configured backend.
+
+    freesasa when it is installed and not overridden, otherwise plmol's own
+    Shrake-Rupley. Both objects expose the same accessors the featurizers use.
+    See :mod:`plmol.sasa` for how the two differ.
+    """
+    from .sasa import native_structure_result, resolve_sasa_backend
+
+    if resolve_sasa_backend() == "native":
+        return native_structure_result(pdb_file)
+    return freesasa_structure_result(pdb_file)
+
+
 def freesasa_structure_result(pdb_file: str):
     """Return a cached ``(structure, result)`` FreeSASA pair for a PDB path.
 
@@ -98,6 +112,40 @@ def freesasa_structure_result(pdb_file: str):
     if len(_SASA_RESULT_CACHE) > _SASA_RESULT_CACHE_MAX:
         _SASA_RESULT_CACHE.popitem(last=False)
     return structure, result
+
+
+def _burial_index_native(
+    atom_positions: np.ndarray,
+    res_names: list,
+    atom_names: list,
+    n_atoms: int,
+) -> np.ndarray:
+    """Burial index from plmol's own Shrake-Rupley, no freesasa involved.
+
+    The element comes from the leading letters of the PDB atom name, the same
+    rule the parser uses.
+    """
+    from .constants import RESIDUE_MAX_SASA
+    from .sasa import element_radius, shrake_rupley
+
+    radii = np.array(
+        [element_radius(_element_from_atom_name(atom_names[i])) for i in range(n_atoms)],
+        dtype=np.float32,
+    )
+    areas = shrake_rupley(np.asarray(atom_positions, dtype=np.float32), radii)
+    max_sasa = np.array(
+        [RESIDUE_MAX_SASA.get(res_names[i], 200.0) or 200.0 for i in range(n_atoms)],
+        dtype=np.float64,
+    )
+    return np.clip(1.0 - areas / max_sasa, 0.0, 1.0).astype(np.float32)
+
+
+def _element_from_atom_name(atom_name: str) -> str:
+    """First alphabetic character of a PDB atom name, its element symbol."""
+    for character in (atom_name or "").strip():
+        if character.isalpha():
+            return character.upper()
+    return ""
 
 
 def _burial_index_from_file(
@@ -163,8 +211,13 @@ def compute_burial_index(
     """
     from .constants import RESIDUE_MAX_SASA
 
-    if _freesasa is None or atom_positions is None or n_atoms == 0:
+    if atom_positions is None or n_atoms == 0:
         return np.full(n_atoms, 0.5, dtype=np.float32)
+
+    from .sasa import resolve_sasa_backend
+
+    if resolve_sasa_backend() == "native":
+        return _burial_index_native(atom_positions, res_names, atom_names, n_atoms)
 
     if pdb_file is not None:
         reused = _burial_index_from_file(pdb_file, res_names, atom_names, n_atoms)

@@ -26,6 +26,13 @@ from .ligand.core import Ligand
 from .ligand.descriptors import MoleculeFeaturizer
 from .ligand.graph import MoleculeGraphFeaturizer
 from .base import BaseMolecule, TempFileOwner
+from .sasa import (
+    SASA_BACKENDS,
+    get_sasa_backend,
+    resolve_sasa_backend,
+    set_sasa_backend,
+    shrake_rupley,
+)
 from .graph_view import FEATURE_DIMS, as_graph, collate, feature_dims
 from .ligand.fragment_graph import build_fragment_graph
 from .ligand.graph_edge_features import (
@@ -72,6 +79,8 @@ __all__ = [
     "BOND_VIEW_CHANNELS", "BOND_VIEW_DROPPED_CHANNELS", "bond_view_channels",
     "bond_view_channels",
     "as_graph", "collate", "feature_dims", "FEATURE_DIMS",
+    "SASA_BACKENDS", "set_sasa_backend", "get_sasa_backend",
+    "resolve_sasa_backend", "shrake_rupley",
     "NucleicAcid", "NucleicFeaturizer",
     "StructureParser", "MMCIFParser",
     "PLInteractionFeaturizer", "Complex", "MolecularComplex",

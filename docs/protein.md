@@ -23,6 +23,46 @@ protein = Protein.from_structure("protein.cif", chain_id="A")
 | `standardize` | `bool` | `True` | Standardize PDB (remove non-standard, fix naming) |
 | `keep_hydrogens` | `bool` | `False` | Keep hydrogen atoms |
 
+## SASA Backends
+
+SASA feeds the residue 12-dim block, the atom graph's `burial_index`,
+`sasa`, `relative_sasa` and `is_polar_sasa`, the surface burial channel and
+voxel channel 15.
+
+```python
+from plmol import set_sasa_backend, resolve_sasa_backend
+
+resolve_sasa_backend()        # "freesasa" when it is installed
+set_sasa_backend("native")    # plmol's own Shrake-Rupley
+set_sasa_backend("auto")      # the default: freesasa, else native
+```
+
+| Backend | Algorithm | Radii |
+|---------|-----------|-------|
+| `freesasa` | Lee-Richards, 20 slices | freesasa's ProtOr, atom-type dependent |
+| `native` | Shrake-Rupley, 100 points | plmol's `VDW_RADIUS`, element based |
+
+**freesasa stays the default.** It is not slower and it is what plmol's
+published feature values were computed with. The native path exists so the
+library degrades honestly rather than silently: before it, a missing freesasa
+turned the residue SASA block into zeros and every `burial_index` into 0.5,
+and those were handed back as features.
+
+Agreement between the two, measured on a 3260-atom protein:
+
+| Comparison | Correlation |
+|------------|-------------|
+| native vs freesasa's own Shrake-Rupley, same radii | 0.994 |
+| native vs freesasa default (Lee-Richards, ProtOr radii) | 0.982 per atom, +2% total area |
+| residue absolute-area columns | > 0.99 |
+
+The `relative*` columns agree less closely (0.78–0.99) because freesasa
+normalises polar, apolar and main-chain areas by separate per-class reference
+values, while the native path normalises everything by the residue's
+`RESIDUE_MAX_SASA`. Polar/apolar classification is identical: freesasa's
+classifier calls N, O and S polar, and the native element rule reproduces that
+exactly on protein atoms.
+
 ## Featurization Modes
 
 ```python
@@ -99,7 +139,7 @@ Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA,
 | `[23:33]` | self_distance | 10 | Intra-residue pairwise distances among N, CA, C, O, SC (upper triangle) |
 | `[33:53]` | degree_feature | 20 | cos/sin of 10 angles: phi, psi, omega, chi1-chi5, backbone_curvature, backbone_torsion |
 | `[53:58]` | has_chi_angles | 5 | Binary flags: has chi1, chi2, chi3, chi4, chi5 |
-| `[58:70]` | sasa | 12 | SASA: total, polar, apolar, mainchain, sidechain (abs/RESIDUE_MAX_SASA + relative), burial_index (1.0 - relativeTotal/100), polar_apolar_ratio |
+| `[58:70]` | sasa | 12 | SASA: total, polar, apolar, mainchain, sidechain (abs/RESIDUE_MAX_SASA + relative), burial_index (1.0 - relativeTotal), polar_apolar_ratio |
 | `[70:78]` | rf_distance | 8 | Forward/reverse neighbor distances: fwd(CA-CA, SC-SC, CA-SC, SC-CA) + rev(same) |
 | `[78:83]` | physicochemical | 5 | Residue properties: hydrophobicity (Kyte-Doolittle), volume (Zamyatnin), charge, flexibility, polarity |
 

@@ -40,7 +40,7 @@ from .utils import (
     normalize_residue_name,
 )
 
-from ..utils import dense_to_edges, freesasa_structure_result, knn_mask_torch
+from ..utils import dense_to_edges, knn_mask_torch, sasa_structure_result
 
 # Import amino acid constants from centralized module
 from ..constants import (
@@ -315,21 +315,18 @@ class ResidueFeaturizer:
             SASA features tensor of shape [num_residues, 12] with:
                 - total/max_sasa, polar/max_sasa, apolar/max_sasa, mainChain/max_sasa, sideChain/max_sasa
                 - relativeTotal, relativePolar, relativeApolar, relativeMainChain, relativeSideChain
-                - burial_index (1.0 - relativeTotal/100)
+                - burial_index (1.0 - relativeTotal)
                 - polar_apolar_ratio (polar / (polar + apolar + 1e-8))
         """
         num_residues = len(self.get_residues())
         sasa_dim = 12  # Number of SASA features per residue
 
-        if not FREESASA_AVAILABLE:
-            logger.warning("FreeSASA not available. Returning zeros for SASA features.")
-            return torch.zeros(num_residues, sasa_dim)
 
         # Build reverse mapping: res_type_int -> 3-letter code for RESIDUE_MAX_SASA lookup
         int_to_3letter = {v: k for k, v in AMINO_ACID_3_TO_INT.items()}
 
         try:
-            _, result = freesasa_structure_result(self.pdb_file)
+            _, result = sasa_structure_result(self.pdb_file)
             residue_areas = result.residueAreas()
 
             sasas = []
@@ -345,7 +342,9 @@ class ResidueFeaturizer:
                         max_sasa = 200.0
                     residue_idx += 1
 
-                    burial_index = 1.0 - (values.relativeTotal / 100.0)
+                    # relativeTotal is a fraction of the residue's reference
+                    # area, not a percentage.
+                    burial_index = 1.0 - values.relativeTotal
                     polar_apolar_ratio = values.polar / (values.polar + values.apolar + 1e-8)
 
                     sasas.append([
