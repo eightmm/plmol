@@ -194,6 +194,37 @@ def compute_burial_index(
         return np.full(n_atoms, 0.5, dtype=np.float32)
 
 
+def dihedral_angles(
+    p0: np.ndarray,
+    p1: np.ndarray,
+    p2: np.ndarray,
+    p3: np.ndarray,
+) -> np.ndarray:
+    """Dihedral angles in radians for batches of four points, each ``(M, 3)``.
+
+    Degenerate quadruples, where the central bond has near-zero length, yield
+    0.0. Single points may be passed as ``(1, 3)``.
+
+    ``protein.geometry.calculate_dihedral`` is deliberately separate: it walks a
+    ``(N, M, 3)`` chain of residue coordinates with padding rather than taking
+    four explicit points.
+    """
+    b0 = p0 - p1
+    b1 = p2 - p1
+    b2 = p3 - p2
+
+    b1_norm = np.linalg.norm(b1, axis=-1)
+    valid = b1_norm >= 1e-8
+    b1_unit = b1 / np.where(valid, b1_norm, 1.0)[:, None]
+
+    v = b0 - np.sum(b0 * b1_unit, axis=-1, keepdims=True) * b1_unit
+    w = b2 - np.sum(b2 * b1_unit, axis=-1, keepdims=True) * b1_unit
+
+    x = np.sum(v * w, axis=-1)
+    y = np.sum(np.cross(b1_unit, v) * w, axis=-1)
+    return np.where(valid, np.arctan2(y, x), 0.0)
+
+
 def knn_mask_torch(dist_matrix: torch.Tensor, k: int) -> torch.Tensor:
     """Square distance matrix -> kNN boolean mask."""
     dm = dist_matrix.clone()

@@ -161,3 +161,45 @@ class TestBurialIndexFreeSasaReuse:
             positions, res_names, atom_names, n, pdb_file=str(tmp_path / "missing.pdb")
         )
         assert np.allclose(fallback, built)
+
+
+class TestDihedralAngles:
+    """One batched 4-point dihedral, shared by the protein and nucleic paths."""
+
+    def test_matches_a_known_angle(self):
+        from plmol.utils import dihedral_angles
+
+        # Planar trans arrangement: 180 degrees.
+        p0 = np.array([[1.0, 1.0, 0.0]])
+        p1 = np.array([[0.0, 1.0, 0.0]])
+        p2 = np.array([[0.0, 0.0, 0.0]])
+        p3 = np.array([[-1.0, 0.0, 0.0]])
+        assert np.isclose(abs(dihedral_angles(p0, p1, p2, p3)[0]), np.pi)
+
+    def test_degenerate_central_bond_is_zero(self):
+        from plmol.utils import dihedral_angles
+
+        p = np.zeros((1, 3))
+        assert dihedral_angles(np.ones((1, 3)), p, p, np.ones((1, 3)))[0] == 0.0
+
+    def test_batched_matches_one_at_a_time(self):
+        from plmol.utils import dihedral_angles
+
+        rng = np.random.default_rng(0)
+        pts = rng.normal(size=(4, 32, 3))
+        batched = dihedral_angles(*pts)
+        one_by_one = np.array(
+            [dihedral_angles(*[p[i][None, :] for p in pts])[0] for i in range(32)]
+        )
+        assert np.allclose(batched, one_by_one)
+
+    def test_nucleic_and_protein_helpers_agree(self):
+        from plmol.nucleic_acid.featurizer import _dihedral
+        from plmol.protein.atom_featurizer import AtomFeaturizer
+
+        rng = np.random.default_rng(1)
+        for _ in range(20):
+            p = rng.normal(size=(4, 3))
+            scalar = _dihedral(*p)
+            batched = float(AtomFeaturizer._dihedral_angles(*[p[i][None, :] for i in range(4)])[0])
+            assert np.isclose(scalar, batched, atol=1e-12)

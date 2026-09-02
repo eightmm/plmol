@@ -36,7 +36,7 @@ from ..constants import (
     HBOND_ACCEPTOR_ATOMS,
     BACKBONE_ATOM_SET,
 )
-from ..utils import freesasa_structure_result
+from ..utils import dihedral_angles, freesasa_structure_result
 
 
 class AtomFeaturizer:
@@ -483,24 +483,8 @@ class AtomFeaturizer:
         p2: np.ndarray,
         p3: np.ndarray,
     ) -> np.ndarray:
-        """Dihedral angles in radians for batches of 4 points, each (M, 3).
-
-        Degenerate quadruples (near-zero central bond) yield 0.0.
-        """
-        b0 = p0 - p1
-        b1 = p2 - p1
-        b2 = p3 - p2
-
-        b1_norm = np.linalg.norm(b1, axis=-1)
-        valid = b1_norm >= 1e-8
-        b1_unit = b1 / np.where(valid, b1_norm, 1.0)[:, None]
-
-        v = b0 - np.sum(b0 * b1_unit, axis=-1, keepdims=True) * b1_unit
-        w = b2 - np.sum(b2 * b1_unit, axis=-1, keepdims=True) * b1_unit
-
-        x = np.sum(v * w, axis=-1)
-        y = np.sum(np.cross(b1_unit, v) * w, axis=-1)
-        return np.where(valid, np.arctan2(y, x), 0.0)
+        """Dihedral angles in radians for batches of 4 points, each (M, 3)."""
+        return dihedral_angles(p0, p1, p2, p3)
 
 
 # Convenience function for direct use

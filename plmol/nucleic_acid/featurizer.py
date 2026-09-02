@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 
 from ..protein.utils import PDBParser, ParsedAtom
+from ..utils import dihedral_angles
 from ..constants import (
     NUCLEOTIDE_TOKEN,
     NUCLEOTIDE_TYPES,
@@ -30,20 +31,8 @@ def _vec(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 def _dihedral(p0: np.ndarray, p1: np.ndarray,
               p2: np.ndarray, p3: np.ndarray) -> float:
     """Dihedral angle (radians) defined by four points."""
-    b1 = p1 - p0
-    b2 = p2 - p1
-    b3 = p3 - p2
-    n1 = np.cross(b1, b2)
-    n2 = np.cross(b2, b3)
-    n1_norm = np.linalg.norm(n1)
-    n2_norm = np.linalg.norm(n2)
-    if n1_norm < 1e-8 or n2_norm < 1e-8:
-        return 0.0
-    n1 /= n1_norm
-    n2 /= n2_norm
-    cos_a = np.clip(np.dot(n1, n2), -1.0, 1.0)
-    sign = np.sign(np.dot(np.cross(n1, n2), b2))
-    return float(sign * np.arccos(cos_a))
+    stacked = [np.asarray(p, dtype=np.float64).reshape(1, 3) for p in (p0, p1, p2, p3)]
+    return float(dihedral_angles(*stacked)[0])
 
 
 def _angle(p0: np.ndarray, p1: np.ndarray, p2: np.ndarray) -> float:
