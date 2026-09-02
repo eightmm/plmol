@@ -22,6 +22,7 @@ from ..errors import InputError, DependencyError
 from ..specs import LIGAND_SPEC, normalize_modes
 from .descriptors import MoleculeFeaturizer
 from .fragment import fragment_molecule, fragment_on_rotatable_bonds
+from .line_graph import build_bond_graph
 from ..rdkit_utils import ensure_3d_conformer, has_3d, prepare_mol
 from ..surface import build_ligand_surface
 from ..voxel import build_ligand_voxel
@@ -107,7 +108,8 @@ class LigandFeaturizer:
 
         Args:
             mode: "all" or a single mode or list/tuple of modes.
-                Supported: graph, surface, voxel, fingerprint, smiles, sequence
+                Supported: graph, bond_graph, surface, voxel, fingerprint,
+                descriptor, smiles, sequence, fragment, morgan
             graph_kwargs: Optional kwargs for graph featurization.
             surface_kwargs: Optional kwargs for surface extraction.
             fingerprint_kwargs: Optional kwargs for fingerprint extraction.
@@ -146,6 +148,10 @@ class LigandFeaturizer:
         if "graph" in modes:
             graph_kwargs = graph_kwargs or {}
             results["graph"] = self.get_graph(standardized=True, **graph_kwargs)
+
+        if "bond_graph" in modes:
+            graph_kwargs = graph_kwargs or {}
+            results["bond_graph"] = self.get_bond_graph(**graph_kwargs)
 
         if "fingerprint" in modes:
             fingerprint_kwargs = dict(fingerprint_kwargs or {})
@@ -404,6 +410,25 @@ class LigandFeaturizer:
             sigma_scale=sigma_scale,
             cutoff_sigma=cutoff_sigma,
             charge_method=charge_method,
+        )
+
+    def get_bond_graph(
+        self,
+        mol_or_smiles: Optional[Union[str, "Chem.Mol"]] = None,
+        **graph_kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Return the bond-wise (line) graph derived from the atom-wise graph.
+
+        Bonds become nodes and shared atoms become edges, inverting the ``graph``
+        mode output. Accepts the same kwargs as :meth:`get_graph`.
+        """
+        featurizer = self._get_featurizer(mol_or_smiles)
+        graph = self.get_graph(mol_or_smiles=mol_or_smiles, standardized=True, **graph_kwargs)
+        return build_bond_graph(
+            featurizer.get_rdkit_mol(),
+            adjacency=graph["adjacency"],
+            node_features=graph["node_features"],
+            coords=graph.get("coords"),
         )
 
     def get_fragment(

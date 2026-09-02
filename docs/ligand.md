@@ -33,6 +33,7 @@ Mode strings are normalized via `normalize_modes()` from `plmol.specs`. Invalid 
 | Mode | Output Key | Description |
 |------|-----------|-------------|
 | `"graph"` | `"graph"` | Dense adjacency graph (node_features, adjacency, bond_mask, ...) |
+| `"bond_graph"` | `"bond_graph"` | Bond-wise (line) graph: bonds are nodes, shared atoms are edges |
 | `"fingerprint"` | `"fingerprint"` | Descriptors + ECFP/Morgan, MACCS, RDKit FP, AtomPair, ErG |
 | `"descriptor"` | `"descriptor"` | 62-dim normalized descriptor vector + descriptor names |
 | `"fragment"` | `"fragment"` | Fragmentation result (rotatable-bond by default; BRICS optional) |
@@ -151,6 +152,76 @@ Channels `[27:37]` are pair features (defined for all atom pairs).
 | `[34:37]` | Pair context | 3 | same_ring, same_fragment, same_aromatic_system |
 
 ---
+
+## Bond Graph Mode
+
+Inverts the atom-wise graph. Every bond becomes a node, and two bond nodes are
+connected when they share an atom — so the roles of atoms and bonds are swapped
+relative to `graph` mode.
+
+```python
+bond_graph = ligand.featurize(mode="bond_graph")["bond_graph"]
+```
+
+`bond_graph` accepts the same `graph_kwargs` as `graph`, because it is derived
+from that output. Bond node features are read directly from the atom graph's
+dense adjacency rather than recomputed, so the two views always agree.
+
+`"bond_graph"` is not part of `mode="all"`; request it explicitly.
+
+### Output
+
+`B` = number of bonds, `E` = number of bond-graph edges.
+
+| Key | Shape | Type | Description |
+|-----|-------|------|-------------|
+| `node_features` | `(B, 37)` | `float32` | Per-bond features, i.e. `adjacency[begin, end]` from the atom graph |
+| `edge_index` | `(2, E)` | `int64` | Bond pairs sharing an atom, both directions |
+| `edge_features` | `(E, 100)` | `float32` | Shared atom's 98-dim features + `[cos(theta), theta/pi]` |
+| `edge_shared_atom` | `(E,)` | `int64` | Atom index bridging each edge |
+| `bond_index` | `(B, 2)` | `int64` | Atom pair each bond node came from |
+| `atom_to_bonds` | `List[List[int]]` | — | Atom → incident bond indices (reverse of `bond_index`) |
+| `coords` | `(B, 3)` | `float32` | Bond midpoints (0 if no conformer) |
+| `adjacency` | `(B, B)` | `bool` | Bond-node connectivity |
+| `num_bonds` | `int` | — | B |
+| `num_bond_edges` | `int` | — | E |
+
+Bond nodes follow RDKit bond index order. Edge count satisfies
+`E = 2 * sum over atoms of C(degree, 2)`.
+
+### Angle Features
+
+`edge_features[:, 98:]` holds the angle the two bonds subtend at the shared atom:
+`cos(theta)` in `[-1, 1]` and `theta / pi` in `[0, 1]`. Both are zero when the
+molecule has no 3D conformer — SMILES input generates one by default, so pass
+`graph_kwargs={"generate_conformer": False}` to opt out.
+
+### Edge Cases
+
+| Input | Result |
+|-------|--------|
+| No bonds (`"C"`, `"[Na+]"`) | `B = 0`, `E = 0`, empty arrays with correct trailing dims |
+| One bond (`"CO"`) | `B = 1`, `E = 0` |
+| Disconnected fragments (`"CC.CC"`) | Bonds in different fragments share no atoms, so no edges between them |
+| Rings | Ring-closure bonds are ordinary bond nodes; cyclopropane gives K3 |
+
+### Low-Level Function
+
+```python
+from plmol import build_bond_graph, MoleculeFeaturizer
+
+graph = ligand.featurize(mode="graph")["graph"]
+bond_graph = build_bond_graph(
+    MoleculeFeaturizer(smiles).get_rdkit_mol(),
+    adjacency=graph["adjacency"],
+    node_features=graph["node_features"],
+    coords=graph["coords"],
+)
+```
+
+The molecule must be the one the atom graph was built from. `graph` mode
+canonicalizes atom order, so passing a differently ordered copy raises
+`InputError` on an atom-count mismatch and would otherwise map bonds wrongly.
 
 ## Fingerprint Mode
 
