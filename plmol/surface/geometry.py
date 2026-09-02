@@ -17,8 +17,9 @@ logger = logging.getLogger(__name__)
 
 # Points per curvature block. Blocks are both the memory bound and the unit
 # of parallelism, so this trades per-call overhead against how evenly the
-# work spreads: on a 14.8k-point cloud, 1024 measured fastest (44 ms against
-# 80 ms at 4096 and 46 ms at 256).
+# work spreads. Measured on 14.8k- and 59k-point clouds: 512 and 1024 tie,
+# 2048 is ~20% worse and 4096 ~70% worse. The 3x3 eigendecomposition does
+# not engage BLAS threading, so this does not depend on OPENBLAS_NUM_THREADS.
 _CURVATURE_CHUNK = 1024
 
 
