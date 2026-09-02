@@ -157,3 +157,23 @@ class TestHierarchicalProteinData:
     def test_constructing_it_does_not_require_esm(self):
         """HierarchicalFeaturizer needs the esm package; the container does not."""
         assert _minimal_hierarchical_data().has_esm is False
+
+
+class TestHierarchicalDataSerialization:
+    """to_dict replaces the flattening the removed batch CLI used to do."""
+
+    def test_round_trips_through_torch_save(self, tmp_path):
+        import torch as _torch
+
+        data = _minimal_hierarchical_data()
+        path = tmp_path / "features.pt"
+        _torch.save(data.to_dict(), path)
+        loaded = _torch.load(path, weights_only=False)
+        assert loaded["residue_features"].shape == data.residue_features.shape
+        assert loaded["residue_names"] == data.residue_names
+
+    def test_covers_every_field_and_keeps_unset_ones_none(self):
+        data = _minimal_hierarchical_data()
+        as_dict = data.to_dict()
+        assert set(as_dict) == set(data.__dataclass_fields__)
+        assert as_dict["esmc_embeddings"] is None

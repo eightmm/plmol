@@ -69,10 +69,6 @@ Homepage = "https://github.com/eightmm/plmol"
 Repository = "https://github.com/eightmm/plmol"
 Issues = "https://github.com/eightmm/plmol/issues"
 
-[project.scripts]
-plmol-batch-protein-featurize = "plmol.cli.batch_protein_featurize:main"
-plmol-batch-ligand-featurize = "plmol.cli.batch_ligand_featurize:main"
-
 [tool.setuptools]
 include-package-data = true
 
@@ -85,7 +81,6 @@ testpaths = ["tests"]
 [tool.coverage.run]
 source = ["plmol"]
 omit = [
-    "plmol/cli/*",
     "plmol/voxel/features.py",
     "plmol/protein/esm_featurizer.py",
     "plmol/protein/hierarchical_featurizer.py",

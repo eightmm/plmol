@@ -130,14 +130,28 @@ Features are computed lazily and cached. All APIs follow the same `.featurize(mo
 
 ## Batch Processing
 
-```bash
-plmol-batch-protein-featurize --input-dir pdbs/ --output-dir features/
-plmol-batch-ligand-featurize --input-dir sdfs/ --output-dir features/
+plmol is a library, not a command line tool. Preprocessing happens in your own
+script or dataloader, where the batching, parallelism and output format are
+yours to choose.
 
-# Common options
-plmol-batch-protein-featurize --input-dir pdbs/ --output-dir features/ --all-pdb --device auto --resume
-plmol-batch-ligand-featurize --input-dir ligands/ --output-dir features/ --extensions sdf,mol2 --graph-only
+```python
+from pathlib import Path
+import torch
+from plmol import Ligand, Protein, collate
+
+# Ligands: featurize and batch for a model
+graphs = [Ligand.from_sdf(p).featurize(mode="graph")["graph"] for p in Path("sdfs").glob("*.sdf")]
+batch = collate(graphs)
+
+# Proteins: featurize and cache to disk
+for pdb in Path("pdbs").glob("*.pdb"):
+    with Protein.from_pdb(pdb) as protein:
+        torch.save(protein.featurize(mode=["graph", "sequence"]), f"features/{pdb.stem}.pt")
 ```
+
+Use `with` so temporary files are released as you go, and reach for
+`concurrent.futures` if you want workers. Language model embeddings load their
+weights once and are reused across proteins, so a plain loop is fine.
 
 Underscore option names such as `--input_dir` are still accepted for compatibility.
 

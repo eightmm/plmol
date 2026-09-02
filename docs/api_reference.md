@@ -92,9 +92,8 @@ plmol/
 ├── voxel/
 │   ├── __init__.py                 # Voxel building (3D grid)
 │   └── features.py                 # Voxel feature computation (16-channel grid)
-├── io/
-│   └── loaders.py                  # load_protein_input, load_ligand_input
-└── cli/                            # Command-line interface
+└── io/
+    └── loaders.py                  # load_protein_input, load_ligand_input
 ```
 
 ## Core Classes

@@ -213,6 +213,14 @@ class HierarchicalProteinData:
             num_atoms_per_residue=move(self.num_atoms_per_residue),
         )
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Flat mapping of every field, ready for ``torch.save``.
+
+        Unset optional tensors stay None, so a container built without
+        language model embeddings round-trips unchanged.
+        """
+        return {field: getattr(self, field) for field in self.__dataclass_fields__}
+
     def get_feature_dims(self) -> Dict[str, int]:
         """Get feature dimensions."""
         dims = {
