@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 from collections import OrderedDict
+from typing import Optional
 from io import StringIO
 
 import numpy as np
@@ -99,11 +100,45 @@ def freesasa_structure_result(pdb_file: str):
     return structure, result
 
 
+def _burial_index_from_file(
+    pdb_file: str,
+    res_names: list,
+    atom_names: list,
+    n_atoms: int,
+) -> "Optional[np.ndarray]":
+    """Burial index from the cached file-based SASA, or None if it does not fit.
+
+    The caller's atom list is only interchangeable with the file's when both
+    describe the same atoms in the same order, so that is checked rather than
+    assumed.
+    """
+    from .constants import RESIDUE_MAX_SASA
+
+    try:
+        structure, result = freesasa_structure_result(pdb_file)
+        if result.nAtoms() != n_atoms:
+            return None
+        for i in range(n_atoms):
+            if (structure.atomName(i).strip() != atom_names[i]
+                    or structure.residueName(i).strip() != res_names[i]):
+                return None
+
+        burial = np.empty(n_atoms, dtype=np.float32)
+        for i in range(n_atoms):
+            max_sasa = RESIDUE_MAX_SASA.get(res_names[i], 200.0)
+            relative = result.atomArea(i) / max_sasa if max_sasa > 0 else 0.5
+            burial[i] = np.clip(1.0 - relative, 0.0, 1.0)
+        return burial
+    except Exception:
+        return None
+
+
 def compute_burial_index(
     atom_positions: np.ndarray,
     res_names: list,
     atom_names: list,
     n_atoms: int,
+    pdb_file: Optional[str] = None,
 ) -> np.ndarray:
     """Compute per-atom burial index from SASA.
 
@@ -118,6 +153,10 @@ def compute_burial_index(
         res_names: Residue name per atom.
         atom_names: Atom name per atom.
         n_atoms: Number of atoms.
+        pdb_file: Optional path the same atoms came from. When the cached
+            file-based FreeSASA result describes exactly these atoms, it is
+            reused instead of running a second ~65 ms calculation; any
+            mismatch falls back to building the structure atom by atom.
 
     Returns:
         Per-atom burial index array (N,) in [0, 1].
@@ -126,6 +165,11 @@ def compute_burial_index(
 
     if _freesasa is None or atom_positions is None or n_atoms == 0:
         return np.full(n_atoms, 0.5, dtype=np.float32)
+
+    if pdb_file is not None:
+        reused = _burial_index_from_file(pdb_file, res_names, atom_names, n_atoms)
+        if reused is not None:
+            return reused
 
     try:
         structure = _freesasa.Structure()

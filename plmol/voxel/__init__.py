@@ -72,6 +72,7 @@ def build_protein_voxel(
     padding: float = VOXEL_DEFAULT_PADDING,
     sigma_scale: float = VOXEL_DEFAULT_SIGMA_SCALE,
     cutoff_sigma: float = VOXEL_DEFAULT_CUTOFF_SIGMA,
+    pdb_file: Optional[str] = None,
 ) -> Optional[Dict[str, np.ndarray]]:
     """Create protein voxel representation.
 
@@ -99,6 +100,7 @@ def build_protein_voxel(
         padding=padding,
         sigma_scale=sigma_scale,
         cutoff_sigma=cutoff_sigma,
+        pdb_file=pdb_file,
     )
 
 

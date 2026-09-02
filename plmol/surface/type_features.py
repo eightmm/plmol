@@ -114,6 +114,7 @@ def compute_protein_type_features(
     knn_atoms: int = SURFACE_KNN_ATOMS,
     verbose: bool = False,
     _knn_data: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]] = None,
+    pdb_file: Optional[str] = None,
 ) -> dict:
     """Compute protein-specific type features mapped to surface vertices.
 
@@ -155,7 +156,9 @@ def compute_protein_type_features(
             atom_names.append("")
 
     # Burial index: 1.0 - relative_sasa (clamped to [0, 1])
-    burial = compute_burial_index(atom_positions, res_names, atom_names, n_prot_atoms)
+    burial = compute_burial_index(
+        atom_positions, res_names, atom_names, n_prot_atoms, pdb_file=pdb_file
+    )
 
     # Residue type one-hot (20 amino acids)
     aa_to_idx = {aa: i for i, aa in enumerate(AMINO_ACID_LETTERS)}

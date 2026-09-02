@@ -284,6 +284,7 @@ def compute_protein_channels(
     mol,
     atom_metadata: Optional[list[dict]] = None,
     positions: Optional[np.ndarray] = None,
+    pdb_file: Optional[str] = None,
 ) -> tuple[np.ndarray, list[str]]:
     """Extract per-atom feature matrix for protein voxelization.
 
@@ -374,7 +375,7 @@ def compute_protein_channels(
 
     # 15: Burial index (1.0 - relative_sasa, clamped to [0, 1])
     features[:, 15] = compute_burial_index(
-        positions, res_names_list, atom_names_list, n_atoms,
+        positions, res_names_list, atom_names_list, n_atoms, pdb_file=pdb_file,
     )
 
     # Normalize hydrophobicity to [-1, 1] using global Kyte-Doolittle range
@@ -461,6 +462,7 @@ def voxelize_protein(
     padding: float = VOXEL_DEFAULT_PADDING,
     sigma_scale: float = VOXEL_DEFAULT_SIGMA_SCALE,
     cutoff_sigma: float = VOXEL_DEFAULT_CUTOFF_SIGMA,
+    pdb_file: Optional[str] = None,
 ) -> dict:
     """Voxelize protein atoms into a multi-channel 3D grid.
 
@@ -494,7 +496,7 @@ def voxelize_protein(
     )
 
     features, channel_names = compute_protein_channels(
-        mol, atom_metadata=atom_metadata, positions=positions,
+        mol, atom_metadata=atom_metadata, positions=positions, pdb_file=pdb_file,
     )
 
     voxel = gaussian_smear_to_grid(

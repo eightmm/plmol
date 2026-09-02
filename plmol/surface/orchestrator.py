@@ -85,6 +85,7 @@ def compute_all_vertex_features(
     normals: Optional[np.ndarray] = None,
     extra_atom_features: Optional[dict[str, np.ndarray]] = None,
     charge_method: str = "gasteiger",
+    pdb_file: Optional[str] = None,
 ) -> dict:
     """Compute dMaSIF-inspired surface features at each vertex.
 
@@ -145,7 +146,8 @@ def compute_all_vertex_features(
         type_feat['burial_index'] = np.zeros(n_verts, dtype=np.float32)
     else:
         type_feat = compute_protein_type_features(
-            verts, atom_positions, mol, knn_atoms, verbose, _knn_data=knn_data,
+            verts, atom_positions, mol, knn_atoms, verbose,
+            _knn_data=knn_data, pdb_file=pdb_file,
         )
         type_feat['atom_type'] = np.zeros((n_verts, 6), dtype=np.float32)
         type_feat['hybridization'] = np.zeros(n_verts, dtype=np.float32)
@@ -284,6 +286,7 @@ def compute_protein_surface_features(
     verbose: bool = False,
     normals: Optional[np.ndarray] = None,
     extra_atom_features: Optional[dict[str, np.ndarray]] = None,
+    pdb_file: Optional[str] = None,
 ) -> dict:
     """Compute protein-specific surface features (residue/patch scale).
 
@@ -303,6 +306,7 @@ def compute_protein_surface_features(
         verbose=verbose,
         normals=normals,
         extra_atom_features=extra_atom_features,
+        pdb_file=pdb_file,
     )
 
     feature_keys = [

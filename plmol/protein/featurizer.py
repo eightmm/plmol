@@ -453,8 +453,9 @@ class ProteinFeaturizer:
                 include_features=include_features,
                 n_points_per_atom=n_points_per_atom,
                 probe_radius=probe_radius,
+                pdb_file=pdb_to_use,
             )
-        except Exception as exc:  # pragma: no cover - optional dependency
+        except ImportError as exc:  # pragma: no cover - optional dependency
             raise DependencyError(
                 "Surface featurization requires scipy. "
                 "Install it to enable surface features."
@@ -540,6 +541,7 @@ class ProteinFeaturizer:
             padding=padding,
             sigma_scale=sigma_scale,
             cutoff_sigma=cutoff_sigma,
+            pdb_file=pdb_to_use,
         )
 
         self._cache[cache_key] = voxel

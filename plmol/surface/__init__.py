@@ -87,6 +87,7 @@ def build_protein_surface(
     n_points_per_atom: int = SURFACE_DEFAULT_POINTS_PER_ATOM,
     probe_radius: float = SURFACE_DEFAULT_PROBE_RADIUS,
     extra_atom_features: Optional[Dict[str, np.ndarray]] = None,
+    pdb_file: Optional[str] = None,
 ) -> Optional[Dict[str, np.ndarray]]:
     """Create protein surface point cloud and optional vertex features.
 
@@ -98,6 +99,8 @@ def build_protein_surface(
         n_points_per_atom: Points per atom (default: 100).
         probe_radius: Solvent probe radius (default: 1.4).
         extra_atom_features: User-provided per-atom features to map to vertices.
+        pdb_file: Optional path the atoms came from; lets the burial index reuse
+            an already computed FreeSASA result instead of recomputing it.
     """
     verts, normals = create_surface_points(
         coords,
@@ -121,6 +124,7 @@ def build_protein_surface(
                 verbose=verbose,
                 normals=normals,
                 extra_atom_features=extra_atom_features,
+                pdb_file=pdb_file,
             )
         )
     return surface
