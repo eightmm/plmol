@@ -1,5 +1,7 @@
 """Shared utility functions for plmol."""
 
+from __future__ import annotations
+
 import contextlib
 import logging
 import os
@@ -9,7 +11,6 @@ from typing import Optional
 from io import StringIO
 
 import numpy as np
-import torch
 
 logger = logging.getLogger(__name__)
 
@@ -278,8 +279,12 @@ def dihedral_angles(
     return np.where(valid, np.arctan2(y, x), 0.0)
 
 
-def dense_to_edges(adjacency: torch.Tensor):
+def dense_to_edges(adjacency: "torch.Tensor"):
     """Split a dense ``(N, N, C)`` adjacency into edge indices and edge values.
+
+    torch is imported inside, not at module scope: the SASA and burial helpers
+    next to it are pure numpy and are what the surface and voxel paths import,
+    so a module-level import would drag torch into the geometry stack.
 
     An edge exists where the ``C``-vector for that pair is not all zero, which
     is the same rule ``Tensor.to_sparse(sparse_dim=2)`` applies -- but that call
@@ -292,13 +297,17 @@ def dense_to_edges(adjacency: torch.Tensor):
     Returns:
         ``(src, dst, values)`` in row-major order.
     """
+    import torch
+
     mask = (adjacency != 0).any(dim=-1) if adjacency.dim() > 2 else adjacency != 0
     src, dst = torch.nonzero(mask, as_tuple=True)
     return src, dst, adjacency[src, dst]
 
 
-def knn_mask_torch(dist_matrix: torch.Tensor, k: int) -> torch.Tensor:
+def knn_mask_torch(dist_matrix: "torch.Tensor", k: int) -> "torch.Tensor":
     """Square distance matrix -> kNN boolean mask."""
+    import torch
+
     dm = dist_matrix.clone()
     dm.fill_diagonal_(float('inf'))
     k = min(k, dm.size(0) - 1)
