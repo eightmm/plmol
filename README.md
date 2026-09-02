@@ -88,12 +88,28 @@ result = cx.featurize(requests="all")
 
 | Component | Input | Modes | Key Outputs |
 |-----------|-------|-------|-------------|
-| **Protein** | PDB, mmCIF, sequence | `graph` (residue/atom), `backbone`, `surface`, `voxel`, `sequence` | Residue graph (12-dim SASA with burial_index), atom graph (187 tokens with burial_index/is_polar_sasa), SE(3)-invariant backbone, dMaSIF point cloud |
-| **Ligand** | SMILES, SDF, RDKit Mol | `graph`, `fingerprint`, `descriptor`, `fragment`, `surface`, `voxel`, `morgan`, `smiles` | Dense adjacency (N, N, 37), node features (N, 98), 62-dim descriptors, ECFP4/6, MACCS, ErG, rotatable-bond fragments, 16-channel voxel grids |
+| **Protein** | PDB, mmCIF, sequence | `graph` (residue/atom), `atom_graph`, `backbone`, `surface`, `voxel`, `sequence` | Residue graph (12-dim SASA with burial_index), atom graph (187 tokens with burial_index/is_polar_sasa), SE(3)-invariant backbone, dMaSIF point cloud |
+| **Ligand** | SMILES, SDF, RDKit Mol | `graph`, `bond_graph`, `fragment_graph`, `fingerprint`, `descriptor`, `fragment`, `surface`, `voxel`, `morgan`, `smiles` | Dense adjacency (N, N, 37), node features (N, 98), bond-wise and fragment-level graphs, 62-dim descriptors, ECFP4/6, MACCS, ErG, rotatable-bond fragments, 16-channel voxel grids |
 | **Nucleic Acid** | PDB, mmCIF, sequence | `sequence`, `graph`, `backbone`, `atom_graph` | Nucleotide graph, sugar-phosphate backbone coordinates, atom graph, auto DNA/RNA detection |
 | **Interaction** | Protein + Ligand | `graph` | Bipartite edges (E, 79), pharmacophore interactions, optional contact edges, metal coordination |
 
 All graph modes support `distance_cutoff` and `knn_cutoff` (union strategy) for flexible edge construction.
+
+## One Graph Shape for Models
+
+The graph views disagree on how they express edges — the ligand graph is a dense adjacency, the protein atom graph is token ids plus loose per-edge arrays, the rest use `edge_index`. `as_graph` maps any of them onto one shape, `collate` batches them the way PyTorch Geometric does, and `feature_dims` reports widths so models do not hardcode them.
+
+```python
+from plmol import Ligand, as_graph, collate, feature_dims
+
+batch = collate([Ligand.from_smiles(s).featurize(mode="graph")["graph"] for s in smiles])
+# batch: node_features, edge_index, edge_features, coords, batch, ptr
+
+dims = feature_dims("ligand", "graph")   # {"node_features": 98, "edge_features": 37}
+model = MyGNN(dims["node_features"], dims["edge_features"])
+```
+
+These are additive; `featurize` still returns exactly what it did.
 
 ## Architecture Overview
 
@@ -130,9 +146,10 @@ Underscore option names such as `--input_dir` are still accepted for compatibili
 Detailed API reference with feature dimensions, index ranges, and parameters:
 
 - [Protein API](docs/protein.md) — graph (residue/atom), backbone, surface, voxel, sequence, ESM embeddings
-- [Ligand API](docs/ligand.md) — graph, fingerprint, fragment, surface, voxel
+- [Ligand API](docs/ligand.md) — graph, bond graph, fragment graph, fingerprint, fragment, surface, voxel
 - [Nucleic Acid API](docs/nucleic_acid.md) — graph, sequence, backbone, atom graph
 - [Complex API](docs/complex.md) — interaction detection, contact edges, pocket extraction
+- [Graph View API](docs/graph_view.md) — one graph shape across views, batching, feature dimensions
 
 ## Citation
 

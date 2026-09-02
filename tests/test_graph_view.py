@@ -1,0 +1,247 @@
+"""Tests for the normalized graph view, batching, and dimension lookup."""
+
+import numpy as np
+import pytest
+import torch
+
+from plmol import (
+    FEATURE_DIMS,
+    InputError,
+    Ligand,
+    Protein,
+    as_graph,
+    collate,
+    feature_dims,
+)
+
+CANONICAL = {
+    "node_features",
+    "node_tokens",
+    "node_vector_features",
+    "edge_index",
+    "edge_features",
+    "edge_vector_features",
+    "coords",
+    "num_nodes",
+    "num_edges",
+    "source",
+}
+
+LIGAND_MODES = ["graph", "bond_graph", "fragment_graph"]
+PROTEIN_MODES = ["graph", "atom_graph"]
+
+
+@pytest.fixture(scope="module")
+def ligand_views(request):
+    sdf = request.path.parent.parent / "examples" / "10gs_ligand.sdf"
+    lig = Ligand.from_sdf(str(sdf))
+    return {mode: lig.featurize(mode=mode)[mode] for mode in LIGAND_MODES}
+
+
+@pytest.fixture(scope="module")
+def protein_views(request):
+    pdb = request.path.parent.parent / "examples" / "10gs_protein.pdb"
+    return {
+        mode: Protein.from_pdb(str(pdb)).featurize(mode=mode)[mode]
+        for mode in PROTEIN_MODES
+    }
+
+
+# -- Normalization ------------------------------------------------------------
+
+
+def test_every_view_yields_the_same_keys(ligand_views, protein_views):
+    for view in list(ligand_views.values()) + list(protein_views.values()):
+        assert set(as_graph(view)) == CANONICAL
+
+
+@pytest.mark.parametrize("mode", LIGAND_MODES)
+def test_ligand_views_normalize(ligand_views, mode):
+    g = as_graph(ligand_views[mode])
+    assert g["edge_index"].shape == (2, g["num_edges"])
+    assert g["edge_index"].dtype == torch.int64
+    assert g["node_features"].shape[0] == g["num_nodes"]
+    assert g["edge_features"].shape[0] == g["num_edges"]
+    assert g["coords"].shape == (g["num_nodes"], 3)
+    if g["num_edges"]:
+        assert int(g["edge_index"].max()) < g["num_nodes"]
+
+
+@pytest.mark.parametrize("mode", PROTEIN_MODES)
+def test_protein_views_normalize(protein_views, mode):
+    g = as_graph(protein_views[mode])
+    assert g["edge_index"].shape == (2, g["num_edges"])
+    assert g["node_features"].shape[0] == g["num_nodes"]
+    assert int(g["edge_index"].max()) < g["num_nodes"]
+
+
+def test_dense_ligand_graph_becomes_sparse_edges(ligand_views):
+    """The dense adjacency is unrolled with the same bond mask the library uses."""
+    view = ligand_views["graph"]
+    g = as_graph(view)
+    mask = torch.as_tensor(view["bond_mask"]).clone()
+    mask.fill_diagonal_(False)
+    assert g["num_edges"] == int(mask.sum())
+    adjacency = torch.as_tensor(view["adjacency"]).float()
+    src, dst = g["edge_index"]
+    assert torch.equal(g["edge_features"], adjacency[src, dst])
+
+
+def test_residue_graph_keeps_vectors_separate(protein_views):
+    """SE(3) models need vector features unflattened."""
+    g = as_graph(protein_views["graph"])
+    assert g["node_vector_features"] is not None
+    assert g["node_vector_features"].dim() == 3
+    assert g["node_vector_features"].shape[-1] == 3
+    assert g["node_vector_features"].shape[0] == g["num_nodes"]
+    assert g["edge_vector_features"].shape[0] == g["num_edges"]
+
+
+def test_atom_graph_exposes_tokens_and_continuous_features(protein_views):
+    g = as_graph(protein_views["atom_graph"])
+    assert g["node_tokens"] is not None
+    assert g["node_tokens"].dtype == torch.int64
+    assert g["node_tokens"].shape == (g["num_nodes"], 3)
+    assert g["node_features"].dtype == torch.float32
+
+
+def test_numpy_input_comes_back_as_tensors(ligand_views):
+    """Ligand.featurize returns numpy; the normalized view is always torch."""
+    assert isinstance(ligand_views["graph"]["node_features"], np.ndarray)
+    g = as_graph(ligand_views["graph"])
+    assert torch.is_tensor(g["node_features"])
+    assert torch.is_tensor(g["edge_features"])
+
+
+def test_unrecognized_input_is_rejected():
+    with pytest.raises(InputError):
+        as_graph({"something": 1})
+    with pytest.raises(InputError):
+        as_graph([1, 2, 3])
+
+
+def test_normalizing_twice_is_stable(ligand_views):
+    once = as_graph(ligand_views["bond_graph"])
+    twice = as_graph(once)
+    assert torch.equal(once["edge_index"], twice["edge_index"])
+    assert torch.equal(once["node_features"], twice["node_features"])
+
+
+# -- Batching -----------------------------------------------------------------
+
+
+@pytest.fixture
+def small_batch():
+    smiles = ["CCO", "CC(=O)Oc1ccccc1C(=O)O", "c1ccccc1"]
+    return [
+        as_graph(Ligand.from_smiles(s).featurize(mode="graph")["graph"]) for s in smiles
+    ]
+
+
+def test_collate_offsets_edges_per_graph(small_batch):
+    batch = collate(small_batch)
+    assert batch["num_nodes"] == sum(g["num_nodes"] for g in small_batch)
+    assert batch["num_edges"] == sum(g["num_edges"] for g in small_batch)
+    assert int(batch["edge_index"].max()) < batch["num_nodes"]
+    for i in range(batch["num_graphs"]):
+        lo, hi = int(batch["ptr"][i]), int(batch["ptr"][i + 1])
+        selected = batch["batch"][batch["edge_index"][0]] == i
+        edges = batch["edge_index"][:, selected]
+        assert int(edges.min()) >= lo and int(edges.max()) < hi
+
+
+def test_collate_batch_vector_and_ptr(small_batch):
+    batch = collate(small_batch)
+    assert batch["batch"].shape == (batch["num_nodes"],)
+    assert batch["ptr"].shape == (batch["num_graphs"] + 1,)
+    assert int(batch["ptr"][0]) == 0
+    assert int(batch["ptr"][-1]) == batch["num_nodes"]
+    for i, graph in enumerate(small_batch):
+        assert int((batch["batch"] == i).sum()) == graph["num_nodes"]
+
+
+def test_collate_accepts_raw_featurize_output():
+    smiles = ["CCO", "c1ccccc1"]
+    raw = [Ligand.from_smiles(s).featurize(mode="graph")["graph"] for s in smiles]
+    normalized = [as_graph(v) for v in raw]
+    assert torch.equal(collate(raw)["edge_index"], collate(normalized)["edge_index"])
+
+
+def test_collate_single_graph_is_a_passthrough(small_batch):
+    batch = collate(small_batch[:1])
+    assert batch["num_graphs"] == 1
+    assert torch.equal(batch["edge_index"], small_batch[0]["edge_index"])
+    assert bool((batch["batch"] == 0).all())
+
+
+def test_collate_rejects_incompatible_widths(ligand_views):
+    graph = as_graph(ligand_views["graph"])
+    bond = as_graph(ligand_views["bond_graph"])
+    with pytest.raises(InputError, match="width"):
+        collate([graph, bond])
+
+
+def test_collate_rejects_an_empty_sequence():
+    with pytest.raises(InputError):
+        collate([])
+
+
+def test_collate_preserves_vector_features(protein_views):
+    graph = as_graph(protein_views["graph"])
+    batch = collate([graph, graph])
+    assert batch["node_vector_features"].shape[0] == 2 * graph["num_nodes"]
+    assert batch["edge_vector_features"].shape[0] == 2 * graph["num_edges"]
+
+
+def test_collate_preserves_tokens(protein_views):
+    graph = as_graph(protein_views["atom_graph"])
+    batch = collate([graph, graph])
+    assert batch["node_tokens"].shape == (2 * graph["num_nodes"], 3)
+
+
+# -- Dimensions ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mode", LIGAND_MODES)
+def test_recorded_ligand_dims_match_reality(ligand_views, mode):
+    g = as_graph(ligand_views[mode])
+    dims = feature_dims("ligand", mode)
+    assert g["node_features"].shape[-1] == dims["node_features"]
+    assert g["edge_features"].shape[-1] == dims["edge_features"]
+
+
+@pytest.mark.parametrize("mode", PROTEIN_MODES)
+def test_recorded_protein_dims_match_reality(protein_views, mode):
+    g = as_graph(protein_views[mode])
+    dims = feature_dims("protein", mode)
+    assert g["node_features"].shape[-1] == dims["node_features"]
+    assert g["edge_features"].shape[-1] == dims["edge_features"]
+    if "node_vector_features" in dims:
+        assert g["node_vector_features"].shape[1] == dims["node_vector_features"]
+    if "edge_vector_features" in dims:
+        assert g["edge_vector_features"].shape[1] == dims["edge_vector_features"]
+    if "node_tokens" in dims:
+        assert g["node_tokens"].shape[-1] == dims["node_tokens"]
+
+
+def test_feature_dims_returns_a_copy():
+    dims = feature_dims("ligand", "graph")
+    dims["node_features"] = 0
+    assert feature_dims("ligand", "graph")["node_features"] == 98
+
+
+def test_feature_dims_rejects_unknown_keys():
+    with pytest.raises(InputError, match="No recorded dimensions"):
+        feature_dims("ligand", "nope")
+    with pytest.raises(InputError):
+        feature_dims("nope", "graph")
+
+
+def test_every_recorded_mode_is_reachable():
+    """FEATURE_DIMS must not name modes the specs do not allow."""
+    from plmol.specs import FEATURE_SPECS
+
+    for molecule, modes in FEATURE_DIMS.items():
+        allowed = set(FEATURE_SPECS[molecule].allowed_modes)
+        for mode in modes:
+            assert mode in allowed, f"{molecule}.{mode} is not an allowed mode"

@@ -56,6 +56,7 @@ plmol/
 │   ├── hierarchical_featurizer.py  # HierarchicalFeaturizer + HierarchicalProteinData
 │   ├── esm_featurizer.py           # ESM3/ESMC embedding extraction
 │   └── utils.py                    # Utilities (PDB parsing helpers)
+├── graph_view.py               # as_graph / collate / feature_dims
 ├── parsers/
 │   ├── __init__.py                 # StructureParser, MMCIFParser, PDBParser, ParsedAtom, ParsedResidue
 │   ├── base.py                     # StructureParser (ABC)
