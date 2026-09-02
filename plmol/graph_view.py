@@ -22,6 +22,7 @@ import numpy as np
 import torch
 
 from .errors import InputError
+from .ligand.line_graph import _bond_view_channels
 
 # Per-edge keys of the protein atom graph, in the order they are concatenated
 # into ``edge_features``. Documented so column indices are stable.
@@ -33,6 +34,11 @@ _ATOM_GRAPH_EDGE_KEYS = (
 )
 
 # Per-node continuous keys of the protein atom graph, likewise ordered.
+# ``relative_sasa`` is deliberately absent: burial_index is exactly
+# ``1 - relative_sasa`` (measured correlation -1.000000, maximum difference 0),
+# so emitting both would put a column and its complement in the same vector.
+# The raw ``atom_graph`` dict still exposes ``relative_sasa`` for callers that
+# want it under that name.
 _ATOM_GRAPH_NODE_KEYS = (
     "burial_index",
     "formal_charge",
@@ -40,7 +46,6 @@ _ATOM_GRAPH_NODE_KEYS = (
     "is_hbond_acceptor",
     "is_hbond_donor",
     "is_polar_sasa",
-    "relative_sasa",
     "sasa",
     "secondary_structure",
 )
@@ -147,12 +152,15 @@ def _from_dense_adjacency(view: Dict[str, Any], source: str) -> Dict[str, Any]:
 
     src, dst = torch.where(mask)
     node_features = _float(view["node_features"])
+    # Only the channels that describe a bonded pair; the rest of the pair block
+    # is degenerate once the dense adjacency is unrolled into bonds.
+    channels = _bond_view_channels(adjacency.shape[-1])
     return _pack(
         node_features=node_features,
         node_tokens=None,
         node_vector_features=None,
         edge_index=torch.stack([src, dst], dim=0),
-        edge_features=adjacency[src, dst].float(),
+        edge_features=adjacency[src, dst][:, channels].float(),
         edge_vector_features=None,
         coords=_coords(view, node_features.shape[0]),
         source=source,
@@ -304,9 +312,9 @@ def _check_widths(graphs: List[Dict[str, Any]]) -> None:
 #: hardcoding; a test asserts these against real featurization output.
 FEATURE_DIMS: Dict[str, Dict[str, Dict[str, int]]] = {
     "ligand": {
-        "graph": {"node_features": 98, "edge_features": 37},
-        "bond_graph": {"node_features": 37, "edge_features": 100},
-        "fragment_graph": {"node_features": 62, "edge_features": 39},
+        "graph": {"node_features": 98, "edge_features": 29},
+        "bond_graph": {"node_features": 29, "edge_features": 100},
+        "fragment_graph": {"node_features": 62, "edge_features": 31},
         "descriptor": {"descriptors": 62},
     },
     "protein": {
@@ -316,7 +324,7 @@ FEATURE_DIMS: Dict[str, Dict[str, Dict[str, int]]] = {
             "edge_features": 39,
             "edge_vector_features": 8,
         },
-        "atom_graph": {"node_features": 11, "node_tokens": 3, "edge_features": 6},
+        "atom_graph": {"node_features": 10, "node_tokens": 3, "edge_features": 6},
     },
 }
 

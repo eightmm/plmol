@@ -16,9 +16,19 @@ import torch
 from rdkit import Chem
 
 from ..errors import InputError
+from .graph_edge_features import BOND_VIEW_CHANNELS
 
 # Bond angle channels appended to the shared atom's feature vector.
 BOND_ANGLE_FEATURE_DIM = 2
+
+
+def _bond_view_channels(width: int) -> "list[int]":
+    """Channels to keep from a dense adjacency of the given width.
+
+    A caller may pass a narrower adjacency than the standard 37-channel one, so
+    the selection is clipped rather than assumed.
+    """
+    return [c for c in BOND_VIEW_CHANNELS if c < width]
 
 
 def build_bond_graph(
@@ -42,7 +52,8 @@ def build_bond_graph(
 
     Returns:
         Dict with:
-            - ``node_features`` ``(B, C)``: per-bond features.
+            - ``node_features`` ``(B, C)``: per-bond features, the informative
+              channels of ``adjacency[begin, end]``.
             - ``edge_index`` ``(2, E)``: bond pairs sharing an atom, both
               directions.
             - ``edge_features`` ``(E, F + 2)``: shared atom features followed by
@@ -57,7 +68,8 @@ def build_bond_graph(
     adjacency = torch.as_tensor(adjacency)
     node_features = torch.as_tensor(node_features)
     atom_feature_dim = int(node_features.shape[-1])
-    bond_feature_dim = int(adjacency.shape[-1])
+    channels = _bond_view_channels(adjacency.shape[-1])
+    bond_feature_dim = len(channels)
     edge_feature_dim = atom_feature_dim + BOND_ANGLE_FEATURE_DIM
 
     num_atoms = mol.GetNumAtoms()
@@ -105,8 +117,9 @@ def build_bond_graph(
     end_idx = bond_index[:, 1]
 
     # The atom adjacency is symmetric across every channel, so either direction
-    # yields the same bond vector.
-    bond_node_features = adjacency[begin_idx, end_idx]
+    # yields the same bond vector. Only the channels that say something about a
+    # bonded pair are kept; see BOND_VIEW_CHANNELS.
+    bond_node_features = adjacency[begin_idx, end_idx][:, channels]
 
     # Two bonds are adjacent when they share an atom; emit both directions to
     # match the atom graph's bidirectional edge convention.

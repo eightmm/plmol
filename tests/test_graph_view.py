@@ -5,6 +5,8 @@ import pytest
 import torch
 
 from plmol import (
+    BOND_VIEW_CHANNELS,
+    BOND_VIEW_DROPPED_CHANNELS,
     FEATURE_DIMS,
     InputError,
     Ligand,
@@ -84,7 +86,8 @@ def test_dense_ligand_graph_becomes_sparse_edges(ligand_views):
     assert g["num_edges"] == int(mask.sum())
     adjacency = torch.as_tensor(view["adjacency"]).float()
     src, dst = g["edge_index"]
-    assert torch.equal(g["edge_features"], adjacency[src, dst])
+    kept = list(BOND_VIEW_CHANNELS)
+    assert torch.equal(g["edge_features"], adjacency[src, dst][:, kept])
 
 
 def test_residue_graph_keeps_vectors_separate(protein_views):
@@ -245,3 +248,82 @@ def test_every_recorded_mode_is_reachable():
         allowed = set(FEATURE_SPECS[molecule].allowed_modes)
         for mode in modes:
             assert mode in allowed, f"{molecule}.{mode} is not an allowed mode"
+
+
+class TestBondViewChannels:
+    """Guards the claim that the dropped adjacency channels carry nothing.
+
+    ``BOND_VIEW_CHANNELS`` removes 8 of the 10 pair channels from every sparse
+    bond view. If a future change makes one of them informative on a bond,
+    these tests fail rather than silently discarding signal.
+    """
+
+    SMILES = [
+        "CC(=O)Oc1ccccc1C(=O)O", "CN1C=NC2=C1C(=O)N(C)C(=O)N2C",
+        "C1=CC2=CC=CC3=C2C(=C1)C=C3", "OP(=O)(O)O", "C/C=C/C", "C/C=C\\C",
+        "FC(F)(F)c1ccc(Br)cc1I", "CSSC", "N#Cc1ccccc1", "c1ccsc1", "CC.CC",
+    ]
+
+    @classmethod
+    def _bond_rows(cls):
+        rows = []
+        for smiles in cls.SMILES:
+            view = Ligand.from_smiles(smiles).featurize(mode="graph")["graph"]
+            adjacency = torch.as_tensor(view["adjacency"]).float()
+            mask = torch.as_tensor(view["bond_mask"]).clone()
+            mask.fill_diagonal_(False)
+            src, dst = torch.where(mask)
+            if src.numel():
+                rows.append(adjacency[src, dst])
+        return torch.cat(rows)
+
+    def test_the_two_sets_partition_the_adjacency(self, ligand_views):
+        width = torch.as_tensor(ligand_views["graph"]["adjacency"]).shape[-1]
+        assert set(BOND_VIEW_CHANNELS) | set(BOND_VIEW_DROPPED_CHANNELS) == set(range(width))
+        assert not set(BOND_VIEW_CHANNELS) & set(BOND_VIEW_DROPPED_CHANNELS)
+
+    def test_dropped_channels_are_constant_or_collinear_on_bonds(self):
+        rows = self._bond_rows()
+        constant, collinear = [], []
+        for channel in BOND_VIEW_DROPPED_CHANNELS:
+            column = rows[:, channel]
+            if float(column.std()) == 0.0:
+                constant.append(channel)
+            else:
+                # The only survivor is the euclidean distance, which is the
+                # bond length that channel 20 already carries.
+                other = rows[:, 20]
+                corr = torch.corrcoef(torch.stack([column, other]))[0, 1]
+                assert abs(float(corr)) > 0.9999, f"channel {channel} is informative"
+                collinear.append(channel)
+        assert constant == [27, 28, 29, 30, 31, 32, 35]
+        assert collinear == [33]
+
+    def test_kept_channels_are_not_all_constant(self):
+        """A sanity check in the other direction: the kept set carries signal."""
+        rows = self._bond_rows()
+        kept = rows[:, list(BOND_VIEW_CHANNELS)]
+        assert int((kept.std(dim=0) > 0).sum()) > 20
+
+    def test_the_dense_adjacency_is_unchanged(self, ligand_views):
+        """Only the sparse views drop channels; the dense contract is 37 wide."""
+        adjacency = torch.as_tensor(ligand_views["graph"]["adjacency"])
+        assert adjacency.shape[-1] == 37
+
+
+class TestProteinAtomNodeHasNoComplement:
+    def test_no_column_is_one_minus_burial_index(self, protein_views):
+        view = protein_views["atom_graph"]
+        g = as_graph(view)
+        burial = torch.as_tensor(view["burial_index"]).float()
+        for column in range(g["node_features"].shape[1]):
+            assert not torch.allclose(g["node_features"][:, column], 1.0 - burial), (
+                f"column {column} is the complement of burial_index"
+            )
+
+    def test_relative_sasa_is_still_available_on_the_raw_view(self, protein_views):
+        view = protein_views["atom_graph"]
+        assert "relative_sasa" in view
+        burial = torch.as_tensor(view["burial_index"]).float()
+        relative = torch.as_tensor(view["relative_sasa"]).float()
+        assert torch.allclose(burial, 1.0 - relative)

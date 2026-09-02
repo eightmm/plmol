@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from plmol import (
+    BOND_VIEW_CHANNELS,
     InputError,
     Ligand,
     LigandFeaturizer,
@@ -40,7 +41,7 @@ def test_fragment_and_edge_counts(smiles, num_fragments, num_edges):
     assert fg["coords"].shape == (num_fragments, 3)
     assert fg["adjacency"].shape == (num_fragments, num_fragments)
     assert fg["edge_index"].shape == (2, num_edges)
-    assert fg["edge_features"].shape == (num_edges, 39)
+    assert fg["edge_features"].shape == (num_edges, len(BOND_VIEW_CHANNELS) + 2)
     assert fg["edge_cleaved_bond"].shape == (num_edges, 2)
 
 
@@ -68,7 +69,11 @@ def test_edge_features_start_with_the_cleaved_bond(example_sdf):
     graph = lig.featurize(mode="graph")["graph"]
     fg = lig.featurize(mode="fragment_graph")["fragment_graph"]
     cut = fg["edge_cleaved_bond"]
-    assert np.array_equal(fg["edge_features"][:, :37], graph["adjacency"][cut[:, 0], cut[:, 1]])
+    kept = list(BOND_VIEW_CHANNELS)
+    assert np.array_equal(
+        fg["edge_features"][:, : len(kept)],
+        graph["adjacency"][cut[:, 0], cut[:, 1]][:, kept],
+    )
 
 
 def test_every_cleaved_pair_is_a_real_bond(example_sdf):
@@ -136,8 +141,9 @@ def test_brics_method_is_supported():
 
 def test_geometry_is_positive_with_3d(example_sdf):
     fg = Ligand.from_sdf(example_sdf).featurize(mode="fragment_graph")["fragment_graph"]
-    centroid_distance = fg["edge_features"][:, 37]
-    bond_length = fg["edge_features"][:, 38]
+    base = len(BOND_VIEW_CHANNELS)
+    centroid_distance = fg["edge_features"][:, base]
+    bond_length = fg["edge_features"][:, base + 1]
     assert np.all(centroid_distance > 0.0)
     # Cleaved bonds are ordinary covalent bonds.
     assert np.all(bond_length > 0.9) and np.all(bond_length < 2.5)
@@ -148,7 +154,7 @@ def test_geometry_is_zero_without_conformer():
         "CCCCCC", graph_kwargs={"generate_conformer": False}
     )
     assert not fg["coords"].any()
-    assert np.allclose(fg["edge_features"][:, 37:], 0.0)
+    assert np.allclose(fg["edge_features"][:, len(BOND_VIEW_CHANNELS):], 0.0)
 
 
 # -- API surface --------------------------------------------------------------

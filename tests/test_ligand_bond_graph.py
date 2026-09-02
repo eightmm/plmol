@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from plmol import (
+    BOND_VIEW_CHANNELS,
     InputError,
     Ligand,
     LigandFeaturizer,
@@ -36,7 +37,7 @@ def expected_edge_count(atom_to_bonds) -> int:
 def test_bond_count_matches_molecule(smiles, num_bonds):
     bg = bond_graph(smiles)
     assert bg["num_bonds"] == num_bonds
-    assert bg["node_features"].shape == (num_bonds, 37)
+    assert bg["node_features"].shape == (num_bonds, len(BOND_VIEW_CHANNELS))
     assert bg["bond_index"].shape == (num_bonds, 2)
     assert bg["coords"].shape == (num_bonds, 3)
     assert bg["adjacency"].shape == (num_bonds, num_bonds)
@@ -73,7 +74,7 @@ def test_bondless_molecule_yields_empty_graph(smiles):
     bg = bond_graph(smiles)
     assert bg["num_bonds"] == 0
     assert bg["num_bond_edges"] == 0
-    assert bg["node_features"].shape == (0, 37)
+    assert bg["node_features"].shape == (0, len(BOND_VIEW_CHANNELS))
     assert bg["edge_index"].shape == (2, 0)
     assert bg["edge_features"].shape == (0, 100)
     assert bg["coords"].shape == (0, 3)
@@ -94,7 +95,8 @@ def test_node_features_come_from_atom_adjacency(example_sdf):
     graph = lig.featurize(mode="graph")["graph"]
     bg = lig.featurize(mode="bond_graph")["bond_graph"]
     begin, end = bg["bond_index"][:, 0], bg["bond_index"][:, 1]
-    assert np.array_equal(bg["node_features"], graph["adjacency"][begin, end])
+    kept = list(BOND_VIEW_CHANNELS)
+    assert np.array_equal(bg["node_features"], graph["adjacency"][begin, end][:, kept])
 
 
 def test_edge_features_start_with_shared_atom_features(example_sdf):

@@ -17,6 +17,7 @@ import torch
 from rdkit import Chem
 
 from ..errors import InputError
+from .line_graph import _bond_view_channels
 
 # Geometry channels appended to the cleaved bond's feature vector.
 FRAGMENT_GEOMETRY_FEATURE_DIM = 2
@@ -48,9 +49,9 @@ def build_fragment_graph(
             - ``node_features`` ``(F, 62)``: per-fragment descriptors.
             - ``edge_index`` ``(2, E)``: fragment pairs joined by a cleaved
               bond, both directions.
-            - ``edge_features`` ``(E, C + 2)``: the cleaved bond's features
-              followed by ``[centroid distance, cleaved bond length]`` in
-              Angstrom.
+            - ``edge_features`` ``(E, C + 2)``: the informative channels of the
+              cleaved bond, followed by ``[centroid distance, cleaved bond
+              length]`` in Angstrom.
             - ``edge_cleaved_bond`` ``(E, 2)``: the atom pair cut for each edge.
             - ``coords`` ``(F, 3)``: fragment centroids.
             - ``adjacency`` ``(F, F)`` bool: fragment connectivity.
@@ -62,8 +63,8 @@ def build_fragment_graph(
             fragmentation result was produced without fragment features.
     """
     adjacency = torch.as_tensor(adjacency)
-    bond_feature_dim = int(adjacency.shape[-1])
-    edge_feature_dim = bond_feature_dim + FRAGMENT_GEOMETRY_FEATURE_DIM
+    channels = _bond_view_channels(adjacency.shape[-1])
+    edge_feature_dim = len(channels) + FRAGMENT_GEOMETRY_FEATURE_DIM
 
     num_atoms = mol.GetNumAtoms()
     atom_to_fragment = np.asarray(fragment_result["atom_to_fragment"], dtype=np.int64)
@@ -122,9 +123,9 @@ def build_fragment_graph(
     if num_edges:
         edge_index = torch.tensor([src, dst], dtype=torch.long)
         edge_cleaved_bond = torch.tensor(cut_atoms, dtype=torch.long)
-        bond_features = adjacency[edge_cleaved_bond[:, 0], edge_cleaved_bond[:, 1]].to(
-            torch.float32
-        )
+        bond_features = adjacency[
+            edge_cleaved_bond[:, 0], edge_cleaved_bond[:, 1]
+        ][:, channels].to(torch.float32)
         geometry = _fragment_geometry_features(
             edge_index, edge_cleaved_bond, fragment_coords, coords if has_3d else None
         )

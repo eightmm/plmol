@@ -28,6 +28,12 @@ from .ligand.graph import MoleculeGraphFeaturizer
 from .base import BaseMolecule, TempFileOwner
 from .graph_view import FEATURE_DIMS, as_graph, collate, feature_dims
 from .ligand.fragment_graph import build_fragment_graph
+from .ligand.graph_edge_features import (
+    BOND_FEATURE_DIM,
+    BOND_VIEW_CHANNELS,
+    BOND_VIEW_DROPPED_CHANNELS,
+    PAIR_FEATURE_DIM,
+)
 from .ligand.line_graph import build_bond_graph
 from .ligand.featurizer import LigandFeaturizer
 from .ligand.fragment import fragment_by_brics, fragment_molecule, fragment_on_rotatable_bonds
@@ -61,6 +67,8 @@ __all__ = [
     "Ligand", "MoleculeFeaturizer", "MoleculeGraphFeaturizer", "LigandFeaturizer",
     "fragment_by_brics", "fragment_molecule", "fragment_on_rotatable_bonds",
     "build_bond_graph", "build_fragment_graph",
+    "BOND_FEATURE_DIM", "PAIR_FEATURE_DIM",
+    "BOND_VIEW_CHANNELS", "BOND_VIEW_DROPPED_CHANNELS",
     "as_graph", "collate", "feature_dims", "FEATURE_DIMS",
     "NucleicAcid", "NucleicFeaturizer",
     "StructureParser", "MMCIFParser",

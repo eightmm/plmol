@@ -17,8 +17,8 @@ even those do not mean the same thing:
 | protein `graph` (residue) | `edge_index` | tuple of 2 tensors + vector tuple | tuple of 8 tensors |
 | protein `atom_graph` | `edge_index` | none — 4 loose per-edge arrays | `(N,)` token ids |
 | ligand `graph` | none — dense `(N, N, 37)` `adjacency` | in the adjacency | `(N, 98)` |
-| ligand `bond_graph` | `edge_index` | `(E, 100)` | `(B, 37)` |
-| ligand `fragment_graph` | `edge_index` | `(E, 39)` | `(F, 62)` |
+| ligand `bond_graph` | `edge_index` | `(E, 100)` | `(B, 29)` |
+| ligand `fragment_graph` | `edge_index` | `(E, 31)` | `(F, 62)` |
 
 Writing one GNN that consumes any of them means branching five ways.
 `as_graph` removes that branch.
@@ -54,17 +54,25 @@ to numpy while the other classes do not, so normalizing settles that too.
 ### Conversions applied
 
 - **Dense ligand `adjacency`** is unrolled with the same bond mask the library
-  uses elsewhere (first four channels are the bond-type one-hot), giving
-  `edge_index` and `edge_features` identical to
-  `LigandFeaturizer.adjacency_to_bond_edges`.
+  uses elsewhere (first four channels are the bond-type one-hot), then reduced
+  to the 29 channels that describe a bonded pair. Eight of the ten pair
+  channels are degenerate on a bond: the six shortest-path bins are always
+  `d=1`, `same_fragment` is always 1, and the euclidean distance is the bond
+  length channel 20 already carries (measured correlation 1.000000). See
+  [Bond View Channels](ligand.md#bond-view-channels).
+  `LigandFeaturizer.adjacency_to_bond_edges` stays faithful at 37 channels; it
+  is a literal conversion, while `as_graph` is a curated model-ready view.
 - **Protein residue tuples** are concatenated along the feature axis. Vector
   features stay in their own `(N, V, 3)` tensor rather than being flattened.
 - **Protein atom graph** loose arrays are concatenated in a fixed order.
   Per-edge: `edge_distances`, `same_residue`, `sequence_separation`,
   `unit_vector` → `(E, 6)`. Per-node: `burial_index`, `formal_charge`,
   `is_backbone`, `is_hbond_acceptor`, `is_hbond_donor`, `is_polar_sasa`,
-  `relative_sasa`, `sasa`, `secondary_structure` → `(N, 11)`. Tokens:
+  `sasa`, `secondary_structure` → `(N, 10)`. Tokens:
   `atom_tokens`, `residue_token`, `atom_element` → `(N, 3)`.
+  `relative_sasa` is deliberately excluded: `burial_index` is exactly
+  `1 - relative_sasa` (measured correlation -1.000000, maximum difference 0).
+  The raw `atom_graph` dict still exposes it under that name.
 
 `as_graph` is idempotent: normalizing an already normalized graph returns it
 unchanged.
@@ -101,19 +109,19 @@ Answers the `in_channels` question in code instead of in documentation.
 
 ```python
 dims = feature_dims("ligand", "graph")
-# {"node_features": 98, "edge_features": 37}
+# {"node_features": 98, "edge_features": 29}
 
 model = MyGNN(in_channels=dims["node_features"], edge_dim=dims["edge_features"])
 ```
 
 | Molecule | Mode | Dimensions |
 |----------|------|-----------|
-| `ligand` | `graph` | node 98, edge 37 |
-| `ligand` | `bond_graph` | node 37, edge 100 |
-| `ligand` | `fragment_graph` | node 62, edge 39 |
+| `ligand` | `graph` | node 98, edge 29 |
+| `ligand` | `bond_graph` | node 29, edge 100 |
+| `ligand` | `fragment_graph` | node 62, edge 31 |
 | `ligand` | `descriptor` | descriptors 62 |
 | `protein` | `graph` | node 83, node_vector 31, edge 39, edge_vector 8 |
-| `protein` | `atom_graph` | node 11, node_tokens 3, edge 6 |
+| `protein` | `atom_graph` | node 10, node_tokens 3, edge 6 |
 
 Vector entries give the *number* of vectors; each is 3-dimensional. The table
 lives in `FEATURE_DIMS` and a test asserts every entry against real

@@ -135,6 +135,33 @@ The public API is unchanged: `MoleculeGraphFeaturizer.featurize(mol)` returns `(
 | `[96:97]` | TPSA contribution | 1 | Per-atom topological polar surface area |
 | `[97:98]` | Labute ASA | 1 | Per-atom approximate surface area (Labute) |
 
+**Known duplicates.** Four channels repeat a value that is already in the
+vector. Measured identical on every atom of 29 molecules covering B, Se, P, S,
+halogens, charges and stereocentres (maximum difference 0):
+
+| Duplicate | Identical to |
+|-----------|--------------|
+| `[57]` `is_aromatic` (Stereochemistry) | `[34]` `is_aromatic` (Flags) |
+| `[59]` `is_SP` (Stereochemistry) | `[28]` `SP` (Hybridization) |
+| `[62]` `mass` (Physical) | `[49]` `mass` (Atom properties) |
+| `[63]` `vdw_radius` (Physical) | `[50]` `vdw_radius` (Atom properties) |
+
+`[58] is_SP2` is **not** a duplicate of `[29] SP2`; the two disagree on some
+atoms.
+
+**Element lookups.** `[49:52]` and `[62:67]` -- mass, vdw radius,
+electronegativity, covalent radius, ionisation energy, polarisability -- are
+determined entirely by the element, which the 22-dim atom-type one-hot at
+`[0:22]` already encodes. A linear layer on that one-hot reproduces them
+exactly. They are kept because they are free to compute and convenient for
+models that do not embed the one-hot. `[67] lone_pairs` does vary within an
+element.
+
+Removing the four duplicates would change `node_features` from 98 to 94 and
+re-index every row above, so it is deferred to a major release rather than done
+silently.
+
+
 ### Adjacency Channels `(N, N, 37)`
 
 Channels `[0:27]` are bond features (nonzero only where `bond_mask` is True).
@@ -176,7 +203,7 @@ dense adjacency rather than recomputed, so the two views always agree.
 
 | Key | Shape | Type | Description |
 |-----|-------|------|-------------|
-| `node_features` | `(B, 37)` | `float32` | Per-bond features, i.e. `adjacency[begin, end]` from the atom graph |
+| `node_features` | `(B, 29)` | `float32` | Per-bond features: the informative channels of `adjacency[begin, end]` (see [Bond view channels](#bond-view-channels)) |
 | `edge_index` | `(2, E)` | `int64` | Bond pairs sharing an atom, both directions |
 | `edge_features` | `(E, 100)` | `float32` | Shared atom's 98-dim features + `[cos(theta), theta/pi]` |
 | `edge_shared_atom` | `(E,)` | `int64` | Atom index bridging each edge |
@@ -189,6 +216,36 @@ dense adjacency rather than recomputed, so the two views always agree.
 
 Bond nodes follow RDKit bond index order. Edge count satisfies
 `E = 2 * sum over atoms of C(degree, 2)`.
+
+### Bond View Channels
+
+The dense adjacency has 37 channels: 27 bond channels followed by 10 pair
+channels. Every sparse bond view -- `bond_graph` nodes, `fragment_graph` edges
+and `as_graph` on a ligand `graph` -- keeps 29 of them.
+
+The pair block describes *arbitrary* atom pairs. On a bonded pair, 8 of its 10
+channels say nothing a bond channel does not:
+
+| Dropped | Why |
+|---------|-----|
+| `[27:33]` shortest-path bins | Always `d=1`; that is what being bonded means. Measured variance exactly 0 over 216 bonds |
+| `[33]` euclidean distance | The interatomic distance that `[20]` bond length already gives. Measured correlation 1.000000, differing only by the normalising constant |
+| `[35]` same_fragment | Always 1; bonded atoms are in the same fragment |
+
+`[34] same_ring` and `[36] same_aromatic_system` are kept -- they say something
+no bond channel does.
+
+The dense `adjacency (N, N, 37)` is **unchanged**; all 37 channels are
+meaningful there, where non-bonded pairs exist.
+`LigandFeaturizer.adjacency_to_bond_edges` also stays faithful at 37 -- it is a
+literal dense-to-sparse conversion, not a curated view.
+
+```python
+from plmol import BOND_VIEW_CHANNELS, BOND_VIEW_DROPPED_CHANNELS
+
+BOND_VIEW_CHANNELS          # (0..26, 34, 36) -- index back into the dense adjacency
+BOND_VIEW_DROPPED_CHANNELS  # (27, 28, 29, 30, 31, 32, 33, 35)
+```
 
 ### Angle Features
 
@@ -248,7 +305,7 @@ and `bond_graph` skip — use those if you only need the mappings.
 |-----|-------|------|-------------|
 | `node_features` | `(F, 62)` | `float32` | Per-fragment descriptors, same space as `molecule_features` |
 | `edge_index` | `(2, E)` | `int64` | Fragment pairs joined by a cleaved bond, both directions |
-| `edge_features` | `(E, 39)` | `float32` | Cleaved bond's 37 adjacency channels + `[centroid distance, bond length]` |
+| `edge_features` | `(E, 31)` | `float32` | Cleaved bond's 29 informative channels + `[centroid distance, bond length]` |
 | `edge_cleaved_bond` | `(E, 2)` | `int64` | Atom pair cut for each edge |
 | `coords` | `(F, 3)` | `float32` | Fragment centroids (0 if no conformer) |
 | `adjacency` | `(F, F)` | `bool` | Fragment connectivity; equals `fragment_adjacency` from `fragment` mode |
@@ -260,8 +317,8 @@ and `bond_graph` skip — use those if you only need the mappings.
 
 ### Geometry Features
 
-`edge_features[:, 37]` is the distance between the two fragment centroids and
-`edge_features[:, 38]` the length of the cleaved bond, both in Angstrom (the
+`edge_features[:, 29]` is the distance between the two fragment centroids and
+`edge_features[:, 30]` the length of the cleaved bond, both in Angstrom (the
 same convention as `distance_matrix` in `graph` mode). Both are zero without a
 3D conformer.
 
@@ -467,7 +524,7 @@ node_features (N, 98)             <- per-atom features          | graph mode
 adjacency (N, N, 37)              <- atom connectivity          |
     ^ lookup via bond_index
     v lookup via atom_to_bonds
-bond node_features (B, 37)        <- per-bond features          | bond_graph mode
+bond node_features (B, 29)        <- per-bond features          | bond_graph mode
 bond adjacency (B, B)             <- bonds sharing an atom      |
 ```
 

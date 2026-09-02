@@ -20,6 +20,31 @@ from ..constants import (
 from ..utils import knn_mask_torch
 
 
+#: Width of the bond block at the front of the dense adjacency.
+BOND_FEATURE_DIM = 27
+
+#: Width of the pair block that follows it.
+PAIR_FEATURE_DIM = 10
+
+#: Channels of the dense adjacency worth keeping once it is unrolled into a
+#: bond edge list.
+#:
+#: The pair block describes *arbitrary* atom pairs. On a bonded pair 8 of its
+#: 10 channels carry nothing new: the six shortest-path-distance bins are
+#: always d=1 and ``same_fragment`` is always 1, because that is what being
+#: bonded means, and ``euclid`` is the interatomic distance that channel 20
+#: already gives (measured correlation 1.000000, differing only by the
+#: normalising constant). ``same_ring`` and ``same_aromatic_system`` are the
+#: two that say something a bond channel does not.
+#:
+#: The dense adjacency itself keeps all 37 channels -- they are meaningful
+#: there, where non-bonded pairs exist.
+BOND_VIEW_CHANNELS = (*range(BOND_FEATURE_DIM), 34, 36)
+
+#: Channels dropped by :data:`BOND_VIEW_CHANNELS`, for documentation and tests.
+BOND_VIEW_DROPPED_CHANNELS = (27, 28, 29, 30, 31, 32, 33, 35)
+
+
 class EdgeFeatureMixin:
     """Mixin providing edge-level feature extraction methods.
 
@@ -50,7 +75,7 @@ class EdgeFeatureMixin:
             Tensor of shape [num_atoms, num_atoms, ~27]
         """
         num_atoms = mol.GetNumAtoms()
-        num_edge_features = 27
+        num_edge_features = BOND_FEATURE_DIM
 
         # Precompute rotatable bonds
         rotatable_bonds = set()
