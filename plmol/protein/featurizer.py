@@ -11,7 +11,6 @@ from typing import Optional, Dict, Any, Tuple
 import torch
 import numpy as np
 
-from ..errors import DependencyError
 from .pdb_standardizer import PDBStandardizer
 from .residue_featurizer import ResidueFeaturizer
 from .utils import calculate_sidechain_centroid, normalize_residue_name
@@ -443,21 +442,15 @@ class ProteinFeaturizer:
             }
             for atom in atoms
         ]
-        try:
-            surface = build_protein_surface(
-                coords=coords,
-                radii=radii,
-                atom_metadata=atom_metadata,
-                include_features=include_features,
-                n_points_per_atom=n_points_per_atom,
-                probe_radius=probe_radius,
-                pdb_file=pdb_to_use,
-            )
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise DependencyError(
-                "Surface featurization requires scipy. "
-                "Install it to enable surface features."
-            ) from exc
+        surface = build_protein_surface(
+            coords=coords,
+            radii=radii,
+            atom_metadata=atom_metadata,
+            include_features=include_features,
+            n_points_per_atom=n_points_per_atom,
+            probe_radius=probe_radius,
+            pdb_file=pdb_to_use,
+        )
         if surface is None:
             self._cache[cache_key] = None
             return None

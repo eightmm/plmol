@@ -8,7 +8,6 @@ metal coordination sites in protein structures.
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 import numpy as np
-from scipy.spatial import cKDTree
 
 from ..constants.interactions import (
     METAL_COORDINATION_CUTOFF,
@@ -55,7 +54,6 @@ def detect_metal_sites(
         return []
 
     non_metal_coords = atom_coords[non_metal_indices]
-    tree = cKDTree(non_metal_coords)
 
     sites = []
     for metal_idx in metal_indices:
@@ -63,7 +61,11 @@ def detect_metal_sites(
         metal_meta = atom_metadata[metal_idx]
         metal_element = metal_meta.get('element', metal_meta.get('atom_name', 'UNK')).upper().strip()
 
-        neighbor_positions = tree.query_ball_point(metal_coord, r=distance_cutoff)
+        # A structure holds a handful of metals against a few thousand other
+        # atoms, so one pass over the distances beats building an index.
+        offsets = non_metal_coords - metal_coord
+        squared = np.einsum("ij,ij->i", offsets, offsets)
+        neighbor_positions = np.flatnonzero(squared <= distance_cutoff * distance_cutoff)
         preferred_donors = METAL_PREFERRED_DONORS.get(metal_element, {'N', 'O', 'S'})
 
         coordinating_atoms = []

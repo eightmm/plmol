@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.spatial import cKDTree
 
 from ..constants import (
     SURFACE_DEFAULT_CURVATURE_SCALES,
     SURFACE_DEFAULT_KNN_ATOMS,
 )
+from ..spatial import knn
 
 # Re-export for convenience
 CURVATURE_SCALES = SURFACE_DEFAULT_CURVATURE_SCALES
@@ -44,7 +44,8 @@ def _build_knn_weights(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build KNN-based distance weights for atom-to-vertex mapping.
 
-    Uses cKDTree for O(N*K) memory instead of O(N*M) full distance matrix.
+    Uses a neighbour search for O(N*K) memory instead of an O(N*M) full
+    distance matrix.
 
     Args:
         verts: Mesh vertices (N, 3)
@@ -56,16 +57,7 @@ def _build_knn_weights(
         knn_weights: (N, K) normalized inverse-distance weights (rows sum to 1)
         knn_dists: (N, K) Euclidean distances to K nearest atoms
     """
-    n_atoms = len(atom_positions)
-    k = min(k, n_atoms)
-
-    tree = cKDTree(atom_positions)
-    knn_dists, knn_idx = tree.query(verts, k=k, workers=-1)
-
-    # cKDTree.query returns 1D arrays when k=1; ensure 2D
-    if k == 1:
-        knn_dists = knn_dists[:, None]
-        knn_idx = knn_idx[:, None]
+    knn_dists, knn_idx = knn(atom_positions, verts, k)
 
     knn_dists = knn_dists.astype(np.float32)
     knn_idx = knn_idx.astype(np.intp)

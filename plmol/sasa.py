@@ -26,7 +26,6 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-from scipy.spatial import cKDTree
 
 from .constants import (
     DEFAULT_VDW_RADIUS,
@@ -35,6 +34,7 @@ from .constants import (
     VDW_RADIUS,
 )
 from .errors import InputError
+from .spatial import sphere_point_exposure
 
 logger = logging.getLogger(__name__)
 
@@ -53,15 +53,6 @@ DEFAULT_PROBE_RADIUS = 1.4
 
 #: Sample points per atom sphere. freesasa's Shrake-Rupley default is 100.
 DEFAULT_SASA_POINTS = 100
-
-#: Neighbours considered per sample point. Only atoms within
-#: ``max(radius) + probe`` of a point can bury it; the most ever found that
-#: close on a 3260-atom protein was 17, with 0.3% of points reaching 16 and
-#: none reaching 20. The code detects the saturated case exactly and warns
-#: rather than silently truncating.
-DEFAULT_SASA_NEIGHBOURS = 24
-
-_POINT_QUERY_CHUNK = 32768
 
 _BACKEND = "auto"
 
@@ -133,7 +124,6 @@ def shrake_rupley(
     radii: np.ndarray,
     probe_radius: float = DEFAULT_PROBE_RADIUS,
     n_points: int = DEFAULT_SASA_POINTS,
-    max_neighbours: int = DEFAULT_SASA_NEIGHBOURS,
 ) -> np.ndarray:
     """Per-atom solvent accessible surface area by point sampling.
 
@@ -141,15 +131,15 @@ def shrake_rupley(
     accessible unless it falls inside another atom's expanded sphere. The area
     is then ``4 pi r^2`` times the accessible fraction.
 
-    All points are queried in one pass against a shared tree rather than atom by
-    atom, which is both faster and the same shape as the surface point cloud.
+    The occlusion test comes from :func:`plmol.spatial.sphere_point_exposure`,
+    which considers every overlapping neighbour rather than a fixed number of
+    nearest ones, so no sampling cap can make an area come out too large.
 
     Args:
         coords: Atom positions ``(N, 3)``.
         radii: Van der Waals radii ``(N,)``, without the probe.
         probe_radius: Solvent probe radius in Angstrom.
         n_points: Sample points per atom.
-        max_neighbours: Neighbours considered per sample point.
 
     Returns:
         Per-atom SASA ``(N,)`` in square Angstrom.
@@ -162,43 +152,13 @@ def shrake_rupley(
         return np.zeros(0, dtype=np.float64)
 
     expanded = np.asarray(radii, dtype=np.float32) + probe_radius
-    sphere = _fibonacci_sphere(n_points)
-    points = (expanded[:, None, None] * sphere[None] + coords[:, None, :]).reshape(-1, 3)
-    owner = np.repeat(np.arange(n_atoms, dtype=np.int32), n_points)
-
-    tree = cKDTree(coords)
-    neighbours = min(max_neighbours, n_atoms)
-    reach = float(expanded.max())
-
-    accessible = np.empty(len(points), dtype=bool)
-    saturated = False
-    for start in range(0, len(points), _POINT_QUERY_CHUNK):
-        stop = min(start + _POINT_QUERY_CHUNK, len(points))
-        dists, idx = tree.query(
-            points[start:stop], k=neighbours, workers=-1, distance_upper_bound=reach
-        )
-        if neighbours == 1:
-            dists, idx = dists[:, None], idx[:, None]
-        # If the farthest neighbour returned is still inside the reach, the
-        # query ran out of slots and there may be more we did not see. That
-        # cannot happen when every atom was already a candidate.
-        if (not saturated and neighbours < n_atoms
-                and bool((dists[:, -1] < reach).any())):
-            saturated = True
-        # Neighbours beyond the bound come back as index n_atoms at infinite
-        # distance; clip so the radius lookup stays in range.
-        np.minimum(idx, n_atoms - 1, out=idx)
-        buried = (dists < expanded[idx]) & (idx != owner[start:stop, None])
-        accessible[start:stop] = ~buried.any(axis=1)
-
-    if saturated:
-        logger.warning(
-            "SASA sampling hit the %d-neighbour limit for at least one point; "
-            "areas may be slightly overestimated. Raise max_neighbours.",
-            neighbours,
-        )
-
-    counts = np.bincount(owner[accessible], minlength=n_atoms)
+    exposed = sphere_point_exposure(
+        coords,
+        expanded,
+        np.full(n_atoms, n_points, dtype=np.int64),
+        _fibonacci_sphere,
+    )
+    counts = exposed.reshape(n_atoms, n_points).sum(axis=1)
     return 4.0 * np.pi * expanded.astype(np.float64) ** 2 * (counts / n_points)
 
 

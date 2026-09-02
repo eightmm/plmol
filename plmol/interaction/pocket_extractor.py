@@ -8,7 +8,6 @@ Uses fast PDB line-based parsing with vectorized distance calculation.
 from typing import Dict, List, Tuple, Optional, Union
 from dataclasses import dataclass
 import numpy as np
-from scipy.spatial.distance import cdist
 from rdkit import Chem
 from ..constants import POCKET_MAX_ATOMS_PER_RESIDUE
 from ..rdkit_utils import has_3d
@@ -100,6 +99,11 @@ def _extract_for_ligand_input(
     return [extractor.extract_for_ligand(ligand, distance_cutoff)]
 
 
+def _pairwise_distances(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+    """Euclidean distances between every row of *left* and every row of *right*."""
+    return np.linalg.norm(left[:, None, :] - right[None, :, :], axis=-1)
+
+
 @dataclass
 class ParsedProtein:
     """Pre-parsed protein data for efficient pocket extraction."""
@@ -118,7 +122,7 @@ class PocketExtractor:
     this approach:
     1. Reads PDB file line by line, grouping by residue
     2. Builds coordinate tensor [num_residue, max_atoms, 3]
-    3. Uses scipy.cdist for fast vectorized distance calculation
+    3. Computes the residue-to-ligand distance matrix in one vectorized pass
     4. Filters residues by distance cutoff
     5. Creates pocket PDB block from selected lines
     6. Calls MolFromPDBBlock only on the small pocket
@@ -361,7 +365,7 @@ class PocketExtractor:
         distance_cutoff: float
     ) -> np.ndarray:
         """
-        Compute boolean mask for pocket residues using vectorized cdist.
+        Compute boolean mask for pocket residues in one vectorized pass.
 
         Args:
             ligand_coords: Ligand coordinates [num_atoms, 3]
@@ -385,9 +389,8 @@ class PocketExtractor:
             dtype=np.float32
         )
         if valid_mask.any():
-            distances[valid_mask] = cdist(
-                coords_flat[valid_mask],
-                ligand_coords
+            distances[valid_mask] = _pairwise_distances(
+                coords_flat[valid_mask], ligand_coords
             )
 
         # Reshape to [num_res, MAX_ATOMS, num_ligand_atoms]
@@ -427,7 +430,7 @@ class PocketExtractor:
 
         # Include nearby metal HETATM lines
         if ligand_coords is not None and len(self._metal_coords) > 0:
-            metal_dists = cdist(self._metal_coords, ligand_coords)
+            metal_dists = _pairwise_distances(self._metal_coords, ligand_coords)
             min_metal_dists = metal_dists.min(axis=1)
             for j, dist in enumerate(min_metal_dists):
                 if dist < distance_cutoff:
@@ -622,9 +625,8 @@ class PocketExtractor:
             dtype=np.float32
         )
         if valid_mask.any():
-            distances[valid_mask] = cdist(
-                coords_flat[valid_mask],
-                ligand_coords
+            distances[valid_mask] = _pairwise_distances(
+                coords_flat[valid_mask], ligand_coords
             )
 
         distances = distances.reshape(num_res, MAX_ATOMS_PER_RESIDUE, -1)

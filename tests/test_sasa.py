@@ -70,17 +70,32 @@ class TestShrakeRupley:
         with pytest.raises(InputError, match=r"\(N, 3\)"):
             shrake_rupley(np.zeros((4, 2)), np.zeros(4))
 
-    def test_more_neighbours_does_not_change_the_answer(self, example_pdb):
-        from plmol.parsers import PDBParser
-        from plmol.sasa import element_radius
+    def test_matches_a_brute_force_occlusion(self):
+        """Every neighbour counts, not just the nearest few.
 
-        atoms = PDBParser(example_pdb).protein_atoms
-        coords = np.array([a.coords for a in atoms], dtype=np.float32)
-        radii = np.array([element_radius(a.element) for a in atoms], dtype=np.float32)
-        assert np.allclose(
-            shrake_rupley(coords, radii, max_neighbours=24),
-            shrake_rupley(coords, radii, max_neighbours=48),
-        )
+        The occlusion test used to look at a fixed number of nearest atoms,
+        which quietly overestimated areas in a crowded pocket. This compares it
+        to the definition: a sample point survives unless *some* other sphere
+        covers it, checked against all of them.
+        """
+        from plmol.surface.point_cloud import _fibonacci_sphere
+
+        rng = np.random.default_rng(7)
+        coords = rng.normal(scale=2.0, size=(40, 3)).astype(np.float32)
+        radii = rng.uniform(1.2, 1.9, size=40).astype(np.float32)
+
+        expanded = radii + 1.4
+        sphere = _fibonacci_sphere(100)
+        expected = np.empty(len(coords))
+        for i in range(len(coords)):
+            points = coords[i] + expanded[i] * sphere
+            covered = np.zeros(len(sphere), dtype=bool)
+            for j in range(len(coords)):
+                if j != i:
+                    covered |= np.linalg.norm(points - coords[j], axis=1) < expanded[j]
+            expected[i] = 4 * np.pi * expanded[i] ** 2 * (~covered).mean()
+
+        assert np.allclose(shrake_rupley(coords, radii), expected)
 
 
 # -- Backend selection --------------------------------------------------------

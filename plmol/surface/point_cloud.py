@@ -6,20 +6,14 @@ from functools import lru_cache
 from typing import Optional
 
 import numpy as np
-from scipy.spatial import cKDTree
 
 from ..constants import (
-    SURFACE_BURIAL_KNN,
     SURFACE_DEFAULT_POINTS_PER_ATOM,
     SURFACE_DEFAULT_PROBE_RADIUS,
     SURFACE_MAX_POINTS_RATIO,
     SURFACE_MIN_POINTS_PER_ATOM,
 )
-
-
-# Points per burial-query batch, chosen so the (chunk, K) neighbour arrays
-# stay a few MB regardless of protein size.
-_BURIAL_QUERY_CHUNK = 32768
+from ..spatial import sphere_point_exposure
 
 
 @lru_cache(maxsize=None)
@@ -57,7 +51,7 @@ def create_surface_points(
 
     Algorithm:
         1. Fibonacci sphere generates uniform points on each atom sphere
-        2. cKDTree identifies buried points (overlapping with neighbouring atoms)
+        2. Points covered by a neighbouring atom's expanded sphere are dropped
         3. Surviving points form the SAS point cloud
 
     Args:
@@ -85,57 +79,21 @@ def create_surface_points(
     max_pts = n_points_per_atom * SURFACE_MAX_POINTS_RATIO
     per_atom_counts = np.clip(raw_counts, min_pts, max_pts)
 
-    # Generate per-atom Fibonacci spheres with varying n_points (Option A)
+    # Points are laid out atom by atom, which is the layout the occlusion test
+    # expects, so the exposure mask indexes straight into these arrays.
     all_points_list = []
     all_normals_list = []
-    atom_ids_list = []
-
     for i in range(n_atoms):
-        n_pts = int(per_atom_counts[i])
-        unit_sphere = _fibonacci_sphere(n_pts)
-        pts = expanded_radii[i] * unit_sphere + positions[i]
-        all_points_list.append(pts)
+        unit_sphere = _fibonacci_sphere(int(per_atom_counts[i]))
+        all_points_list.append(expanded_radii[i] * unit_sphere + positions[i])
         all_normals_list.append(unit_sphere)
-        atom_ids_list.append(np.full(n_pts, i, dtype=np.int32))
 
     all_points_flat = np.concatenate(all_points_list, axis=0)
     all_normals_flat = np.concatenate(all_normals_list, axis=0)
-    atom_ids = np.concatenate(atom_ids_list, axis=0)
 
-    # Build tree of atom centres for neighbour lookup
-    tree = cKDTree(positions)
-
-    # For each point, check if it is buried inside any *other* atom's expanded
-    # sphere. Points are queried in chunks: each point's neighbours are
-    # independent, so this is identical to one big query, but the (P, K)
-    # float64 distance and int64 index arrays would otherwise be over 100 MB
-    # for a mid-sized protein while only a few percent of points survive.
-    K = min(SURFACE_BURIAL_KNN, n_atoms)
-    # A point can only sit inside atom j's expanded sphere if it is within
-    # expanded_radii[j] of j's centre, so neighbours beyond the largest expanded
-    # radius can never bury anything. Telling the tree that lets it prune, and
-    # the pruned neighbours come back at infinite distance where the test below
-    # rejects them anyway -- same answer, 1.7x faster.
-    max_expanded = float(expanded_radii.max())
-    exposed_chunks = []
-    for start in range(0, len(all_points_flat), _BURIAL_QUERY_CHUNK):
-        stop = min(start + _BURIAL_QUERY_CHUNK, len(all_points_flat))
-        dists, idx = tree.query(
-            all_points_flat[start:stop], k=K, workers=-1,
-            distance_upper_bound=max_expanded,
-        )
-        if K == 1:
-            dists = dists[:, None]
-            idx = idx[:, None]
-        # Missing neighbours are reported as index n_atoms; clip so the radius
-        # lookup stays in range. Their distance is infinite, so they never count.
-        np.minimum(idx, n_atoms - 1, out=idx)
-
-        is_owner = idx == atom_ids[start:stop, None]     # (chunk, K) bool
-        is_inside = dists < expanded_radii[idx]          # (chunk, K) bool
-        exposed_chunks.append(~(is_inside & ~is_owner).any(axis=1))
-
-    exposed = np.concatenate(exposed_chunks) if exposed_chunks else np.zeros(0, dtype=bool)
+    exposed = sphere_point_exposure(
+        positions, expanded_radii, per_atom_counts, _fibonacci_sphere
+    )
 
     points = all_points_flat[exposed]
     normals = all_normals_flat[exposed]

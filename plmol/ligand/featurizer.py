@@ -334,24 +334,18 @@ class LigandFeaturizer:
             dtype=np.float32,
         )
 
-        try:
-            surface = build_ligand_surface(
-                coords=coords,
-                radii=radii,
-                mol=mol,
-                include_features=include_features,
-                curvature_scales=curvature_scales,
-                knn_atoms=knn_atoms,
-                charge_method=charge_method,
-                extra_atom_features=extra_atom_features,
-                n_points_per_atom=n_points_per_atom,
-                probe_radius=probe_radius,
-            )
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise DependencyError(
-                "Surface featurization requires scipy. "
-                "Install it to enable surface features."
-            ) from exc
+        surface = build_ligand_surface(
+            coords=coords,
+            radii=radii,
+            mol=mol,
+            include_features=include_features,
+            curvature_scales=curvature_scales,
+            knn_atoms=knn_atoms,
+            charge_method=charge_method,
+            extra_atom_features=extra_atom_features,
+            n_points_per_atom=n_points_per_atom,
+            probe_radius=probe_radius,
+        )
         if surface is None and mol_or_smiles is None:
             self._surface_cache[cache_key] = None
             return None

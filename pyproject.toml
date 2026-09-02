@@ -40,8 +40,7 @@ classifiers = [
 dependencies = [
   "torch>=1.9.0",
   "numpy>=1.19.0",
-  "rdkit>=2020.09.1",
-  "scipy>=1.8.0"
+  "rdkit>=2020.09.1"
 ]
 
 [project.optional-dependencies]
@@ -50,6 +49,12 @@ dev = [
 ]
 mmcif = [
     "gemmi>=0.7.5",
+]
+# scipy's cKDTree is the default backend for k-nearest-neighbour queries, which
+# the surface curvature and atom mapping passes use. plmol runs without it on a
+# uniform grid instead; the results agree, the grid is slower.
+spatial = [
+    "scipy>=1.8.0",
 ]
 # freesasa is the default SASA backend when installed. plmol computes SASA
 # natively without it; the two differ slightly in algorithm and radii.

@@ -5,11 +5,10 @@ from __future__ import annotations
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
 
 import numpy as np
-from scipy.spatial import cKDTree
 
+from ..spatial import NeighbourIndex
 from .mapping import _normalize_to_range, CURVATURE_SCALES
 
 logger = logging.getLogger(__name__)
@@ -21,69 +20,6 @@ logger = logging.getLogger(__name__)
 # 2048 is ~20% worse and 4096 ~70% worse. The 3x3 eigendecomposition does
 # not engage BLAS threading, so this does not depend on OPENBLAS_NUM_THREADS.
 _CURVATURE_CHUNK = 1024
-
-
-def _compute_pca_curvature(
-    points: np.ndarray,
-    normals: np.ndarray,
-    radius: float,
-    tree: Optional[cKDTree] = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Estimate mean and Gaussian curvature from a point cloud via local PCA.
-
-    Uses a **KNN-based** approach where K is adapted to the scale *radius*.
-    This is more robust than a fixed-radius ball query because it guarantees
-    a minimum number of neighbours even at small scales, and avoids the
-    "everything inside" degeneracy at large scales.
-
-    Heuristic: ``K = clamp(int(radius * 8), 6, N//2)``
-    – smaller radius → fewer neighbours (fine detail)
-    – larger radius → more neighbours (coarse curvature)
-
-    Eigenvalue ratios of the local 3×3 covariance matrix:
-        lambda_0 <= lambda_1 <= lambda_2
-
-    * **mean curvature proxy** – ``lambda_0 / total``
-    * **Gaussian curvature proxy** – ``lambda_0 * lambda_1 / total²``
-
-    Both are normalised to [-1, 1] before return.
-
-    Args:
-        points: (N, 3) surface positions.
-        normals: (N, 3) surface normals.
-        radius: curvature scale (Å) – controls K.
-        tree: optional pre-built cKDTree of *points*.
-
-    Returns:
-        (mean_curv, gauss_curv) each (N,), normalised to [-1, 1].
-    """
-    n = len(points)
-    mean_curv = np.zeros(n, dtype=np.float32)
-    gauss_curv = np.zeros(n, dtype=np.float32)
-
-    if n < 6:
-        return mean_curv, gauss_curv
-
-    if tree is None:
-        tree = cKDTree(points)
-
-    # Adaptive K based on scale
-    k = _adaptive_k(radius, n)
-
-    # Points are processed in chunks. Each point's neighbourhood is independent,
-    # so the result is identical to one pass, but the (N, K, 3) neighbour and
-    # centred arrays would otherwise reach tens of megabytes per scale.
-    for start in range(0, n, _CURVATURE_CHUNK):
-        stop = min(start + _CURVATURE_CHUNK, n)
-        _, knn_idx = tree.query(points[start:stop], k=k, workers=-1)
-        if knn_idx.ndim == 1:
-            knn_idx = knn_idx[:, None]
-        _pca_curvature_from_neighbours(
-            points, knn_idx, mean_curv[start:stop], gauss_curv[start:stop]
-        )
-
-    # Normalisation is global, so it runs once over the assembled arrays.
-    return _normalize_to_range(mean_curv), _normalize_to_range(gauss_curv)
 
 
 def _adaptive_k(radius: float, n: int) -> int:
@@ -163,7 +99,7 @@ def compute_pointcloud_geometry(
     if n_verts >= 4:
         if verbose:
             logger.debug("Computing PCA curvature for point cloud")
-        pc_tree = cKDTree(points)
+        index = NeighbourIndex(points)
         # kNN results are sorted by distance, so the k nearest neighbours are a
         # prefix of the k_max nearest. One query per block therefore serves
         # every scale, instead of one query per scale.
@@ -177,7 +113,7 @@ def compute_pointcloud_geometry(
 
         def process_block(bounds: tuple[int, int]) -> None:
             start, stop = bounds
-            _, knn_idx = pc_tree.query(points[start:stop], k=k_max, workers=1)
+            _, knn_idx = index.query(points[start:stop], k=k_max)
             if knn_idx.ndim == 1:
                 knn_idx = knn_idx[:, None]
             for scale, k in enumerate(neighbour_counts):

@@ -26,6 +26,14 @@ from .ligand.core import Ligand
 from .ligand.descriptors import MoleculeFeaturizer
 from .ligand.graph import MoleculeGraphFeaturizer
 from .base import BaseMolecule, TempFileOwner
+from .spatial import (
+    SPATIAL_BACKENDS,
+    NeighbourIndex,
+    get_spatial_backend,
+    knn,
+    resolve_spatial_backend,
+    set_spatial_backend,
+)
 from .sasa import (
     SASA_BACKENDS,
     get_sasa_backend,
@@ -81,6 +89,8 @@ __all__ = [
     "as_graph", "collate", "feature_dims", "FEATURE_DIMS",
     "SASA_BACKENDS", "set_sasa_backend", "get_sasa_backend",
     "resolve_sasa_backend", "shrake_rupley",
+    "SPATIAL_BACKENDS", "set_spatial_backend", "get_spatial_backend",
+    "resolve_spatial_backend", "knn", "NeighbourIndex",
     "NucleicAcid", "NucleicFeaturizer",
     "StructureParser", "MMCIFParser",
     "PLInteractionFeaturizer", "Complex", "MolecularComplex",
