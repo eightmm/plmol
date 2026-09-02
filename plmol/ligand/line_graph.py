@@ -16,19 +16,10 @@ import torch
 from rdkit import Chem
 
 from ..errors import InputError
-from .graph_edge_features import BOND_VIEW_CHANNELS
+from .graph_edge_features import bond_view_channels
 
 # Bond angle channels appended to the shared atom's feature vector.
 BOND_ANGLE_FEATURE_DIM = 2
-
-
-def _bond_view_channels(width: int) -> "list[int]":
-    """Channels to keep from a dense adjacency of the given width.
-
-    A caller may pass a narrower adjacency than the standard 37-channel one, so
-    the selection is clipped rather than assumed.
-    """
-    return [c for c in BOND_VIEW_CHANNELS if c < width]
 
 
 def build_bond_graph(
@@ -68,7 +59,7 @@ def build_bond_graph(
     adjacency = torch.as_tensor(adjacency)
     node_features = torch.as_tensor(node_features)
     atom_feature_dim = int(node_features.shape[-1])
-    channels = _bond_view_channels(adjacency.shape[-1])
+    channels = bond_view_channels(adjacency.shape[-1])
     bond_feature_dim = len(channels)
     edge_feature_dim = atom_feature_dim + BOND_ANGLE_FEATURE_DIM
 

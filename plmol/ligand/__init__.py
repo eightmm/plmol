@@ -8,6 +8,7 @@ from .graph_edge_features import (
     BOND_FEATURE_DIM,
     BOND_VIEW_CHANNELS,
     BOND_VIEW_DROPPED_CHANNELS,
+    bond_view_channels,
     PAIR_FEATURE_DIM,
 )
 from .line_graph import build_bond_graph
@@ -24,6 +25,7 @@ __all__ = [
     "PAIR_FEATURE_DIM",
     "BOND_VIEW_CHANNELS",
     "BOND_VIEW_DROPPED_CHANNELS",
+    "bond_view_channels",
     "MoleculeFeaturizer",
     "fragment_on_rotatable_bonds",
     "fragment_by_brics",

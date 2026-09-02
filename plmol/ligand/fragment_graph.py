@@ -17,7 +17,7 @@ import torch
 from rdkit import Chem
 
 from ..errors import InputError
-from .line_graph import _bond_view_channels
+from .graph_edge_features import bond_view_channels
 
 # Geometry channels appended to the cleaved bond's feature vector.
 FRAGMENT_GEOMETRY_FEATURE_DIM = 2
@@ -63,7 +63,7 @@ def build_fragment_graph(
             fragmentation result was produced without fragment features.
     """
     adjacency = torch.as_tensor(adjacency)
-    channels = _bond_view_channels(adjacency.shape[-1])
+    channels = bond_view_channels(adjacency.shape[-1])
     edge_feature_dim = len(channels) + FRAGMENT_GEOMETRY_FEATURE_DIM
 
     num_atoms = mol.GetNumAtoms()

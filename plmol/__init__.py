@@ -32,6 +32,7 @@ from .ligand.graph_edge_features import (
     BOND_FEATURE_DIM,
     BOND_VIEW_CHANNELS,
     BOND_VIEW_DROPPED_CHANNELS,
+    bond_view_channels,
     PAIR_FEATURE_DIM,
 )
 from .ligand.line_graph import build_bond_graph
@@ -68,7 +69,8 @@ __all__ = [
     "fragment_by_brics", "fragment_molecule", "fragment_on_rotatable_bonds",
     "build_bond_graph", "build_fragment_graph",
     "BOND_FEATURE_DIM", "PAIR_FEATURE_DIM",
-    "BOND_VIEW_CHANNELS", "BOND_VIEW_DROPPED_CHANNELS",
+    "BOND_VIEW_CHANNELS", "BOND_VIEW_DROPPED_CHANNELS", "bond_view_channels",
+    "bond_view_channels",
     "as_graph", "collate", "feature_dims", "FEATURE_DIMS",
     "NucleicAcid", "NucleicFeaturizer",
     "StructureParser", "MMCIFParser",

@@ -22,7 +22,7 @@ import numpy as np
 import torch
 
 from .errors import InputError
-from .ligand.line_graph import _bond_view_channels
+from .ligand.graph_edge_features import bond_view_channels
 
 # Per-edge keys of the protein atom graph, in the order they are concatenated
 # into ``edge_features``. Documented so column indices are stable.
@@ -52,6 +52,24 @@ _ATOM_GRAPH_NODE_KEYS = (
 
 # Token-valued node keys, kept as integers for nn.Embedding.
 _ATOM_GRAPH_TOKEN_KEYS = ("atom_tokens", "residue_token", "atom_element")
+
+# Nucleic acid residue graph: per-nucleotide keys, in concatenation order.
+_NA_RESIDUE_NODE_KEYS = (
+    "one_hot",
+    "is_purine",
+    "is_pyrimidine",
+    "is_dna",
+    "torsions",
+    "sugar_pucker",
+    "mol_weight",
+    "n_hbond_donors",
+    "n_hbond_acceptors",
+)
+_NA_RESIDUE_TOKEN_KEYS = ("nucleotide_type",)
+
+# Nucleic acid atom graph: nodes are token-valued, edges carry a distance.
+_NA_ATOM_TOKEN_KEYS = ("residue_token",)
+_NA_ATOM_EDGE_KEYS = ("edge_distances",)
 
 _CANONICAL_KEYS = (
     "node_features",
@@ -105,11 +123,16 @@ def as_graph(view: Dict[str, Any], source: Optional[str] = None) -> Dict[str, An
         return _from_protein_atom_graph(view, source or "protein_atom_graph")
     if kind == "residue_graph":
         return _from_tuple_graph(view, source or "protein_residue_graph")
+    if kind == "na_residue_graph":
+        return _from_na_residue_graph(view, source or "nucleic_residue_graph")
+    if kind == "na_atom_graph":
+        return _from_na_atom_graph(view, source or "nucleic_atom_graph")
     if kind == "edge_index":
         return _from_edge_index_graph(view, source or "edge_index_graph")
     raise InputError(
-        "Unrecognized graph view. Expected one of: a dense 'adjacency', an "
-        "'edge_index' with 'edge_features', or a protein atom graph."
+        "Unrecognized graph view. Expected a dense 'adjacency', an 'edge_index' "
+        "with 'edge_features', or one of the protein/nucleic acid graph modes. "
+        "Note that 'backbone' and 'surface' are not graphs and have no edges."
     )
 
 
@@ -122,6 +145,10 @@ def _infer_source(view: Dict[str, Any]) -> Optional[str]:
         return "atom_graph"
     if isinstance(view.get("node_features"), tuple):
         return "residue_graph"
+    if "torsions" in view and "one_hot" in view:
+        return "na_residue_graph"
+    if "residue_token" in view and "edge_distances" in view:
+        return "na_atom_graph"
     if "edge_features" in view:
         return "edge_index"
     return None
@@ -154,7 +181,7 @@ def _from_dense_adjacency(view: Dict[str, Any], source: str) -> Dict[str, Any]:
     node_features = _float(view["node_features"])
     # Only the channels that describe a bonded pair; the rest of the pair block
     # is degenerate once the dense adjacency is unrolled into bonds.
-    channels = _bond_view_channels(adjacency.shape[-1])
+    channels = bond_view_channels(adjacency.shape[-1])
     return _pack(
         node_features=node_features,
         node_tokens=None,
@@ -196,6 +223,39 @@ def _from_tuple_graph(view: Dict[str, Any], source: str) -> Dict[str, Any]:
         edge_features=_concat_tuple(view.get("edge_features"), dim=-1),
         edge_vector_features=_concat_tuple(view.get("edge_vector_features"), dim=1),
         coords=_coords(view, node_features.shape[0]),
+        source=source,
+    )
+
+
+def _from_na_residue_graph(view: Dict[str, Any], source: str) -> Dict[str, Any]:
+    """Nucleic acid ``graph``: per-nucleotide arrays plus ``edge_attr``."""
+    edge_index = _tensor(view["edge_index"]).long()
+    num_nodes = int(_tensor(view["coords"]).shape[0])
+    return _pack(
+        node_features=_concat_columns(view, _NA_RESIDUE_NODE_KEYS, num_nodes),
+        node_tokens=_concat_tokens(view, _NA_RESIDUE_TOKEN_KEYS, num_nodes),
+        node_vector_features=None,
+        edge_index=edge_index,
+        edge_features=_float(view["edge_attr"]).reshape(int(edge_index.shape[1]), -1),
+        edge_vector_features=None,
+        coords=_coords(view, num_nodes),
+        source=source,
+    )
+
+
+def _from_na_atom_graph(view: Dict[str, Any], source: str) -> Dict[str, Any]:
+    """Nucleic acid ``atom_graph``: token-valued nodes, distance-valued edges."""
+    edge_index = _tensor(view["edge_index"]).long()
+    num_edges = int(edge_index.shape[1])
+    num_nodes = int(_tensor(view["coords"]).shape[0])
+    return _pack(
+        node_features=torch.zeros((num_nodes, 0), dtype=torch.float32),
+        node_tokens=_concat_tokens(view, _NA_ATOM_TOKEN_KEYS, num_nodes),
+        node_vector_features=None,
+        edge_index=edge_index,
+        edge_features=_concat_columns(view, _NA_ATOM_EDGE_KEYS, num_edges),
+        edge_vector_features=None,
+        coords=_coords(view, num_nodes),
         source=source,
     )
 
@@ -317,6 +377,10 @@ FEATURE_DIMS: Dict[str, Dict[str, Dict[str, int]]] = {
         "fragment_graph": {"node_features": 62, "edge_features": 31},
         "descriptor": {"descriptors": 62},
     },
+    "nucleic_acid": {
+        "graph": {"node_features": 23, "node_tokens": 1, "edge_features": 3},
+        "atom_graph": {"node_features": 0, "node_tokens": 1, "edge_features": 1},
+    },
     "protein": {
         "graph": {
             "node_features": 83,
@@ -333,7 +397,7 @@ def feature_dims(molecule: str, mode: str) -> Dict[str, int]:
     """Feature widths for a molecule type and mode, as :func:`as_graph` emits them.
 
     Args:
-        molecule: ``"ligand"`` or ``"protein"``.
+        molecule: ``"ligand"``, ``"protein"`` or ``"nucleic_acid"``.
         mode: A featurization mode, e.g. ``"graph"`` or ``"bond_graph"``.
 
     Returns:

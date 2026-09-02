@@ -45,6 +45,15 @@ BOND_VIEW_CHANNELS = (*range(BOND_FEATURE_DIM), 34, 36)
 BOND_VIEW_DROPPED_CHANNELS = (27, 28, 29, 30, 31, 32, 33, 35)
 
 
+def bond_view_channels(width: int) -> "list[int]":
+    """Channels of a dense adjacency of the given width to keep in a bond view.
+
+    A caller may pass a narrower adjacency than the standard 37-channel one, so
+    the selection is clipped rather than assumed.
+    """
+    return [c for c in BOND_VIEW_CHANNELS if c < width]
+
+
 class EdgeFeatureMixin:
     """Mixin providing edge-level feature extraction methods.
 

@@ -327,3 +327,64 @@ class TestProteinAtomNodeHasNoComplement:
         burial = torch.as_tensor(view["burial_index"]).float()
         relative = torch.as_tensor(view["relative_sasa"]).float()
         assert torch.allclose(burial, 1.0 - relative)
+
+
+class TestNucleicAcidViews:
+    """as_graph claims to cover every plmol graph view, so it must cover these."""
+
+    NA_MODES = ["graph", "atom_graph"]
+
+    @pytest.fixture(scope="class")
+    def na_views(self, tmp_path_factory):
+        from plmol import NucleicAcid
+        from tests.test_nucleic_acid_core import _DNA_PDB
+
+        path = tmp_path_factory.mktemp("na") / "dna.pdb"
+        path.write_text(_DNA_PDB)
+        return {
+            mode: NucleicAcid.from_pdb(str(path)).featurize(mode=mode)[mode]
+            for mode in self.NA_MODES
+        }
+
+    @pytest.mark.parametrize("mode", NA_MODES)
+    def test_normalizes_to_the_canonical_shape(self, na_views, mode):
+        g = as_graph(na_views[mode])
+        assert set(g) == CANONICAL
+        assert g["edge_index"].shape == (2, g["num_edges"])
+        assert g["node_features"].shape[0] == g["num_nodes"]
+        assert g["edge_features"].shape[0] == g["num_edges"]
+        assert g["coords"].shape == (g["num_nodes"], 3)
+        assert int(g["edge_index"].max()) < g["num_nodes"]
+
+    @pytest.mark.parametrize("mode", NA_MODES)
+    def test_recorded_dims_match_reality(self, na_views, mode):
+        g = as_graph(na_views[mode])
+        dims = feature_dims("nucleic_acid", mode)
+        assert g["node_features"].shape[-1] == dims["node_features"]
+        assert g["edge_features"].shape[-1] == dims["edge_features"]
+        assert g["node_tokens"].shape[-1] == dims["node_tokens"]
+
+    def test_atom_graph_nodes_are_purely_token_valued(self, na_views):
+        g = as_graph(na_views["atom_graph"])
+        assert g["node_features"].shape[1] == 0
+        assert g["node_tokens"] is not None
+
+    def test_sources_are_distinguishable(self, na_views):
+        assert as_graph(na_views["graph"])["source"] == "nucleic_residue_graph"
+        assert as_graph(na_views["atom_graph"])["source"] == "nucleic_atom_graph"
+
+    def test_collate_works_across_nucleic_graphs(self, na_views):
+        g = as_graph(na_views["graph"])
+        batch = collate([g, g])
+        assert batch["num_nodes"] == 2 * g["num_nodes"]
+        assert int(batch["edge_index"].max()) < batch["num_nodes"]
+
+    def test_backbone_is_not_a_graph(self, tmp_path):
+        from plmol import NucleicAcid
+        from tests.test_nucleic_acid_core import _DNA_PDB
+
+        path = tmp_path / "dna.pdb"
+        path.write_text(_DNA_PDB)
+        backbone = NucleicAcid.from_pdb(str(path)).featurize(mode="backbone")["backbone"]
+        with pytest.raises(InputError, match="not graphs"):
+            as_graph(backbone)

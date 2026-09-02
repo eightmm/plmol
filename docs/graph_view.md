@@ -9,8 +9,8 @@ from plmol import as_graph, collate, feature_dims
 ## Why
 
 plmol's graph outputs grew per molecule type and disagree on almost everything.
-Across the five graph views only `coords` and `node_features` are shared, and
-even those do not mean the same thing:
+Across the seven graph views only `coords` is shared, and even that sits
+beside wildly different node and edge conventions:
 
 | View | Edges | Edge features | Node features |
 |------|-------|---------------|---------------|
@@ -19,8 +19,10 @@ even those do not mean the same thing:
 | ligand `graph` | none — dense `(N, N, 37)` `adjacency` | in the adjacency | `(N, 98)` |
 | ligand `bond_graph` | `edge_index` | `(E, 100)` | `(B, 29)` |
 | ligand `fragment_graph` | `edge_index` | `(E, 31)` | `(F, 62)` |
+| nucleic `graph` | `edge_index` | `(E, 3)` `edge_attr` | 9 loose per-nucleotide arrays |
+| nucleic `atom_graph` | `edge_index` | `(E,)` `edge_distances` | token ids only |
 
-Writing one GNN that consumes any of them means branching five ways.
+Writing one GNN that consumes any of them means branching seven ways.
 `as_graph` removes that branch.
 
 Nothing here changes what `featurize` returns; this is a view on top of it.
@@ -64,6 +66,12 @@ to numpy while the other classes do not, so normalizing settles that too.
   is a literal conversion, while `as_graph` is a curated model-ready view.
 - **Protein residue tuples** are concatenated along the feature axis. Vector
   features stay in their own `(N, V, 3)` tensor rather than being flattened.
+- **Nucleic acid `graph`** loose per-nucleotide arrays are concatenated in a
+  fixed order: `one_hot`, `is_purine`, `is_pyrimidine`, `is_dna`, `torsions`,
+  `sugar_pucker`, `mol_weight`, `n_hbond_donors`, `n_hbond_acceptors` →
+  `(N, 23)`; `nucleotide_type` → `node_tokens (N, 1)`; `edge_attr` → edges.
+- **Nucleic acid `atom_graph`** has no continuous node features, so
+  `node_features` is `(N, 0)` and `residue_token` becomes `node_tokens`.
 - **Protein atom graph** loose arrays are concatenated in a fixed order.
   Per-edge: `edge_distances`, `same_residue`, `sequence_separation`,
   `unit_vector` → `(E, 6)`. Per-node: `burial_index`, `formal_charge`,
@@ -75,7 +83,8 @@ to numpy while the other classes do not, so normalizing settles that too.
   The raw `atom_graph` dict still exposes it under that name.
 
 `as_graph` is idempotent: normalizing an already normalized graph returns it
-unchanged.
+unchanged. `backbone`, `surface` and `voxel` are not graphs — they have no
+edges — and are rejected with `InputError`.
 
 ## `collate(views)`
 
@@ -122,8 +131,13 @@ model = MyGNN(in_channels=dims["node_features"], edge_dim=dims["edge_features"])
 | `ligand` | `descriptor` | descriptors 62 |
 | `protein` | `graph` | node 83, node_vector 31, edge 39, edge_vector 8 |
 | `protein` | `atom_graph` | node 10, node_tokens 3, edge 6 |
+| `nucleic_acid` | `graph` | node 23, node_tokens 1, edge 3 |
+| `nucleic_acid` | `atom_graph` | node 0, node_tokens 1, edge 1 |
 
-Vector entries give the *number* of vectors; each is 3-dimensional. The table
+These are the widths of `as_graph(view)`, not of the raw `featurize` output —
+ligand `graph` has no `edge_features` key at all, it has a dense
+`adjacency (N, N, 37)`. Vector entries give the *number* of vectors; each
+is 3-dimensional. The table
 lives in `FEATURE_DIMS` and a test asserts every entry against real
 featurization output, so it cannot drift from the code.
 
