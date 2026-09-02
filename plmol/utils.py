@@ -225,6 +225,25 @@ def dihedral_angles(
     return np.where(valid, np.arctan2(y, x), 0.0)
 
 
+def dense_to_edges(adjacency: torch.Tensor):
+    """Split a dense ``(N, N, C)`` adjacency into edge indices and edge values.
+
+    An edge exists where the ``C``-vector for that pair is not all zero, which
+    is the same rule ``Tensor.to_sparse(sparse_dim=2)`` applies -- but that call
+    is pathologically slow on hybrid tensors (25 ms against 0.2 ms on a
+    416-residue graph) while producing identical indices and values.
+
+    Args:
+        adjacency: Dense ``(N, N, C)`` or ``(N, N)`` tensor.
+
+    Returns:
+        ``(src, dst, values)`` in row-major order.
+    """
+    mask = (adjacency != 0).any(dim=-1) if adjacency.dim() > 2 else adjacency != 0
+    src, dst = torch.nonzero(mask, as_tuple=True)
+    return src, dst, adjacency[src, dst]
+
+
 def knn_mask_torch(dist_matrix: torch.Tensor, k: int) -> torch.Tensor:
     """Square distance matrix -> kNN boolean mask."""
     dm = dist_matrix.clone()

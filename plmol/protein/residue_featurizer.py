@@ -40,7 +40,7 @@ from .utils import (
     normalize_residue_name,
 )
 
-from ..utils import freesasa_structure_result, knn_mask_torch
+from ..utils import dense_to_edges, freesasa_structure_result, knn_mask_torch
 
 # Import amino acid constants from centralized module
 from ..constants import (
@@ -614,10 +614,8 @@ class ResidueFeaturizer:
             coords, distance_cutoff=distance_cutoff, knn_cutoff=knn_cutoff
         )
 
-        # Convert to sparse format
-        sparse = distance_adj.to_sparse(sparse_dim=2)
-        src, dst = sparse.indices()
-        distance = sparse.values()
+        # Dense adjacency to edge list
+        src, dst, distance = dense_to_edges(distance_adj)
 
         relative_position = relative_position[src, dst]
         vectors = interaction_vectors[src, dst, :]

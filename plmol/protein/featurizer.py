@@ -37,7 +37,7 @@ from ..constants import (
     VOXEL_DEFAULT_CUTOFF_SIGMA,
 )
 from ..surface import build_protein_surface
-from ..utils import knn_mask_torch
+from ..utils import dense_to_edges, knn_mask_torch
 from ..voxel import build_protein_voxel
 from .utils import PDBParser
 
@@ -224,10 +224,8 @@ class ProteinFeaturizer:
                 self.coords, distance_cutoff=distance_cutoff, knn_cutoff=knn_cutoff
             )
 
-            # Get sparse representation
-            sparse = distance_adj.to_sparse(sparse_dim=2)
-            src, dst = sparse.indices()
-            distances = sparse.values()
+            # Dense adjacency to edge list
+            src, dst, distances = dense_to_edges(distance_adj)
 
             self._cache[cache_key] = {
                 'adjacency_matrix': adj,

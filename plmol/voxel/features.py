@@ -139,45 +139,48 @@ def gaussian_smear_to_grid(
     n_atoms, n_channels = features.shape
     D, H, W = grid_shape
     grid = np.zeros((n_channels, D, H, W), dtype=np.float32)
+    if n_atoms == 0:
+        return grid
+
+    # Everything that does not depend on the loop body is computed once for all
+    # atoms. Rebuilding these per atom -- three meshgrid arrays and a handful of
+    # one-element numpy operations -- dominated the cost.
+    axes = [grid_origin[axis] + np.arange(n) * resolution
+            for axis, n in enumerate((D, H, W))]
+    cutoff = cutoff_sigma * np.asarray(sigmas)
+    cutoff_sq = cutoff ** 2
+    frac = (positions - grid_origin) / resolution
+    span = (cutoff / resolution)[:, None]
+    lo = np.maximum(0, np.floor(frac - span)).astype(np.intp)
+    hi = np.minimum(np.array([D, H, W]), np.ceil(frac + span).astype(np.intp) + 1)
+    # Most channels are zero for any given atom (about 5 of 16 for proteins),
+    # so only those are multiplied and accumulated.
+    nonzero_channels = [np.flatnonzero(row) for row in features]
 
     for i in range(n_atoms):
-        sigma = sigmas[i]
-        cutoff = cutoff_sigma * sigma
-
-        # Atom position in grid index space (fractional)
-        frac = (positions[i] - grid_origin) / resolution
-
-        # Bounding box of affected voxels
-        lo = np.maximum(0, np.floor(frac - cutoff / resolution).astype(np.intp))
-        hi = np.minimum(
-            np.array([D, H, W]),
-            np.ceil(frac + cutoff / resolution).astype(np.intp) + 1,
-        )
-
-        if (lo >= hi).any():
+        channels = nonzero_channels[i]
+        if channels.size == 0:
             continue
 
-        # Local grid coordinates (sub-grid only)
-        ix = np.arange(lo[0], hi[0])
-        iy = np.arange(lo[1], hi[1])
-        iz = np.arange(lo[2], hi[2])
-        gx, gy, gz = np.meshgrid(ix, iy, iz, indexing="ij")
+        lo0, lo1, lo2 = lo[i]
+        hi0, hi1, hi2 = hi[i]
+        if lo0 >= hi0 or lo1 >= hi1 or lo2 >= hi2:
+            continue
 
-        # Actual spatial positions of these voxels
-        dx = gx * resolution + grid_origin[0] - positions[i, 0]
-        dy = gy * resolution + grid_origin[1] - positions[i, 1]
-        dz = gz * resolution + grid_origin[2] - positions[i, 2]
+        # Offsets from the atom to each voxel centre, as three 1-D arrays that
+        # broadcast into the sub-grid.
+        dx = (axes[0][lo0:hi0] - positions[i, 0])[:, None, None]
+        dy = (axes[1][lo1:hi1] - positions[i, 1])[None, :, None]
+        dz = (axes[2][lo2:hi2] - positions[i, 2])[None, None, :]
         dist_sq = dx * dx + dy * dy + dz * dz
 
+        sigma = sigmas[i]
         gauss = np.exp(-dist_sq / (2.0 * sigma * sigma))
+        gauss[dist_sq > cutoff_sq[i]] = 0.0
 
-        # Apply cutoff mask
-        gauss[dist_sq > cutoff * cutoff] = 0.0
-
-        # Add weighted features to grid channels
-        # features[i] shape: (C,), gauss shape: (sx, sy, sz)
-        grid[:, lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]] += (
-            features[i, :, None, None, None] * gauss[None, :, :, :]
+        sub_grid = grid[:, lo0:hi0, lo1:hi1, lo2:hi2]
+        sub_grid[channels] += (
+            features[i, channels][:, None, None, None] * gauss[None, :, :, :]
         )
 
     return grid
