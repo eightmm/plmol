@@ -183,6 +183,32 @@ class TestKnn:
         assert np.array_equal(native_i, scipy_i)
         assert np.allclose(native_d, scipy_d, atol=1e-4)
 
+    @pytest.mark.parametrize(
+        "name",
+        ["rod", "two distant clusters", "plane", "collinear", "coincident"],
+    )
+    def test_awkward_geometries_still_match_scipy(self, name):
+        """A uniform grid is where degenerate shapes go wrong.
+
+        Each of these breaks a different assumption a grid could make: the
+        points fill one cell, or none of the cells between two clusters, or only
+        a slab of them.
+        """
+        rng = np.random.default_rng(21)
+        shapes = {
+            "rod": rng.uniform([0, 0, 0], [900, 1, 1], size=(3000, 3)),
+            "two distant clusters": np.vstack(
+                [blob := rng.normal(size=(1500, 3)), blob + 900.0]
+            ),
+            "plane": np.c_[rng.uniform(0, 40, size=(3000, 2)), np.zeros(3000)],
+            "collinear": np.c_[np.arange(2000), np.zeros(2000), np.zeros(2000)],
+            "coincident": np.zeros((400, 3)),
+        }
+        points = shapes[name].astype(np.float32)
+        native_d, _ = knn(points, points, 12, backend="native")
+        scipy_d, _ = knn(points, points, 12, backend="scipy")
+        assert np.allclose(native_d, scipy_d, atol=1e-4)
+
     def test_queries_outside_the_data_box(self):
         rng = np.random.default_rng(13)
         data = rng.uniform(0.0, 5.0, size=(200, 3)).astype(np.float32)

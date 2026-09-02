@@ -48,6 +48,13 @@ neighbour cap can make an area come out too large. `shrake_rupley` therefore no
 longer takes `max_neighbours`, and `DEFAULT_SASA_NEIGHBOURS` and
 `SURFACE_BURIAL_KNN` are gone with it.
 
+The cap they set was never observed to bite. At most 18 atoms can reach a given
+sample point on a 3260-atom protein, under the 24 that were allowed, and the
+areas came out identical at 16, 24 and 48 even on a cluster packed tight enough
+that 78% of sample points had more than 24 atoms in reach -- a point is buried
+by its nearest neighbours or not at all. What is gone is the caveat, and the
+saturation warning that came with it.
+
 **freesasa stays the default.** It is not slower and it is what plmol's
 published feature values were computed with. The native path exists so the
 library degrades honestly rather than silently: before it, a missing freesasa
