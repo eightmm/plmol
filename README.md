@@ -10,11 +10,23 @@ pip install plmol
 # With mmCIF support (for mmCIF structure parsing via gemmi)
 pip install 'plmol[mmcif]'
 
+# Faster k-nearest-neighbour queries for the surface path (scipy)
+pip install 'plmol[spatial]'
+
+# freesasa as the SASA backend, instead of plmol's own Shrake-Rupley
+pip install 'plmol[sasa]'
+
 # For development
 pip install -e ".[dev]"
 ```
 
-**Requirements**: Python >= 3.9, PyTorch, RDKit, NumPy, SciPy, FreeSASA, Pandas
+**Requirements**: Python >= 3.9, PyTorch, RDKit, NumPy.
+
+Everything else is optional, and every mode runs without any of it. scipy and
+freesasa are the defaults for the queries and the areas they cover when they
+happen to be installed; see [Spatial Backends](docs/protein.md#spatial-backends)
+and [SASA Backends](docs/protein.md#sasa-backends) for what changes when they
+are not.
 
 ## Quick Start
 

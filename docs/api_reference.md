@@ -37,7 +37,9 @@ plmol/
 ├── complex.py                      # Complex, MolecularComplex classes
 ├── errors.py                       # PlmolError, InputError, DependencyError, FeatureError
 ├── specs.py                        # FeatureSpec, FEATURE_SPECS (PROTEIN/LIGAND/INTERACTION/NUCLEIC_ACID)
-├── utils.py                        # kNN mask utilities
+├── utils.py                        # SASA/burial helpers and kNN mask utilities
+├── sasa.py                         # Shrake-Rupley SASA; freesasa or native backend
+├── spatial.py                      # Neighbour search; sphere occlusion, knn, NeighbourIndex
 ├── constants/
 │   ├── __init__.py                 # Re-exports all constants (amino_acids, nucleic_acids, elements, etc.)
 │   ├── amino_acids.py              # Amino acid mappings & tokens (RESIDUE_MAX_SASA)
@@ -151,6 +153,18 @@ plmol/
 - **`classify_coordination_geometry(coordinating_atoms, metal_coords)`** — Classifies geometry (linear, trigonal_planar, tetrahedral, square_planar, trigonal_bipyramidal, octahedral).
 
 - **`encode_metal_features(metal_sites, n_residues)`** — Encodes detected metal coordination sites into metal type, coordination number, geometry, and distance-stat arrays.
+
+### Backends
+
+Both cover an optional dependency: the library runs without either, on its own
+numpy implementation. See [Spatial Backends](protein.md#spatial-backends) and
+[SASA Backends](protein.md#sasa-backends).
+
+- `set_spatial_backend(name)`, `get_spatial_backend()`, `resolve_spatial_backend()` — `"auto"` | `"scipy"` | `"native"`.
+- `knn(data, queries, k)` — the *k* nearest points, nearest first.
+- `NeighbourIndex(points)` — the same query against a fixed point set, built once.
+- `set_sasa_backend(name)`, `get_sasa_backend()`, `resolve_sasa_backend()` — `"auto"` | `"freesasa"` | `"native"`.
+- `shrake_rupley(coords, radii)` — per-atom SASA in square Angstrom.
 
 ### Error Hierarchy
 

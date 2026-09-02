@@ -42,6 +42,12 @@ set_sasa_backend("auto")      # the default: freesasa, else native
 | `freesasa` | Lee-Richards, 20 slices | freesasa's ProtOr, atom-type dependent |
 | `native` | Shrake-Rupley, 100 points | plmol's `VDW_RADIUS`, element based |
 
+The native occlusion test is exact: it finds the atom pairs whose spheres can
+overlap and tests each atom's sample directions against each neighbour, so no
+neighbour cap can make an area come out too large. `shrake_rupley` therefore no
+longer takes `max_neighbours`, and `DEFAULT_SASA_NEIGHBOURS` and
+`SURFACE_BURIAL_KNN` are gone with it.
+
 **freesasa stays the default.** It is not slower and it is what plmol's
 published feature values were computed with. The native path exists so the
 library degrades honestly rather than silently: before it, a missing freesasa
@@ -62,6 +68,35 @@ values, while the native path normalises everything by the residue's
 `RESIDUE_MAX_SASA`. Polar/apolar classification is identical: freesasa's
 classifier calls N, O and S polar, and the native element rule reproduces that
 exactly on protein atoms.
+
+## Spatial Backends
+
+The surface curvature and the atom-to-point mapping ask for k nearest
+neighbours. scipy's `cKDTree` answers that when it is installed; a uniform grid
+in numpy answers it when it is not.
+
+```python
+from plmol import set_spatial_backend, resolve_spatial_backend
+
+resolve_spatial_backend()        # "scipy" when it is installed
+set_spatial_backend("native")    # plmol's own uniform grid
+set_spatial_backend("auto")      # the default: scipy, else native
+```
+
+**scipy stays the default where it is installed**, because a KD-tree is the
+right structure for this and scipy's is threaded C. Measured on a 3260-atom
+protein whose surface has 15465 points:
+
+| | scipy | native |
+|---|---|---|
+| `surface` mode, end to end | 276 ms | 452 ms |
+| the 39 surface feature columns | — | agree to 4e-06, correlation 1.000000 |
+
+Nothing else in the library goes through a neighbour index. SASA and the
+surface point cloud share an exact sphere-occlusion test that needs no tree;
+metal coordination and the pocket extractor walk their distances directly.
+
+`plmol[spatial]` installs scipy. Without it every mode still runs, on the grid.
 
 ## Featurization Modes
 
