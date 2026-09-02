@@ -506,7 +506,9 @@ class InteractionDetector:
         # Find protein metal atoms by element type
         metal_symbols = {'Zn', 'Fe', 'Mg', 'Mn', 'Cu', 'Co', 'Ni', 'Ca', 'Na', 'K'}
         protein_metals = set()
-        for atom in self._protein_with_h.GetAtoms():
+        _protein = self._protein_with_h
+        for _idx in range(_protein.GetNumAtoms()):
+            atom = _protein.GetAtomWithIdx(_idx)
             full_idx = atom.GetIdx()
             if full_idx in self._protein_full_to_heavy:
                 if atom.GetSymbol() in metal_symbols:

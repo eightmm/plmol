@@ -248,7 +248,10 @@ class PocketExtractor:
         conf = ligand_mol.GetConformer(0)
         positions = np.asarray(conf.GetPositions(), dtype=np.float32).reshape(-1, 3)
         heavy = np.fromiter(
-            (a.GetAtomicNum() > 1 for a in ligand_mol.GetAtoms()),
+            (
+                ligand_mol.GetAtomWithIdx(i).GetAtomicNum() > 1
+                for i in range(ligand_mol.GetNumAtoms())
+            ),
             dtype=bool,
             count=ligand_mol.GetNumAtoms(),
         )

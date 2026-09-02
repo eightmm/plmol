@@ -505,7 +505,8 @@ class MolecularComplex(TempFileOwner):
     @staticmethod
     def _count_protein_residues(protein_mol: "Chem.Mol") -> int:
         residues = set()
-        for atom in protein_mol.GetAtoms():
+        for _idx in range(protein_mol.GetNumAtoms()):
+            atom = protein_mol.GetAtomWithIdx(_idx)
             info = atom.GetPDBResidueInfo()
             if info is None:
                 continue
@@ -520,7 +521,8 @@ class MolecularComplex(TempFileOwner):
         coords = conf.GetPositions()
         metadata = []
         metal_indices = []
-        for atom in protein_mol.GetAtoms():
+        for _idx in range(protein_mol.GetNumAtoms()):
+            atom = protein_mol.GetAtomWithIdx(_idx)
             idx = atom.GetIdx()
             info = atom.GetPDBResidueInfo()
             atom_name = info.GetName().strip() if info is not None else atom.GetSymbol()

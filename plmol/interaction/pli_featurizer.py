@@ -183,7 +183,9 @@ class PLInteractionFeaturizer:
         mol = Chem.Mol(mol)  # Copy to avoid modifying original
 
         # Check if already has hydrogens
-        has_hydrogens = any(atom.GetAtomicNum() == 1 for atom in mol.GetAtoms())
+        has_hydrogens = any(
+            mol.GetAtomWithIdx(i).GetAtomicNum() == 1 for i in range(mol.GetNumAtoms())
+        )
 
         if not has_hydrogens:
             if has_3d(mol):
@@ -202,7 +204,9 @@ class PLInteractionFeaturizer:
         self._protein_full_to_heavy = {}  # full_idx -> heavy_idx
 
         heavy_idx = 0
-        for atom in self._protein_with_h.GetAtoms():
+        _protein = self._protein_with_h
+        for _idx in range(_protein.GetNumAtoms()):
+            atom = _protein.GetAtomWithIdx(_idx)
             full_idx = atom.GetIdx()
             if atom.GetAtomicNum() > 1:  # Not hydrogen
                 self._protein_heavy_indices.append(full_idx)
@@ -219,7 +223,9 @@ class PLInteractionFeaturizer:
         self._ligand_full_to_heavy = {}
 
         heavy_idx = 0
-        for atom in self._ligand_with_h.GetAtoms():
+        _ligand = self._ligand_with_h
+        for _idx in range(_ligand.GetNumAtoms()):
+            atom = _ligand.GetAtomWithIdx(_idx)
             full_idx = atom.GetIdx()
             if atom.GetAtomicNum() > 1:
                 self._ligand_heavy_indices.append(full_idx)
@@ -237,7 +243,8 @@ class PLInteractionFeaturizer:
     def _get_h_neighbors(self, mol: Chem.Mol) -> Dict[int, List[int]]:
         """Get hydrogen neighbor indices for each heavy atom (full indices)."""
         h_neighbors = {}
-        for atom in mol.GetAtoms():
+        for _idx in range(mol.GetNumAtoms()):
+            atom = mol.GetAtomWithIdx(_idx)
             if atom.GetAtomicNum() > 1:  # Heavy atom
                 h_list = []
                 for neighbor in atom.GetNeighbors():
@@ -334,7 +341,8 @@ class PLInteractionFeaturizer:
         Includes hydrogen-related information stored on the heavy atom.
         """
         features = {}
-        for atom in mol.GetAtoms():
+        for _idx in range(mol.GetNumAtoms()):
+            atom = mol.GetAtomWithIdx(_idx)
             full_idx = atom.GetIdx()
             if full_idx not in full_to_heavy:
                 continue  # Skip hydrogens
@@ -381,7 +389,9 @@ class PLInteractionFeaturizer:
         """Extract residue information for protein heavy atoms."""
         self._protein_residue_info = {}
 
-        for atom in self._protein_with_h.GetAtoms():
+        _protein = self._protein_with_h
+        for _idx in range(_protein.GetNumAtoms()):
+            atom = _protein.GetAtomWithIdx(_idx)
             full_idx = atom.GetIdx()
             if full_idx not in self._protein_full_to_heavy:
                 continue
