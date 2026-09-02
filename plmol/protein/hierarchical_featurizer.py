@@ -183,7 +183,10 @@ class HierarchicalProteinData:
         return self.esmc_embeddings is not None or self.esm3_embeddings is not None
 
     def to(self, device: torch.device) -> 'HierarchicalProteinData':
-        """Move all tensors to device."""
+        """Move all tensors to device. Optional tensors that are unset stay None."""
+        def move(tensor):
+            return tensor.to(device) if tensor is not None else None
+
         return HierarchicalProteinData(
             atom_tokens=self.atom_tokens.to(device),
             atom_coords=self.atom_coords.to(device),
@@ -196,17 +199,17 @@ class HierarchicalProteinData:
             residue_sc_coords=self.residue_sc_coords.to(device),
             residue_names=self.residue_names,
             residue_ids=self.residue_ids,
-            residue_vector_features=self.residue_vector_features.to(device) if self.residue_vector_features is not None else None,
-            esmc_embeddings=self.esmc_embeddings.to(device) if self.esmc_embeddings is not None else None,
-            esmc_bos=self.esmc_bos.to(device) if self.esmc_bos is not None else None,
-            esmc_eos=self.esmc_eos.to(device) if self.esmc_eos is not None else None,
-            esm3_embeddings=self.esm3_embeddings.to(device) if self.esm3_embeddings is not None else None,
-            esm3_bos=self.esm3_bos.to(device) if self.esm3_bos is not None else None,
-            esm3_eos=self.esm3_eos.to(device) if self.esm3_eos is not None else None,
-            atom_to_residue=self.atom_to_residue.to(device),
-            residue_atom_indices=self.residue_atom_indices.to(device),
-            residue_atom_mask=self.residue_atom_mask.to(device),
-            num_atoms_per_residue=self.num_atoms_per_residue.to(device),
+            residue_vector_features=move(self.residue_vector_features),
+            esmc_embeddings=move(self.esmc_embeddings),
+            esmc_bos=move(self.esmc_bos),
+            esmc_eos=move(self.esmc_eos),
+            esm3_embeddings=move(self.esm3_embeddings),
+            esm3_bos=move(self.esm3_bos),
+            esm3_eos=move(self.esm3_eos),
+            atom_to_residue=move(self.atom_to_residue),
+            residue_atom_indices=move(self.residue_atom_indices),
+            residue_atom_mask=move(self.residue_atom_mask),
+            num_atoms_per_residue=move(self.num_atoms_per_residue),
         )
 
     def get_feature_dims(self) -> Dict[str, int]:
