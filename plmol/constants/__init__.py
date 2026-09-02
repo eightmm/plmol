@@ -60,6 +60,8 @@ from .amino_acids import (
 
     # Residue tokens
     RESIDUE_TYPES,
+    RESIDUE_TYPE_INDEX,
+    OTHER_RESIDUE_INDEX,
     NUM_RESIDUE_TYPES,
     MAX_ATOMS_PER_RESIDUE,
     RESIDUE_TOKEN,

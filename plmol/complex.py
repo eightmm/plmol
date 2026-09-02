@@ -20,6 +20,11 @@ from .ligand.core import Ligand
 from .protein.core import Protein
 from .specs import FEATURE_SPECS, is_all_mode, normalize_modes, normalize_requests
 
+# Li, Be, Na, Mg, K, Ca, Mn, Fe, Co, Ni, Cu, Zn, Sr, Cd, Ba, Hg
+_METAL_ATOMIC_NUMBERS = frozenset(
+    {3, 4, 11, 12, 19, 20, 25, 26, 27, 28, 29, 30, 38, 48, 56, 80}
+)
+
 try:
     from rdkit import Chem
 except ImportError:  # pragma: no cover - optional dependency typing
@@ -519,29 +524,30 @@ class MolecularComplex(TempFileOwner):
             return []
         conf = protein_mol.GetConformer()
         coords = conf.GetPositions()
-        metadata = []
-        metal_indices = []
-        for _idx in range(protein_mol.GetNumAtoms()):
-            atom = protein_mol.GetAtomWithIdx(_idx)
-            idx = atom.GetIdx()
-            info = atom.GetPDBResidueInfo()
-            atom_name = info.GetName().strip() if info is not None else atom.GetSymbol()
-            res_name = info.GetResidueName().strip() if info is not None else ""
-            chain_id = info.GetChainId() if info is not None else ""
-            element = atom.GetSymbol().upper()
-            metadata.append(
-                {
-                    "atom_name": atom_name,
-                    "res_name": res_name,
-                    "chain_id": chain_id,
-                    "element": element,
-                }
-            )
-            if atom.GetAtomicNum() in {3, 4, 11, 12, 19, 20, 25, 26, 27, 28, 29, 30, 38, 48, 56, 80}:
-                metal_indices.append(idx)
 
+        # Look for metals first. Most structures have none, and building a
+        # metadata dict per atom before finding that out was the whole cost.
+        num_atoms = protein_mol.GetNumAtoms()
+        get_atom = protein_mol.GetAtomWithIdx
+        metal_indices = [
+            i for i in range(num_atoms)
+            if get_atom(i).GetAtomicNum() in _METAL_ATOMIC_NUMBERS
+        ]
         if not metal_indices:
             return []
+
+        metadata = []
+        for i in range(num_atoms):
+            atom = get_atom(i)
+            info = atom.GetPDBResidueInfo()
+            metadata.append(
+                {
+                    "atom_name": info.GetName().strip() if info is not None else atom.GetSymbol(),
+                    "res_name": info.GetResidueName().strip() if info is not None else "",
+                    "chain_id": info.GetChainId() if info is not None else "",
+                    "element": atom.GetSymbol().upper(),
+                }
+            )
 
         import numpy as np
 

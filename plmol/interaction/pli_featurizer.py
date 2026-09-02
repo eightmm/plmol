@@ -31,6 +31,8 @@ from ..constants import (
     NUM_HYBRIDIZATION_TYPES,
     # Residue types
     RESIDUE_TYPES,
+    RESIDUE_TYPE_INDEX,
+    OTHER_RESIDUE_INDEX,
     NUM_RESIDUE_TYPES,
     # Feature normalization
     FORMAL_CHARGE_OFFSET,
@@ -40,6 +42,8 @@ from ..constants import (
 )
 from ..rdkit_utils import has_3d, get_positions
 from ..errors import InputError
+
+_BACKBONE_ATOM_NAMES = frozenset(("N", "CA", "C", "O"))
 
 
 # =============================================================================
@@ -405,12 +409,8 @@ class PLInteractionFeaturizer:
                 atom_name = res_info.GetName().strip()
                 chain = res_info.GetChainId()
 
-                if res_name in RESIDUE_TYPES:
-                    res_idx = RESIDUE_TYPES.index(res_name)
-                else:
-                    res_idx = RESIDUE_TYPES.index('Other')
-
-                is_backbone = atom_name in ['N', 'CA', 'C', 'O']
+                res_idx = RESIDUE_TYPE_INDEX.get(res_name, OTHER_RESIDUE_INDEX)
+                is_backbone = atom_name in _BACKBONE_ATOM_NAMES
 
                 self._protein_residue_info[heavy_idx] = {
                     'residue_name': res_name,
@@ -423,7 +423,7 @@ class PLInteractionFeaturizer:
             else:
                 self._protein_residue_info[heavy_idx] = {
                     'residue_name': 'UNK',
-                    'residue_idx': RESIDUE_TYPES.index('Other'),
+                    'residue_idx': OTHER_RESIDUE_INDEX,
                     'residue_num': -1,
                     'atom_name': '',
                     'chain': '',

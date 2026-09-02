@@ -45,6 +45,10 @@ RESIDUE_TYPES = [
     'Other'
 ]
 NUM_RESIDUE_TYPES = len(RESIDUE_TYPES)
+# Reverse lookup; RESIDUE_TYPES.index() is a linear scan and was being
+# called once per protein atom.
+RESIDUE_TYPE_INDEX = {name: i for i, name in enumerate(RESIDUE_TYPES)}
+OTHER_RESIDUE_INDEX = RESIDUE_TYPE_INDEX['Other']
 
 # Maximum atoms per residue (for coordinate tensors)
 # Standard amino acids have at most 14 heavy atoms (TRP), +1 for sidechain centroid = 15
