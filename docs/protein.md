@@ -39,6 +39,7 @@ result = protein.featurize(
 |------|-----------|-------------|
 | `"graph"` | `"graph"` | Residue/atom-level graph (node_features, edge_index, ...) |
 | `"atom_graph"` | `"atom_graph"` | Atom-level graph; the mode spelling of `graph_kwargs={"level": "atom"}`. Not part of `"all"` |
+| `"embedding"` | `"embedding"` | Per-residue protein language model embeddings (ESM, Ankh, ProtT5). Not part of `"all"` |
 | `"backbone"` | `"backbone"` | Backbone features for inverse folding (dihedrals, kNN, local frames) |
 | `"surface"` | `"surface"` | dMaSIF point cloud with per-vertex features |
 | `"voxel"` | `"voxel"` | 16-channel 3D voxel grid |
@@ -124,6 +125,98 @@ Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA,
 | `[0:8]` | interaction_vectors | 8 | CA_i->CA_j, CA_j->CA_i, CA_i->SC_j, CA_j->SC_i, SC_i->CA_j, SC_j->CA_i, SC_i->SC_j, SC_j->SC_i |
 
 ---
+
+## Embedding Mode
+
+Per-residue embeddings from a protein language model. One call shape for every
+model family, so swapping ESM for Ankh changes a string and nothing else.
+
+```python
+from plmol import Protein, list_protein_language_models, plm_dim
+
+list_protein_language_models()
+# ['ankh-base', 'ankh-large', 'esm2_t12_35m', 'esm2_t33_650m',
+#  'esm3-open', 'esmc_300m', 'esmc_600m', 'prot_t5_xl']
+
+result = protein.featurize(
+    mode="embedding",
+    embedding_kwargs={"model": "ankh-base", "device": "auto"},
+)["embedding"]
+```
+
+`"embedding"` is not part of `mode="all"`, so `"all"` never downloads a model.
+
+### Models
+
+| Name | Dim | Backend | Install |
+|------|-----|---------|---------|
+| `esmc_300m` | 960 | ESM SDK | `pip install 'plmol[esm]'` |
+| `esmc_600m` | 1152 | ESM SDK | `pip install 'plmol[esm]'` |
+| `esm3-open` | 1536 | ESM SDK | `pip install 'plmol[esm]'` |
+| `ankh-base` | 768 | transformers | `pip install 'plmol[plm]'` |
+| `ankh-large` | 1536 | transformers | `pip install 'plmol[plm]'` |
+| `esm2_t12_35m` | 480 | transformers | `pip install 'plmol[plm]'` |
+| `esm2_t33_650m` | 1280 | transformers | `pip install 'plmol[plm]'` |
+| `prot_t5_xl` | 1024 | transformers | `pip install 'plmol[plm]'` |
+
+Neither backend is a hard dependency. Asking for a model whose package is
+missing raises `DependencyError` naming the extra to install; `plm_dim(name)`
+reports the width without loading anything.
+
+Models are cached per `(name, device)`, so featurizing many proteins in a loop
+loads the weights once rather than once per protein.
+
+### Output
+
+| Key | Shape | Type | Description |
+|-----|-------|------|-------------|
+| `embeddings` | `(L, D)` | `float32` | One row per residue, special tokens removed |
+| `bos` | `(D,)` | `float32` | Start-of-sequence token, zeros for models without one |
+| `eos` | `(D,)` | `float32` | End-of-sequence token, zeros for models without one |
+| `model` | `str` | — | The model that produced this |
+| `dim` | `int` | — | D |
+| `sequence` | `str` | — | The sequence embedded, for checking alignment |
+
+Row `i` of `embeddings` is residue `i` of `sequence`. Special-token counts come
+from each model's card and are recorded in the registry; a model returning an
+unexpected number of rows raises `InputError` rather than silently misaligning.
+
+### Chains
+
+Chains are separate molecules, so embedding them together inserts a junction
+that does not exist. Pass `by_chain=True` to embed each one on its own.
+
+```python
+result = protein.featurize(
+    mode="embedding",
+    embedding_kwargs={"model": "esmc_600m", "by_chain": True},
+)["embedding"]
+
+result["by_chain"]["A"]["embeddings"]   # (L_A, D)
+result["by_chain"]["B"]["embeddings"]   # (L_B, D)
+```
+
+### Without a structure
+
+```python
+from plmol import embed_sequence, embed_sequences
+
+embed_sequence("MKTIIALSYIFCLVFA", model="ankh-base")
+embed_sequences({"A": "MKTII", "B": "AAAGG"}, model="esmc_600m")
+```
+
+`embed_sequences` loads the model once for the whole mapping.
+
+### Registering another model
+
+```python
+from plmol import PLMSpec, register_plm
+
+register_plm(PLMSpec(
+    name="my-model", backend="huggingface", dim=1024,
+    model_id="org/my-protein-lm", family="esm2",
+))
+```
 
 ## Graph Mode -- Atom Level
 

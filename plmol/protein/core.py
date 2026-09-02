@@ -137,6 +137,53 @@ class Protein(BaseMolecule):
         self._featurizer = None
         self._featurizer_path = None
 
+    def get_embedding(
+        self,
+        model: str = "esmc_600m",
+        device: str = "auto",
+        by_chain: bool = False,
+    ) -> Dict[str, Any]:
+        """Per-residue embeddings from a protein language model.
+
+        Args:
+            model: A name from ``plmol.list_protein_language_models()``, e.g.
+                "esmc_600m", "esm3-open", "ankh-base", "esm2_t33_650m".
+            device: "auto" (cuda when available), "cuda" or "cpu".
+            by_chain: Embed each chain separately instead of the joined
+                sequence. Chains are independent molecules, so this is the
+                right choice for multi-chain structures.
+
+        Returns:
+            For a single sequence: ``embeddings`` (L, D), ``bos`` (D,),
+            ``eos`` (D,), ``model``, ``dim``, ``sequence``. With
+            ``by_chain=True``: ``by_chain`` mapping each chain id to that
+            dictionary, plus ``model`` and ``dim``.
+
+        Raises:
+            InputError: If no sequence is available, or the model is unknown.
+            DependencyError: If the model's backend package is not installed.
+        """
+        from .plm import embed_sequence, embed_sequences, plm_dim
+
+        if by_chain:
+            self._load_sequence()
+            sequences = self._sequence_by_chain
+            if not sequences:
+                raise InputError("Protein has no per-chain sequence to embed.")
+            return {
+                "by_chain": embed_sequences(sequences, model=model, device=device),
+                "model": model,
+                "dim": plm_dim(model),
+            }
+
+        self._load_sequence()
+        sequence = self._sequence
+        if not sequence and self._sequence_by_chain:
+            sequence = "".join(self._sequence_by_chain.values())
+        if not sequence:
+            raise InputError("Protein has no sequence to embed.")
+        return embed_sequence(sequence, model=model, device=device)
+
     def _get_featurizer(self) -> ProteinFeaturizer:
         if self._pdb_path is None:
             raise InputError("Protein has no PDB path. Initialize from PDB first.")
@@ -298,13 +345,15 @@ class Protein(BaseMolecule):
         surface_kwargs: Optional[Dict[str, Any]] = None,
         voxel_kwargs: Optional[Dict[str, Any]] = None,
         backbone_kwargs: Optional[Dict[str, Any]] = None,
+        embedding_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Generate and cache protein representations with standardized outputs.
 
         Args:
             mode: "all" or a single mode or list of modes.
-                Supported: graph, atom_graph, surface, sequence, backbone.
+                Supported: graph, atom_graph, surface, sequence, backbone,
+                embedding.
                 "atom_graph" is equivalent to graph with
                 graph_kwargs={"level": "atom"} and is not part of "all".
             graph_kwargs: Optional kwargs for graph featurization.
@@ -313,6 +362,9 @@ class Protein(BaseMolecule):
             voxel_kwargs: Optional kwargs for voxel featurization.
             backbone_kwargs: Optional kwargs for backbone featurization.
                 Supports {"k_neighbors": int} (default: 30).
+            embedding_kwargs: Optional kwargs for protein language model
+                embeddings. Supports {"model": str, "device": str,
+                "by_chain": bool}. See plmol.list_protein_language_models().
 
         Returns:
             Dict of requested representations with stable keys. The "graph"
@@ -368,6 +420,9 @@ class Protein(BaseMolecule):
                 self._graph_distance_cutoff = distance_cutoff
 
             results[result_key] = self._graph
+
+        if "embedding" in modes:
+            results["embedding"] = self.get_embedding(**(embedding_kwargs or {}))
 
         if "surface" in modes:
             surface_kwargs = surface_kwargs or {}

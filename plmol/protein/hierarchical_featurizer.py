@@ -32,13 +32,14 @@ Usage:
 """
 
 from dataclasses import dataclass
-from typing import List, Tuple, Optional, Dict, Union
+from typing import Any, List, Tuple, Optional, Dict, Union
 from collections import defaultdict
 
 import torch
 import numpy as np
 
 from .residue_featurizer import ResidueFeaturizer
+from .plm import load_plm, resolve_device
 from .atom_featurizer import AtomFeaturizer
 from .utils import PDBParser, normalize_residue_name, calculate_sidechain_centroid
 from ..constants import (
@@ -376,19 +377,32 @@ class HierarchicalFeaturizer:
 
     def __init__(
         self,
-        esmc_model: str = "esmc_600m",
-        esm3_model: str = "esm3-open",
-        esm_device: str = "cuda",
+        esmc_model: Optional[str] = "esmc_600m",
+        esm3_model: Optional[str] = "esm3-open",
+        esm_device: str = "auto",
     ):
-        self._atom_featurizer = AtomFeaturizer()
+        """
+        Args:
+            esmc_model: ESMC model name, or None to skip ESMC.
+            esm3_model: ESM3 model name, or None to skip ESM3.
+            esm_device: "auto", "cuda" or "cpu".
 
-        # Initialize Dual ESM featurizer (ESMC + ESM3)
-        from .esm_featurizer import DualESMFeaturizer
-        self._esm_featurizer = DualESMFeaturizer(
-            esmc_model=esmc_model,
-            esm3_model=esm3_model,
-            device=esm_device,
-        )
+        Passing None for both skips the esm package entirely, so atom and
+        residue features can be extracted without it installed.
+        """
+        self._atom_featurizer = AtomFeaturizer()
+        self._esmc_model = esmc_model
+        self._esm3_model = esm3_model
+        self._esm_device = resolve_device(esm_device)
+        self._plm_cache: Dict[str, Any] = {}
+
+    def _embed(self, model: Optional[str], sequence: str):
+        """Embeddings for one model name, or None when it is disabled."""
+        if not model or not sequence:
+            return None
+        if model not in self._plm_cache:
+            self._plm_cache[model] = load_plm(model, device=self._esm_device)
+        return self._plm_cache[model].embed(sequence)
 
     def featurize(self, pdb_path: str) -> HierarchicalProteinData:
         """
@@ -499,18 +513,19 @@ class HierarchicalFeaturizer:
         # Step 7: Keep categorical features as integer indices (more efficient)
         # Models can use nn.Embedding or F.one_hot() as needed
 
-        # Step 8: Extract dual ESM embeddings (ESMC + ESM3) using pre-parsed data
-        esm_result = self._esm_featurizer.extract_from_parser(pdb_parser)
+        # Step 8: Extract language model embeddings for whichever models were
+        # requested. All six tensors stay None when both are disabled.
+        sequence = pdb_parser.get_sequence()
+        esmc = self._embed(self._esmc_model, sequence)
+        esm3 = self._embed(self._esm3_model, sequence)
 
-        # ESMC: embeddings [N_res, 1152], bos [1152], eos [1152]
-        esmc_embeddings = esm_result['esmc_embeddings']
-        esmc_bos = esm_result['esmc_bos_token']
-        esmc_eos = esm_result['esmc_eos_token']
+        esmc_embeddings = esmc["embeddings"] if esmc else None
+        esmc_bos = esmc["bos"] if esmc else None
+        esmc_eos = esmc["eos"] if esmc else None
 
-        # ESM3: embeddings [N_res, 1536], bos [1536], eos [1536]
-        esm3_embeddings = esm_result['esm3_embeddings']
-        esm3_bos = esm_result['esm3_bos_token']
-        esm3_eos = esm_result['esm3_eos_token']
+        esm3_embeddings = esm3["embeddings"] if esm3 else None
+        esm3_bos = esm3["bos"] if esm3 else None
+        esm3_eos = esm3["eos"] if esm3 else None
 
         # Verify length matches and truncate/pad if needed
         def _adjust_length(emb, target_len, name):
@@ -525,8 +540,10 @@ class HierarchicalFeaturizer:
                     return torch.cat([emb, pad], dim=0)
             return emb
 
-        esmc_embeddings = _adjust_length(esmc_embeddings, num_residues, "ESMC")
-        esm3_embeddings = _adjust_length(esm3_embeddings, num_residues, "ESM3")
+        if esmc_embeddings is not None:
+            esmc_embeddings = _adjust_length(esmc_embeddings, num_residues, "ESMC")
+        if esm3_embeddings is not None:
+            esm3_embeddings = _adjust_length(esm3_embeddings, num_residues, "ESM3")
 
         return HierarchicalProteinData(
             atom_tokens=atom_tokens,

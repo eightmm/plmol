@@ -7,6 +7,18 @@ from .protein.pdb_standardizer import PDBStandardizer
 from .protein.residue_featurizer import ResidueFeaturizer
 from .protein.atom_featurizer import AtomFeaturizer
 from .protein.hierarchical_featurizer import HierarchicalFeaturizer, HierarchicalProteinData
+from .protein.plm import (
+    PLMSpec,
+    PLM_REGISTRY,
+    ProteinLanguageModel,
+    clear_plm_cache,
+    embed_sequence,
+    embed_sequences,
+    list_protein_language_models,
+    load_plm,
+    plm_dim,
+    register_plm,
+)
 from .protein.esm_featurizer import ESMFeaturizer
 
 # --- Ligand ---
@@ -43,6 +55,9 @@ __version__ = "0.2.1"
 __all__ = [
     "Protein", "ProteinFeaturizer", "PDBStandardizer", "ResidueFeaturizer", "AtomFeaturizer",
     "HierarchicalFeaturizer", "HierarchicalProteinData", "ESMFeaturizer",
+    "PLMSpec", "PLM_REGISTRY", "ProteinLanguageModel", "register_plm",
+    "list_protein_language_models", "plm_dim", "load_plm", "clear_plm_cache",
+    "embed_sequence", "embed_sequences",
     "Ligand", "MoleculeFeaturizer", "MoleculeGraphFeaturizer", "LigandFeaturizer",
     "fragment_by_brics", "fragment_molecule", "fragment_on_rotatable_bonds",
     "build_bond_graph", "build_fragment_graph",
