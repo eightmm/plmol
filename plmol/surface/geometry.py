@@ -14,6 +14,10 @@ from .mapping import _normalize_to_range, CURVATURE_SCALES
 logger = logging.getLogger(__name__)
 
 
+# Points per curvature batch; keeps the per-scale neighbour arrays small.
+_CURVATURE_CHUNK = 4096
+
+
 def _compute_pca_curvature(
     points: np.ndarray,
     normals: np.ndarray,
@@ -60,33 +64,42 @@ def _compute_pca_curvature(
 
     # Adaptive K based on scale
     k = max(6, min(int(radius * 8), n // 2))
-    _, knn_idx = tree.query(points, k=k, workers=-1)
-    if knn_idx.ndim == 1:
-        knn_idx = knn_idx[:, None]
 
-    # Vectorised PCA: batch covariance for all points
-    neighbours = points[knn_idx]                     # (N, K, 3)
-    centroid = neighbours.mean(axis=1, keepdims=True)  # (N, 1, 3)
-    centered = neighbours - centroid                    # (N, K, 3)
+    # Points are processed in chunks. Each point's neighbourhood is independent,
+    # so the result is identical to one pass, but the (N, K, 3) neighbour and
+    # centred arrays would otherwise reach tens of megabytes per scale -- and
+    # every scale is computed concurrently.
+    for start in range(0, n, _CURVATURE_CHUNK):
+        stop = min(start + _CURVATURE_CHUNK, n)
+        _, knn_idx = tree.query(points[start:stop], k=k, workers=-1)
+        if knn_idx.ndim == 1:
+            knn_idx = knn_idx[:, None]
 
-    # Covariance matrices: (N, 3, 3)
-    covs = np.einsum('nki,nkj->nij', centered, centered) / k
+        # Vectorised PCA: batch covariance for this chunk
+        neighbours = points[knn_idx]                       # (chunk, K, 3)
+        centroid = neighbours.mean(axis=1, keepdims=True)  # (chunk, 1, 3)
+        centered = neighbours - centroid                   # (chunk, K, 3)
 
-    # Batch eigenvalues: (N, 3) ascending
-    eigvals = np.linalg.eigvalsh(covs)
-    eigvals = np.maximum(eigvals, 0.0)
+        # Covariance matrices: (chunk, 3, 3)
+        covs = np.einsum('nki,nkj->nij', centered, centered) / k
 
-    total = eigvals.sum(axis=1)  # (N,)
-    valid = total > 1e-12
+        # Batch eigenvalues: (chunk, 3) ascending
+        eigvals = np.linalg.eigvalsh(covs)
+        eigvals = np.maximum(eigvals, 0.0)
 
-    # Mean curvature proxy
-    mean_curv[valid] = eigvals[valid, 0] / total[valid]
+        total = eigvals.sum(axis=1)  # (chunk,)
+        valid = total > 1e-12
 
-    # Gaussian curvature proxy
-    gauss_curv[valid] = (
-        eigvals[valid, 0] * eigvals[valid, 1]
-    ) / (total[valid] ** 2)
+        chunk_mean = mean_curv[start:stop]
+        chunk_gauss = gauss_curv[start:stop]
+        # Mean curvature proxy
+        chunk_mean[valid] = eigvals[valid, 0] / total[valid]
+        # Gaussian curvature proxy
+        chunk_gauss[valid] = (
+            eigvals[valid, 0] * eigvals[valid, 1]
+        ) / (total[valid] ** 2)
 
+    # Normalisation is global, so it runs once over the assembled arrays.
     return _normalize_to_range(mean_curv), _normalize_to_range(gauss_curv)
 
 

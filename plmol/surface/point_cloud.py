@@ -17,6 +17,11 @@ from ..constants import (
 )
 
 
+# Points per burial-query batch, chosen so the (chunk, K) neighbour arrays
+# stay a few MB regardless of protein size.
+_BURIAL_QUERY_CHUNK = 32768
+
+
 @lru_cache(maxsize=None)
 def _fibonacci_sphere(n: int) -> np.ndarray:
     """Generate n approximately uniform points on a unit sphere (Fibonacci lattice).
@@ -100,17 +105,25 @@ def create_surface_points(
     # Build tree of atom centres for neighbour lookup
     tree = cKDTree(positions)
 
-    # For each point, check if it is buried inside any *other* atom's expanded sphere
+    # For each point, check if it is buried inside any *other* atom's expanded
+    # sphere. Points are queried in chunks: each point's neighbours are
+    # independent, so this is identical to one big query, but the (P, K)
+    # float64 distance and int64 index arrays would otherwise be over 100 MB
+    # for a mid-sized protein while only a few percent of points survive.
     K = min(SURFACE_BURIAL_KNN, n_atoms)
-    dists, idx = tree.query(all_points_flat, k=K, workers=-1)
-    if K == 1:
-        dists = dists[:, None]
-        idx = idx[:, None]
+    exposed_chunks = []
+    for start in range(0, len(all_points_flat), _BURIAL_QUERY_CHUNK):
+        stop = min(start + _BURIAL_QUERY_CHUNK, len(all_points_flat))
+        dists, idx = tree.query(all_points_flat[start:stop], k=K, workers=-1)
+        if K == 1:
+            dists = dists[:, None]
+            idx = idx[:, None]
 
-    is_owner = idx == atom_ids[:, None]  # (P, K) bool
-    is_inside = dists < expanded_radii[idx]  # (P, K) bool
-    buried = (is_inside & ~is_owner).any(axis=1)  # (P,) bool
-    exposed = ~buried
+        is_owner = idx == atom_ids[start:stop, None]     # (chunk, K) bool
+        is_inside = dists < expanded_radii[idx]          # (chunk, K) bool
+        exposed_chunks.append(~(is_inside & ~is_owner).any(axis=1))
+
+    exposed = np.concatenate(exposed_chunks) if exposed_chunks else np.zeros(0, dtype=bool)
 
     points = all_points_flat[exposed]
     normals = all_normals_flat[exposed]
