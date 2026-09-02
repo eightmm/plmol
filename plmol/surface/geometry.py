@@ -99,12 +99,16 @@ def compute_pointcloud_geometry(
     if n_verts >= 4:
         if verbose:
             logger.debug("Computing PCA curvature for point cloud")
-        index = NeighbourIndex(points)
         # kNN results are sorted by distance, so the k nearest neighbours are a
-        # prefix of the k_max nearest. One query per block therefore serves
-        # every scale, instead of one query per scale.
+        # prefix of the k_max nearest. One query therefore serves every scale,
+        # instead of one query per scale. It is also one query rather than one
+        # per block: a neighbour search amortises its structure over the whole
+        # cloud, and splitting the queries up threw that away.
         neighbour_counts = [_adaptive_k(radius, n_verts) for radius in curvature_scales]
         k_max = max(neighbour_counts)
+        _, neighbours = NeighbourIndex(points).query(points, k=k_max)
+        if neighbours.ndim == 1:
+            neighbours = neighbours[:, None]
 
         blocks = [
             (start, min(start + _CURVATURE_CHUNK, n_verts))
@@ -113,20 +117,17 @@ def compute_pointcloud_geometry(
 
         def process_block(bounds: tuple[int, int]) -> None:
             start, stop = bounds
-            _, knn_idx = index.query(points[start:stop], k=k_max)
-            if knn_idx.ndim == 1:
-                knn_idx = knn_idx[:, None]
             for scale, k in enumerate(neighbour_counts):
                 _pca_curvature_from_neighbours(
                     points,
-                    knn_idx[:, :k],
+                    neighbours[start:stop, :k],
                     mean_curvatures[start:stop, scale],
                     gauss_curvatures[start:stop, scale],
                 )
 
-        # Blocks, not scales, are the unit of parallelism: the largest scale
-        # alone took as long as the other four together, so splitting by scale
-        # left most workers idle.
+        # Blocks, not scales, are the unit of parallelism for the PCA: the
+        # largest scale alone took as long as the other four together, so
+        # splitting by scale left most workers idle.
         max_workers = min(len(blocks), (os.cpu_count() or 4))
         try:
             if max_workers > 1:

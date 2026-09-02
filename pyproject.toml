@@ -44,8 +44,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# scipy and freesasa are here because the tests compare the native backends
+# against them; the library itself treats both as optional.
 dev = [
-  "pytest>=8.0"
+  "pytest>=8.0",
+  "scipy>=1.8.0",
+  "freesasa>=2.1.0"
 ]
 mmcif = [
     "gemmi>=0.7.5",

@@ -47,11 +47,6 @@ _PAIR_BLOCK = 1 << 16
 #: Queries sampled to size the k-nearest-neighbour grid.
 _CELL_SIZE_SAMPLE = 128
 
-#: Cells are made this much wider than the sampled k-th neighbour distance.
-#: Wider cells cost more candidates per query but fewer queries need the ring
-#: widened; measured over 1.0-2.0 on a 15k-point cloud, 1.3 is the best of them.
-_CELL_SIZE_MARGIN = 1.3
-
 _BACKEND = "auto"
 
 
@@ -149,10 +144,10 @@ class _Grid:
         """Points in the cells within Chebyshev distance *ring* of each query.
 
         Returns ``(row, index)`` pairs: ``row`` indexes *queries*, ``index``
-        indexes the points the grid was built from. Every point within
-        ``(ring - 1) * cell_size`` of a query is guaranteed to appear, because a
-        point that close can differ from the query by at most ``ring`` cells
-        along any axis.
+        indexes the points the grid was built from. Every point closer than
+        ``ring * cell_size`` is guaranteed to appear: two coordinates less than
+        ``ring * cell_size`` apart divide by the cell size into values less than
+        ``ring`` apart, so their cell indices differ by at most ``ring``.
         """
         cell = self._cell_of(queries)
         offsets = _ring_offsets(ring)
@@ -388,10 +383,18 @@ class NeighbourIndex:
         return self._tree
 
     def _grid_for(self, queries: np.ndarray, k: int) -> "_Grid":
+        """The grid for this *k*, built once and kept.
+
+        The cell size is read off the queries, so a first call with only a
+        handful of them would size the grid from too little and every later
+        query would pay for it. Below the sample size the points themselves
+        stand in, which for the usual self-query is the same thing.
+        """
         with self._lock:
             grid = self._grids.get(k)
             if grid is None:
-                grid = _Grid(self.points, _knn_cell_size(self.points, queries, k))
+                sample = queries if len(queries) >= _CELL_SIZE_SAMPLE else self.points
+                grid = _Grid(self.points, _knn_cell_size(self.points, sample, k))
                 self._grids[k] = grid
         return grid
 
@@ -431,9 +434,9 @@ def _knn_native(data: np.ndarray, queries: np.ndarray, k: int, grid=None):
     Queries are grouped by the cell they land in, so every query in a cell
     shares one candidate list and the distances become a dense block instead of
     a ragged gather. A ring of cells around a query only guarantees the points
-    within ``(ring - 1) * cell_size``; a group whose k-th neighbour lies beyond
-    that is redone with a wider ring, which keeps the result exact rather than
-    approximate.
+    closer than ``ring * cell_size``; a group whose k-th neighbour lies at or
+    beyond that is redone with a wider ring, which keeps the result exact rather
+    than approximate.
     """
     if grid is None:
         grid = _Grid(data, _knn_cell_size(data, queries, k))
@@ -454,12 +457,12 @@ def _knn_native(data: np.ndarray, queries: np.ndarray, k: int, grid=None):
     for lo, hi in zip(bounds[:-1], bounds[1:]):
         members = group[lo:hi]
         here = cell[members[0]]
-        ring = 2
+        ring = 1
         while True:
             candidates = _cell_block(grid, here, ring)
             if len(candidates) >= k:
                 near_d, near_i = _dense_topk(queries[members], data, candidates, k)
-                if near_d[:, -1].max() <= (ring - 1) * grid.size:
+                if near_d[:, -1].max() < ring * grid.size:
                     break
             if len(candidates) >= len(data):
                 near_d, near_i = _dense_topk(queries[members], data, candidates, k)
@@ -515,6 +518,11 @@ def _knn_cell_size(data: np.ndarray, queries: np.ndarray, k: int) -> float:
     Estimated by brute force from a small sample of queries rather than from the
     bounding box, because the point clouds this runs on sit on a surface: a
     density read off the enclosing volume is wrong by an order of magnitude.
+    The estimate is used as the cell size directly: one ring of cells then
+    covers everything closer than that distance, which is what makes a typical
+    query exact without widening. Scaling it by 0.7 to 1.3 was measured on a
+    15k-point cloud and none of those beat leaving it alone.
+
     The bounding box still sets a floor, for the degenerate cases where the
     sampled distance comes out at zero.
     """
@@ -533,4 +541,4 @@ def _knn_cell_size(data: np.ndarray, queries: np.ndarray, k: int) -> float:
     squared = np.einsum("ijk,ijk->ij", delta, delta)
     kth = np.partition(squared, k - 1, axis=1)[:, k - 1]
     typical = float(np.sqrt(np.percentile(kth, 90)))
-    return max(typical * _CELL_SIZE_MARGIN, floor, 1e-3)
+    return max(typical, floor, 1e-3)
