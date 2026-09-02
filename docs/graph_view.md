@@ -132,7 +132,7 @@ model = MyGNN(in_channels=dims["node_features"], edge_dim=dims["edge_features"])
 | `protein` | `graph` | node 83, node_vector 31, edge 39, edge_vector 8 |
 | `protein` | `atom_graph` | node 10, node_tokens 3, edge 6 |
 | `nucleic_acid` | `graph` | node 23, node_tokens 1, edge 3 |
-| `nucleic_acid` | `atom_graph` | node 0, node_tokens 1, edge 1 |
+| `nucleic_acid` | `atom_graph` | node 0 (token-only: use `node_tokens`), node_tokens 1, edge 1 |
 
 These are the widths of `as_graph(view)`, not of the raw `featurize` output —
 ligand `graph` has no `edge_features` key at all, it has a dense

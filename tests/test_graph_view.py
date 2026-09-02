@@ -334,15 +334,12 @@ class TestNucleicAcidViews:
 
     NA_MODES = ["graph", "atom_graph"]
 
-    @pytest.fixture(scope="class")
-    def na_views(self, tmp_path_factory):
+    @pytest.fixture
+    def na_views(self, dna_pdb):
         from plmol import NucleicAcid
-        from tests.test_nucleic_acid_core import _DNA_PDB
 
-        path = tmp_path_factory.mktemp("na") / "dna.pdb"
-        path.write_text(_DNA_PDB)
         return {
-            mode: NucleicAcid.from_pdb(str(path)).featurize(mode=mode)[mode]
+            mode: NucleicAcid.from_pdb(dna_pdb).featurize(mode=mode)[mode]
             for mode in self.NA_MODES
         }
 
@@ -379,12 +376,9 @@ class TestNucleicAcidViews:
         assert batch["num_nodes"] == 2 * g["num_nodes"]
         assert int(batch["edge_index"].max()) < batch["num_nodes"]
 
-    def test_backbone_is_not_a_graph(self, tmp_path):
+    def test_backbone_is_not_a_graph(self, dna_pdb):
         from plmol import NucleicAcid
-        from tests.test_nucleic_acid_core import _DNA_PDB
 
-        path = tmp_path / "dna.pdb"
-        path.write_text(_DNA_PDB)
-        backbone = NucleicAcid.from_pdb(str(path)).featurize(mode="backbone")["backbone"]
+        backbone = NucleicAcid.from_pdb(dna_pdb).featurize(mode="backbone")["backbone"]
         with pytest.raises(InputError, match="not graphs"):
             as_graph(backbone)
