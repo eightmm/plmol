@@ -3,7 +3,6 @@ Atom-level protein featurizer for extracting atomic features and SASA.
 """
 
 import logging
-import math
 import torch
 import numpy as np
 from typing import Dict, Tuple, Optional, List
@@ -37,7 +36,7 @@ from ..constants import (
     HBOND_ACCEPTOR_ATOMS,
     BACKBONE_ATOM_SET,
 )
-from ..utils import suppress_freesasa_warnings
+from ..utils import freesasa_structure_result
 
 
 class AtomFeaturizer:
@@ -191,9 +190,7 @@ class AtomFeaturizer:
                 'radius': torch.zeros(0, dtype=torch.float32),
             }
             return empty_sasa, empty_info
-        with suppress_freesasa_warnings():
-            structure = freesasa.Structure(pdb_file)
-            result = freesasa.calc(structure)
+        structure, result = freesasa_structure_result(pdb_file)
 
         n_atoms = result.nAtoms()
 
@@ -418,92 +415,92 @@ class AtomFeaturizer:
             if atom.atom_name in ('N', 'CA', 'C'):
                 residue_backbone[key][atom.atom_name] = atom.coords
 
-        # Compute phi/psi per residue
-        residue_ss = {}  # (chain, resnum) -> (helix, sheet, coil)
+        # Collect the residues that have a complete phi and psi definition,
+        # then evaluate both dihedrals in one batched pass.
+        n_res = len(residue_order)
+        phi_quads, psi_quads, angle_rows = [], [], []
+        for idx in range(n_res):
+            key = residue_order[idx]
+            chain = key[0]
+            curr_bb = residue_backbone.get(key, {})
+            if not ('N' in curr_bb and 'CA' in curr_bb and 'C' in curr_bb):
+                continue
+            if idx == 0 or idx == n_res - 1:
+                continue
+            prev_key = residue_order[idx - 1]
+            next_key = residue_order[idx + 1]
+            if prev_key[0] != chain or next_key[0] != chain:
+                continue
+            prev_bb = residue_backbone.get(prev_key, {})
+            next_bb = residue_backbone.get(next_key, {})
+            if 'C' not in prev_bb or 'N' not in next_bb:
+                continue
+            phi_quads.append((prev_bb['C'], curr_bb['N'], curr_bb['CA'], curr_bb['C']))
+            psi_quads.append((curr_bb['N'], curr_bb['CA'], curr_bb['C'], next_bb['N']))
+            angle_rows.append(key)
 
-        for i, key in enumerate(residue_order):
-            chain, resnum = key
-            phi, psi = None, None
+        # Default every residue to coil; boundary and incomplete residues stay there.
+        residue_ss = {key: (0.0, 0.0, 1.0) for key in residue_order}
 
-            # phi_i = dihedral(C_{i-1}, N_i, CA_i, C_i)
-            if i > 0:
-                prev_key = residue_order[i - 1]
-                if prev_key[0] == chain:  # same chain
-                    prev_bb = residue_backbone.get(prev_key, {})
-                    curr_bb = residue_backbone.get(key, {})
-                    if 'C' in prev_bb and 'N' in curr_bb and 'CA' in curr_bb and 'C' in curr_bb:
-                        phi = self._dihedral_angle(
-                            prev_bb['C'], curr_bb['N'], curr_bb['CA'], curr_bb['C']
-                        )
+        if angle_rows:
+            phi_pts = np.asarray(phi_quads, dtype=np.float64)
+            psi_pts = np.asarray(psi_quads, dtype=np.float64)
+            phi_deg = np.degrees(self._dihedral_angles(
+                phi_pts[:, 0], phi_pts[:, 1], phi_pts[:, 2], phi_pts[:, 3]
+            ))
+            psi_deg = np.degrees(self._dihedral_angles(
+                psi_pts[:, 0], psi_pts[:, 1], psi_pts[:, 2], psi_pts[:, 3]
+            ))
 
-            # psi_i = dihedral(N_i, CA_i, C_i, N_{i+1})
-            if i < len(residue_order) - 1:
-                next_key = residue_order[i + 1]
-                if next_key[0] == chain:  # same chain
-                    curr_bb = residue_backbone.get(key, {})
-                    next_bb = residue_backbone.get(next_key, {})
-                    if 'N' in curr_bb and 'CA' in curr_bb and 'C' in curr_bb and 'N' in next_bb:
-                        psi = self._dihedral_angle(
-                            curr_bb['N'], curr_bb['CA'], curr_bb['C'], next_bb['N']
-                        )
-
-            # Assign SS from Ramachandran regions
-            if phi is not None and psi is not None:
-                phi_deg = math.degrees(phi)
-                psi_deg = math.degrees(psi)
-
-                if -160 <= phi_deg <= -20 and -80 <= psi_deg <= 20:
-                    residue_ss[key] = (1.0, 0.0, 0.0)  # helix
-                elif -180 <= phi_deg <= -60 and (60 <= psi_deg <= 180 or -180 <= psi_deg <= -120):
-                    residue_ss[key] = (0.0, 1.0, 0.0)  # sheet
-                else:
-                    residue_ss[key] = (0.0, 0.0, 1.0)  # coil
-            else:
-                residue_ss[key] = (0.0, 0.0, 1.0)  # coil (boundary residues)
+            is_helix = (phi_deg >= -160) & (phi_deg <= -20) & (psi_deg >= -80) & (psi_deg <= 20)
+            is_sheet = (~is_helix) & (phi_deg >= -180) & (phi_deg <= -60) & (
+                ((psi_deg >= 60) & (psi_deg <= 180)) | ((psi_deg >= -180) & (psi_deg <= -120))
+            )
+            for row, helix, sheet in zip(angle_rows, is_helix, is_sheet):
+                if helix:
+                    residue_ss[row] = (1.0, 0.0, 0.0)
+                elif sheet:
+                    residue_ss[row] = (0.0, 1.0, 0.0)
 
         # Map residue SS back to atoms
-        ss = torch.zeros(n_atoms, 3, dtype=torch.float32)
-        atom_idx = 0
+        ss_rows = []
         for atom in parser.protein_atoms:
             if atom.atom_name == 'OXT' or atom.res_name in ['LLP', 'PTR']:
                 continue
-            if atom_idx >= n_atoms:
+            if len(ss_rows) >= n_atoms:
                 break
-            key = (atom.chain_id, atom.res_num)
-            h, s, c = residue_ss.get(key, (0.0, 0.0, 1.0))
-            ss[atom_idx, 0] = h
-            ss[atom_idx, 1] = s
-            ss[atom_idx, 2] = c
-            atom_idx += 1
+            ss_rows.append(residue_ss.get((atom.chain_id, atom.res_num), (0.0, 0.0, 1.0)))
 
+        ss = torch.zeros(n_atoms, 3, dtype=torch.float32)
+        if ss_rows:
+            ss[:len(ss_rows)] = torch.tensor(ss_rows, dtype=torch.float32)
         return ss
 
     @staticmethod
-    def _dihedral_angle(
-        p0: Tuple[float, float, float],
-        p1: Tuple[float, float, float],
-        p2: Tuple[float, float, float],
-        p3: Tuple[float, float, float],
-    ) -> float:
-        """Compute dihedral angle in radians from 4 points."""
-        b0 = np.array(p0) - np.array(p1)
-        b1 = np.array(p2) - np.array(p1)
-        b2 = np.array(p3) - np.array(p2)
+    def _dihedral_angles(
+        p0: np.ndarray,
+        p1: np.ndarray,
+        p2: np.ndarray,
+        p3: np.ndarray,
+    ) -> np.ndarray:
+        """Dihedral angles in radians for batches of 4 points, each (M, 3).
 
-        # Normalize b1
-        b1_norm = np.linalg.norm(b1)
-        if b1_norm < 1e-8:
-            return 0.0
-        b1 = b1 / b1_norm
+        Degenerate quadruples (near-zero central bond) yield 0.0.
+        """
+        b0 = p0 - p1
+        b1 = p2 - p1
+        b2 = p3 - p2
 
-        # Compute planes
-        v = b0 - np.dot(b0, b1) * b1
-        w = b2 - np.dot(b2, b1) * b1
+        b1_norm = np.linalg.norm(b1, axis=-1)
+        valid = b1_norm >= 1e-8
+        b1_unit = b1 / np.where(valid, b1_norm, 1.0)[:, None]
 
-        x = np.dot(v, w)
-        y = np.dot(np.cross(b1, v), w)
+        v = b0 - np.sum(b0 * b1_unit, axis=-1, keepdims=True) * b1_unit
+        w = b2 - np.sum(b2 * b1_unit, axis=-1, keepdims=True) * b1_unit
 
-        return math.atan2(y, x)
+        x = np.sum(v * w, axis=-1)
+        y = np.sum(np.cross(b1_unit, v) * w, axis=-1)
+        return np.where(valid, np.arctan2(y, x), 0.0)
 
 
 # Convenience function for direct use

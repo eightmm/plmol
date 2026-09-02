@@ -28,6 +28,12 @@ from ..rdkit_utils import ensure_3d_conformer, has_3d
 logger = logging.getLogger(__name__)
 
 
+def _conformer_coords(conf, num_atoms: int) -> torch.Tensor:
+    """First ``num_atoms`` conformer positions as a float32 (num_atoms, 3) tensor."""
+    positions = np.asarray(conf.GetPositions(), dtype=np.float32).reshape(-1, 3)
+    return torch.from_numpy(positions[:num_atoms].copy())
+
+
 class AtomFeatureMixin:
     """Mixin providing atom-level feature extraction methods.
 
@@ -642,11 +648,7 @@ class AtomFeatureMixin:
         # If coordinates exist, use them
         if has_3d(mol):
             conf = mol.GetConformer(0)
-            coords = []
-            for i in range(num_atoms):
-                pos = conf.GetAtomPosition(i)
-                coords.append([pos.x, pos.y, pos.z])
-            return torch.tensor(coords, dtype=torch.float32)
+            return _conformer_coords(conf, num_atoms)
 
         # No coordinates exist
         if not generate_if_missing:
@@ -657,11 +659,9 @@ class AtomFeatureMixin:
             mol_3d = ensure_3d_conformer(mol)
             if mol_3d is not None and has_3d(mol_3d):
                 conf = mol_3d.GetConformer(0)
-                coords = []
-                for i in range(num_atoms):
-                    pos = conf.GetAtomPosition(i)
-                    coords.append([pos.x, pos.y, pos.z])
-                return torch.tensor(coords, dtype=torch.float32)
+                # ensure_3d_conformer adds hydrogens, so keep the leading
+                # heavy-atom rows that line up with the input molecule.
+                return _conformer_coords(conf, num_atoms)
         except (RuntimeError, ValueError, ImportError):
             logger.debug("3D coordinate generation failed, using zero coordinates")
 

@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 
 from rdkit import Chem
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=None)
+def _atomic_number(element: str) -> int:
+    """Atomic number for an element symbol, 0 when unrecognized."""
+    try:
+        return Chem.GetPeriodicTable().GetAtomicNumber(element)
+    except Exception:
+        logger.warning("Unknown element '%s', defaulting atomic number to 0", element)
+        return 0
 
 
 class _SimplePDBResidueInfo:
@@ -30,11 +41,7 @@ class _SimpleAtom:
                  b_factor: float = 0.0, idx: int = 0):
         self._idx = idx
         self._res_info = _SimplePDBResidueInfo(res_name, atom_name, b_factor=b_factor)
-        try:
-            self._atomic_num = Chem.GetPeriodicTable().GetAtomicNumber(element)
-        except Exception:
-            logger.warning("Unknown element '%s', defaulting atomic number to 0", element)
-            self._atomic_num = 0
+        self._atomic_num = _atomic_number(element)
 
     def GetIdx(self) -> int:
         return self._idx

@@ -4,6 +4,7 @@ import contextlib
 import logging
 import os
 import sys
+from collections import OrderedDict
 from io import StringIO
 
 import numpy as np
@@ -59,6 +60,43 @@ def warnings_suppressed():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         yield
+
+
+_SASA_RESULT_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()
+_SASA_RESULT_CACHE_MAX = 4
+
+
+def freesasa_structure_result(pdb_file: str):
+    """Return a cached ``(structure, result)`` FreeSASA pair for a PDB path.
+
+    ``freesasa.calc`` dominates protein featurization (~65 ms on a 3k-atom
+    structure), and residue-level and atom-level featurizers run it on the same
+    standardized file. The cache is keyed on identity plus mtime and size so a
+    rewritten or recycled temporary path never returns a stale result.
+
+    Raises:
+        DependencyError: If freesasa is not installed.
+    """
+    from .errors import DependencyError
+
+    if _freesasa is None:
+        raise DependencyError("freesasa is required for SASA computation.")
+
+    stat = os.stat(pdb_file)
+    key = (os.path.abspath(pdb_file), stat.st_ino, stat.st_mtime_ns, stat.st_size)
+    cached = _SASA_RESULT_CACHE.get(key)
+    if cached is not None:
+        _SASA_RESULT_CACHE.move_to_end(key)
+        return cached
+
+    with suppress_freesasa_warnings():
+        structure = _freesasa.Structure(pdb_file)
+        result = _freesasa.calc(structure)
+
+    _SASA_RESULT_CACHE[key] = (structure, result)
+    if len(_SASA_RESULT_CACHE) > _SASA_RESULT_CACHE_MAX:
+        _SASA_RESULT_CACHE.popitem(last=False)
+    return structure, result
 
 
 def compute_burial_index(

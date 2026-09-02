@@ -15,6 +15,7 @@ _ROTATABLE_PATTERN = Chem.MolFromSmarts(ROTATABLE_BOND_SMARTS)
 def fragment_on_rotatable_bonds(
     mol: Chem.Mol,
     min_fragment_size: int = 1,
+    compute_features: bool = True,
 ) -> Dict[str, Any]:
     """Fragment a molecule by cutting at rotatable bonds.
 
@@ -22,6 +23,9 @@ def fragment_on_rotatable_bonds(
         mol: RDKit molecule.
         min_fragment_size: Fragments smaller than this are merged into the
             largest neighbouring fragment.
+        compute_features: When False, ``fragment_features`` is None. Callers
+            that only need the atom/fragment mappings avoid a full descriptor
+            pass per fragment.
 
     Returns:
         Dict with keys: fragment_smiles, atom_to_fragment, fragment_adjacency,
@@ -38,12 +42,14 @@ def fragment_on_rotatable_bonds(
         min_fragment_size=min_fragment_size,
         method="rotatable",
         count_key="num_rotatable_bonds",
+        compute_features=compute_features,
     )
 
 
 def fragment_by_brics(
     mol: Chem.Mol,
     min_fragment_size: int = 1,
+    compute_features: bool = True,
 ) -> Dict[str, Any]:
     """Fragment a molecule by cutting RDKit BRICS bonds.
 
@@ -58,6 +64,7 @@ def fragment_by_brics(
         min_fragment_size=min_fragment_size,
         method="brics",
         count_key="num_brics_bonds",
+        compute_features=compute_features,
     )
 
 
@@ -65,13 +72,22 @@ def fragment_molecule(
     mol: Chem.Mol,
     method: str = "rotatable",
     min_fragment_size: int = 1,
+    compute_features: bool = True,
 ) -> Dict[str, Any]:
     """Fragment a molecule with one of the supported fragmentation methods."""
     method_norm = method.lower()
     if method_norm in {"rotatable", "rotatable_bonds", "rotbond"}:
-        return fragment_on_rotatable_bonds(mol, min_fragment_size=min_fragment_size)
+        return fragment_on_rotatable_bonds(
+            mol,
+            min_fragment_size=min_fragment_size,
+            compute_features=compute_features,
+        )
     if method_norm in {"brics", "brics_bonds"}:
-        return fragment_by_brics(mol, min_fragment_size=min_fragment_size)
+        return fragment_by_brics(
+            mol,
+            min_fragment_size=min_fragment_size,
+            compute_features=compute_features,
+        )
     raise ValueError("Unsupported fragment method: %s. Supported: rotatable, brics" % method)
 
 
@@ -82,6 +98,7 @@ def _fragment_on_bonds(
     min_fragment_size: int,
     method: str,
     count_key: str,
+    compute_features: bool = True,
 ) -> Dict[str, Any]:
     """Fragment a molecule by cutting the given atom-pair bonds."""
     bond_indices: List[int] = []
@@ -101,6 +118,7 @@ def _fragment_on_bonds(
             num_atoms,
             method=method,
             count_key=count_key,
+            compute_features=compute_features,
         )
 
     fragmented = Chem.FragmentOnBonds(mol, bond_indices, addDummies=False)
@@ -143,7 +161,7 @@ def _fragment_on_bonds(
         "fragment_method": method,
         "num_cleaved_bonds": num_cleaved,
         count_key: num_cleaved,
-        "fragment_features": _compute_fragment_features(smiles_list),
+        "fragment_features": _compute_fragment_features(smiles_list) if compute_features else None,
     }
 
 
@@ -153,6 +171,7 @@ def _single_fragment_result(
     *,
     method: str = "rotatable",
     count_key: str = "num_rotatable_bonds",
+    compute_features: bool = True,
 ) -> Dict[str, Any]:
     """Return result when there are no rotatable bonds."""
     smiles_list = [Chem.MolToSmiles(mol)]
@@ -165,7 +184,7 @@ def _single_fragment_result(
         "fragment_method": method,
         "num_cleaved_bonds": 0,
         count_key: 0,
-        "fragment_features": _compute_fragment_features(smiles_list),
+        "fragment_features": _compute_fragment_features(smiles_list) if compute_features else None,
     }
 
 

@@ -105,7 +105,4 @@ def get_positions(mol: Chem.Mol) -> np.ndarray:
     if mol.GetNumConformers() == 0:
         raise ValueError("Molecule has no conformer")
     conf = mol.GetConformer(0)
-    return np.array(
-        [[pos.x, pos.y, pos.z] for pos in (conf.GetAtomPosition(i) for i in range(mol.GetNumAtoms()))],
-        dtype=np.float64,
-    )
+    return np.asarray(conf.GetPositions(), dtype=np.float64).reshape(-1, 3)

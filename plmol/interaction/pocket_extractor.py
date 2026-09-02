@@ -246,13 +246,13 @@ class PocketExtractor:
     def _get_ligand_coords(ligand_mol: Chem.Mol) -> np.ndarray:
         """Extract heavy atom coordinates from ligand."""
         conf = ligand_mol.GetConformer(0)
-        coords = []
-        for i in range(ligand_mol.GetNumAtoms()):
-            atom = ligand_mol.GetAtomWithIdx(i)
-            if atom.GetAtomicNum() > 1:  # Heavy atoms only
-                pos = conf.GetAtomPosition(i)
-                coords.append([pos.x, pos.y, pos.z])
-        return np.array(coords, dtype=np.float32)
+        positions = np.asarray(conf.GetPositions(), dtype=np.float32).reshape(-1, 3)
+        heavy = np.fromiter(
+            (a.GetAtomicNum() > 1 for a in ligand_mol.GetAtoms()),
+            dtype=bool,
+            count=ligand_mol.GetNumAtoms(),
+        )
+        return positions[heavy]
 
     def _parse_protein_pdb(self):
         """

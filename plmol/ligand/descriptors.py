@@ -33,6 +33,9 @@ from ..rdkit_utils import (
     has_3d,
 )
 
+# Compiled once; SMARTS parsing is not free at descriptor-call rates.
+_AMIDE_PATTERN = Chem.MolFromSmarts('[C](=[O])[N]')
+
 
 class MoleculeFeaturizer:
     """
@@ -423,8 +426,7 @@ class MoleculeFeaturizer:
         features['brenk_alert_count'] = min(len(brenk_cat.GetMatches(mol)) / 5.0, 1.0)
 
         # --- Structural complexity (4) ---
-        amide_pat = Chem.MolFromSmarts('[C](=[O])[N]')
-        n_amides = len(mol.GetSubstructMatches(amide_pat)) if amide_pat else 0
+        n_amides = len(mol.GetSubstructMatches(_AMIDE_PATTERN)) if _AMIDE_PATTERN else 0
         features['num_amide_bonds'] = min(n_amides / 10.0, 1.0)
         features['num_stereocenters'] = min(
             rdMolDescriptors.CalcNumAtomStereoCenters(mol) / 10.0, 1.0
@@ -587,12 +589,8 @@ class MoleculeFeaturizer:
         include_key = self._normalize_include_fps(include_fps)
         return self._compute_features(mol, include_fps=include_key)
 
-    def _compute_features(
-        self,
-        mol: Chem.Mol,
-        include_fps: Optional[Iterable[str]] = None,
-    ) -> Dict:
-        """Compute all features for a prepared molecule."""
+    def _compute_descriptor_tensor(self, mol: Chem.Mol) -> torch.Tensor:
+        """Build the 62-dim descriptor tensor for a prepared molecule."""
         physicochemical = self.get_physicochemical_features(mol)
         druglike = self.get_druglike_features(mol)
         structural = self.get_structural_features(mol)
@@ -632,12 +630,30 @@ class MoleculeFeaturizer:
             [float(admet[key]) for key in admet_keys],
             dtype=np.float32,
         )
+        return torch.from_numpy(descriptors)
+
+    def _cached_descriptor_tensor(self) -> torch.Tensor:
+        """Descriptor tensor for the initialized molecule, computed once."""
+        if 'descriptors' not in self._cache:
+            self._cache['descriptors'] = self._compute_descriptor_tensor(self._mol)
+        return self._cache['descriptors']
+
+    def _compute_features(
+        self,
+        mol: Chem.Mol,
+        include_fps: Optional[Iterable[str]] = None,
+    ) -> Dict:
+        """Compute all features for a prepared molecule."""
+        if mol is self._mol:
+            descriptors = self._cached_descriptor_tensor()
+        else:
+            descriptors = self._compute_descriptor_tensor(mol)
 
         include_order = self._normalize_include_fps(include_fps)
         include_set = set(include_order)
         fingerprints = self.get_fingerprints(mol, include_fps=include_set)
 
-        out = {'descriptors': torch.from_numpy(descriptors)}
+        out = {'descriptors': descriptors}
         for fp_name in include_order:
             if fp_name in fingerprints:
                 out[fp_name] = fingerprints[fp_name]
@@ -721,8 +737,9 @@ class MoleculeFeaturizer:
         Returns:
             torch.Tensor: 62 normalized molecular descriptors
         """
-        features = self.get_features()
-        return features['descriptors']
+        if self._mol is None:
+            raise InputError("No molecule provided. Either initialize with a molecule or pass one to this method.")
+        return self._cached_descriptor_tensor()
 
     def get_morgan_fingerprint(self, radius: int = 2, n_bits: int = 2048) -> torch.Tensor:
         """

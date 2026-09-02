@@ -531,13 +531,11 @@ class MolecularComplex:
         if protein_mol.GetNumConformers() == 0:
             return []
         conf = protein_mol.GetConformer()
-        coords = []
+        coords = conf.GetPositions()
         metadata = []
         metal_indices = []
         for atom in protein_mol.GetAtoms():
             idx = atom.GetIdx()
-            pos = conf.GetAtomPosition(idx)
-            coords.append([pos.x, pos.y, pos.z])
             info = atom.GetPDBResidueInfo()
             atom_name = info.GetName().strip() if info is not None else atom.GetSymbol()
             res_name = info.GetResidueName().strip() if info is not None else ""
@@ -560,7 +558,7 @@ class MolecularComplex:
         import numpy as np
 
         return detect_metal_sites(
-            atom_coords=np.asarray(coords, dtype=np.float32),
+            atom_coords=np.asarray(coords, dtype=np.float32).reshape(-1, 3),
             atom_metadata=metadata,
             metal_indices=metal_indices,
         )

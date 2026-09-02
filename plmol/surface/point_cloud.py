@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Optional
 
 import numpy as np
@@ -16,11 +17,15 @@ from ..constants import (
 )
 
 
+@lru_cache(maxsize=None)
 def _fibonacci_sphere(n: int) -> np.ndarray:
     """Generate n approximately uniform points on a unit sphere (Fibonacci lattice).
 
+    Cached and returned read-only: every atom of a given point count shares the
+    same lattice, so this is called once per distinct count rather than per atom.
+
     Returns:
-        (n, 3) array of unit vectors.
+        (n, 3) read-only array of unit vectors.
     """
     indices = np.arange(n, dtype=np.float64)
     phi = np.arccos(1.0 - 2.0 * (indices + 0.5) / n)
@@ -29,7 +34,9 @@ def _fibonacci_sphere(n: int) -> np.ndarray:
     x = np.sin(phi) * np.cos(theta)
     y = np.sin(phi) * np.sin(theta)
     z = np.cos(phi)
-    return np.column_stack([x, y, z]).astype(np.float32)
+    sphere = np.column_stack([x, y, z]).astype(np.float32)
+    sphere.setflags(write=False)
+    return sphere
 
 
 def create_surface_points(

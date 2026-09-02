@@ -467,7 +467,9 @@ class LigandFeaturizer:
         # Hierarchical fragment mappings (mirrors protein atom_to_residue)
         feat = featurizer if featurizer is not None else self._ligand_base_featurizer
         mol = feat.get_rdkit_mol()
-        frag_result = fragment_on_rotatable_bonds(mol)
+        # Only the mappings are consumed here; skip the per-fragment
+        # descriptor pass that ``fragment`` mode needs.
+        frag_result = fragment_on_rotatable_bonds(mol, compute_features=False)
         graph["atom_to_fragment"] = frag_result["atom_to_fragment"]
         graph["fragment_atom_indices"] = frag_result["fragment_atom_indices"]
         graph["fragment_adjacency"] = frag_result["fragment_adjacency"]

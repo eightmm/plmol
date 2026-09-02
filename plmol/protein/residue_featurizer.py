@@ -40,7 +40,7 @@ from .utils import (
     normalize_residue_name,
 )
 
-from ..utils import knn_mask_torch
+from ..utils import freesasa_structure_result, knn_mask_torch
 
 # Import amino acid constants from centralized module
 from ..constants import (
@@ -329,41 +329,39 @@ class ResidueFeaturizer:
         int_to_3letter = {v: k for k, v in AMINO_ACID_3_TO_INT.items()}
 
         try:
-            with suppress_freesasa_warnings():
-                structure = fs.Structure(self.pdb_file)
-                result = fs.calc(structure)
-                residue_areas = result.residueAreas()
+            _, result = freesasa_structure_result(self.pdb_file)
+            residue_areas = result.residueAreas()
 
-                sasas = []
-                residue_idx = 0
-                for chain, residues in residue_areas.items():
-                    for residue, values in residues.items():
-                        # Look up per-residue max SASA for normalization
-                        if residue_idx < num_residues:
-                            _, _, res_type_int = self._residues[residue_idx]
-                            res_name_3 = int_to_3letter.get(res_type_int, 'UNK')
-                            max_sasa = RESIDUE_MAX_SASA.get(res_name_3, 200.0)
-                        else:
-                            max_sasa = 200.0
-                        residue_idx += 1
+            sasas = []
+            residue_idx = 0
+            for chain, residues in residue_areas.items():
+                for residue, values in residues.items():
+                    # Look up per-residue max SASA for normalization
+                    if residue_idx < num_residues:
+                        _, _, res_type_int = self._residues[residue_idx]
+                        res_name_3 = int_to_3letter.get(res_type_int, 'UNK')
+                        max_sasa = RESIDUE_MAX_SASA.get(res_name_3, 200.0)
+                    else:
+                        max_sasa = 200.0
+                    residue_idx += 1
 
-                        burial_index = 1.0 - (values.relativeTotal / 100.0)
-                        polar_apolar_ratio = values.polar / (values.polar + values.apolar + 1e-8)
+                    burial_index = 1.0 - (values.relativeTotal / 100.0)
+                    polar_apolar_ratio = values.polar / (values.polar + values.apolar + 1e-8)
 
-                        sasas.append([
-                            values.total / max_sasa,
-                            values.polar / max_sasa,
-                            values.apolar / max_sasa,
-                            values.mainChain / max_sasa,
-                            values.sideChain / max_sasa,
-                            values.relativeTotal,
-                            values.relativePolar,
-                            values.relativeApolar,
-                            values.relativeMainChain,
-                            values.relativeSideChain,
-                            burial_index,
-                            polar_apolar_ratio,
-                        ])
+                    sasas.append([
+                        values.total / max_sasa,
+                        values.polar / max_sasa,
+                        values.apolar / max_sasa,
+                        values.mainChain / max_sasa,
+                        values.sideChain / max_sasa,
+                        values.relativeTotal,
+                        values.relativePolar,
+                        values.relativeApolar,
+                        values.relativeMainChain,
+                        values.relativeSideChain,
+                        burial_index,
+                        polar_apolar_ratio,
+                    ])
 
             sasa_tensor = torch.nan_to_num(torch.as_tensor(sasas))
 
