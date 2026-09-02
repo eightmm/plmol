@@ -310,7 +310,9 @@ class Protein(BaseMolecule):
 
         Args:
             mode: "all" or a single mode or list of modes.
-                Supported: graph, surface, sequence, backbone
+                Supported: graph, atom_graph, surface, sequence, backbone.
+                "atom_graph" is equivalent to graph with
+                graph_kwargs={"level": "atom"} and is not part of "all".
             graph_kwargs: Optional kwargs for graph featurization.
                 Use {"level": "residue"} (default) or {"level": "atom"}.
             surface_kwargs: Optional kwargs for surface extraction.
@@ -337,9 +339,18 @@ class Protein(BaseMolecule):
                 self._sequence if self._sequence is not None else self._sequence_by_chain
             )
 
+        # "atom_graph" is the mode spelling of graph_kwargs={"level": "atom"},
+        # matching NucleicAcid. Both spellings stay supported, and asking for
+        # both yields a residue graph and an atom graph side by side.
+        graph_requests = []
         if "graph" in modes:
-            graph_kwargs = graph_kwargs or {}
-            level = graph_kwargs.get("level", "residue")
+            graph_requests.append(("graph", None))
+        if "atom_graph" in modes:
+            graph_requests.append(("atom_graph", "atom"))
+
+        for result_key, level_override in graph_requests:
+            graph_kwargs = dict(graph_kwargs or {})
+            level = level_override or graph_kwargs.get("level", "residue")
             knn_cutoff = graph_kwargs.get("knn_cutoff")
             featurizer = self._get_featurizer()
 
@@ -362,7 +373,7 @@ class Protein(BaseMolecule):
                 self._graph_level = "residue"
                 self._graph_distance_cutoff = distance_cutoff
 
-            results["graph"] = self._graph
+            results[result_key] = self._graph
 
         if "surface" in modes:
             surface_kwargs = surface_kwargs or {}

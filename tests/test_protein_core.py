@@ -145,3 +145,36 @@ class TestProteinFromPDBReal:
         result = p.featurize(mode=["graph", "sequence"])
         assert "graph" in result
         assert "sequence" in result
+
+
+class TestAtomGraphMode:
+    """`atom_graph` is the mode spelling of graph_kwargs={"level": "atom"}."""
+
+    def test_matches_the_graph_kwargs_spelling(self, example_pdb):
+        from plmol import Protein
+
+        as_mode = Protein.from_pdb(example_pdb).featurize(mode="atom_graph")["atom_graph"]
+        as_kwargs = Protein.from_pdb(example_pdb).featurize(
+            mode="graph", graph_kwargs={"level": "atom"}
+        )["graph"]
+        assert set(as_mode) == set(as_kwargs)
+        assert torch.equal(as_mode["node_features"], as_kwargs["node_features"])
+
+    def test_requesting_both_gives_two_levels(self, example_pdb):
+        from plmol import Protein
+
+        result = Protein.from_pdb(example_pdb).featurize(mode=["graph", "atom_graph"])
+        assert set(result) == {"graph", "atom_graph"}
+        # Residue graphs carry (scalar, vector) tuples; atom graphs carry tensors.
+        assert isinstance(result["graph"]["node_features"], tuple)
+        assert torch.is_tensor(result["atom_graph"]["node_features"])
+
+    def test_is_not_part_of_all(self, example_pdb):
+        from plmol import Protein
+
+        assert "atom_graph" not in Protein.from_pdb(example_pdb).featurize(mode="all")
+
+    def test_is_an_allowed_mode(self):
+        from plmol.specs import PROTEIN_SPEC
+
+        assert "atom_graph" in PROTEIN_SPEC.allowed_modes

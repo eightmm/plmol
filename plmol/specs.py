@@ -33,7 +33,9 @@ LIGAND_SPEC = FeatureSpec(
 
 PROTEIN_SPEC = FeatureSpec(
     name="protein",
-    allowed_modes=("graph", "surface", "voxel", "sequence", "backbone", "all"),
+    allowed_modes=(
+        "graph", "atom_graph", "surface", "voxel", "sequence", "backbone", "all",
+    ),
     default_modes=("graph", "sequence"),
     output_keys=("graph", "surface", "voxel", "sequence", "backbone"),
 )
