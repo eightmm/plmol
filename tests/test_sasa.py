@@ -189,3 +189,38 @@ class TestResidueBurialIndexIsInformative:
         burial = [t for t in graph["node_features"] if t.shape[-1] == 12][0].numpy()[:, 10]
         assert burial.std() > 0.1, "a near-constant column means the /100 bug is back"
         assert burial.max() > 0.9 and burial.min() < 0.5
+
+
+class TestEveryModeWorksWithoutFreesasa:
+    """freesasa is an extra, so the whole pipeline has to run without it.
+
+    Rather than uninstalling it, the native backend is forced -- the same code
+    path an environment without freesasa takes.
+    """
+
+    @pytest.fixture(autouse=True)
+    def force_native(self):
+        set_sasa_backend("native")
+
+    def test_residue_graph(self, example_pdb):
+        graph = Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]
+        block = [t for t in graph["node_features"] if t.shape[-1] == 12][0].numpy()
+        assert block.shape[0] > 0 and np.abs(block).sum() > 0
+
+    def test_atom_graph_keeps_every_atom(self, example_pdb):
+        protein = Protein.from_pdb(example_pdb)
+        atom_graph = protein.featurize(mode="atom_graph")["atom_graph"]
+        coords = np.asarray(atom_graph["coords"])
+        assert coords.shape[0] > 0
+        for key in ("sasa", "relative_sasa", "burial_index", "is_polar_sasa"):
+            assert np.asarray(atom_graph[key]).shape[0] == coords.shape[0]
+        assert np.asarray(atom_graph["sasa"]).sum() > 0
+
+    def test_surface(self, example_pdb):
+        surface = Protein.from_pdb(example_pdb).featurize(mode="surface")["surface"]
+        burial = np.asarray(surface["feature_dict"]["burial_index"])
+        assert burial.size > 0 and burial.std() > 0.01
+
+    def test_voxel(self, example_pdb):
+        voxel = Protein.from_pdb(example_pdb).featurize(mode="voxel")["voxel"]
+        assert np.asarray(voxel["voxel"]).shape[0] == 16

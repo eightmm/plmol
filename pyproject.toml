@@ -41,7 +41,6 @@ dependencies = [
   "torch>=1.9.0",
   "numpy>=1.19.0",
   "rdkit>=2020.09.1",
-  "freesasa>=2.1.0",
   "scipy>=1.8.0"
 ]
 
@@ -51,6 +50,11 @@ dev = [
 ]
 mmcif = [
     "gemmi>=0.7.5",
+]
+# freesasa is the default SASA backend when installed. plmol computes SASA
+# natively without it; the two differ slightly in algorithm and radii.
+sasa = [
+    "freesasa>=2.1.0",
 ]
 # Protein language models. Both are optional: plmol imports and runs without
 # either, and asking for a model from a missing backend raises DependencyError

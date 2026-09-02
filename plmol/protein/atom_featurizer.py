@@ -161,7 +161,7 @@ class AtomFeaturizer:
 
     def get_atom_sasa(self, pdb_file: str) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
-        Calculate atom-level SASA using FreeSASA.
+        Calculate atom-level SASA with the configured backend.
 
         Args:
             pdb_file: Path to PDB file
@@ -176,21 +176,6 @@ class AtomFeaturizer:
                     - 'chain_label': Chain labels
                     - 'radius': Atomic radii
         """
-        # Calculate SASA using FreeSASA
-        if freesasa is None:
-            logger.warning(
-                "freesasa is not available for atom-level SASA calculation. "
-                "Returning zeros. Install it with: pip install freesasa"
-            )
-            empty_sasa = torch.zeros(0, dtype=torch.float32)
-            empty_info = {
-                'residue_name': [],
-                'residue_number': torch.zeros(0, dtype=torch.long),
-                'atom_name': [],
-                'chain_label': [],
-                'radius': torch.zeros(0, dtype=torch.float32),
-            }
-            return empty_sasa, empty_info
         structure, result = sasa_structure_result(pdb_file)
 
         n_atoms = result.nAtoms()
