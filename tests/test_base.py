@@ -1,5 +1,7 @@
 """Tests for plmol/base.py — BaseMolecule abstract class."""
 
+import os
+
 import numpy as np
 import pytest
 
@@ -76,3 +78,58 @@ class TestBaseMolecule:
         mol = ConcreteMolecule()
         mol._sequence = "ACDEFG"
         assert mol.sequence == "ACDEFG"
+
+
+class TestTempFileOwnership:
+    """Temporary files are released deterministically, not only via __del__."""
+
+    @staticmethod
+    def _temp_pdbs():
+        import glob
+        import tempfile
+
+        return set(glob.glob(os.path.join(tempfile.gettempdir(), "tmp*.pdb")))
+
+    def test_molecules_and_complex_share_the_mixin(self):
+        from plmol import Ligand, NucleicAcid, Protein, TempFileOwner
+        from plmol.complex import MolecularComplex
+
+        for cls in (Protein, Ligand, NucleicAcid, MolecularComplex):
+            assert issubclass(cls, TempFileOwner)
+
+    def test_context_manager_releases_the_standardized_pdb(self, example_pdb):
+        from plmol import Protein
+
+        before = self._temp_pdbs()
+        with Protein.from_pdb(example_pdb) as protein:
+            protein.featurize(mode="graph")
+            assert self._temp_pdbs() - before, "featurizer should hold a temp file"
+        assert not self._temp_pdbs() - before
+
+    def test_cleanup_is_repeatable_and_does_not_break_reuse(self, example_pdb):
+        from plmol import Protein
+
+        protein = Protein.from_pdb(example_pdb)
+        assert protein.featurize(mode="sequence")["sequence"]
+        protein.cleanup()
+        protein.cleanup()
+        assert protein.featurize(mode="sequence")["sequence"]
+
+    def test_complex_cleanup_reaches_its_molecules(self):
+        from plmol import Ligand
+        from plmol.complex import MolecularComplex
+
+        ligand = Ligand.from_smiles("CCO")
+        ligand._owned_temp_paths.append("/nonexistent/path.sdf")
+        complex_ = MolecularComplex(molecules={"ligand": ligand})
+        with complex_:
+            pass
+        assert ligand._owned_temp_paths == []
+
+    def test_owned_paths_exist_without_calling_init(self):
+        """The list is created on demand, so a subclass skipping __init__ works."""
+        from plmol import TempFileOwner
+
+        owner = TempFileOwner.__new__(TempFileOwner)
+        assert owner._owned_temp_paths == []
+        owner.cleanup()

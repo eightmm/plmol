@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Iterable, Optional, Union
 
-from .base import BaseMolecule
+from .base import BaseMolecule, TempFileOwner
 from .cache import LRUCache
 from .constants import DEFAULT_DISTANCE_CUTOFF
 from .errors import DependencyError, InputError
@@ -36,7 +36,7 @@ def _freeze(value: Any) -> Any:
     return value
 
 
-class MolecularComplex:
+class MolecularComplex(TempFileOwner):
     """User-facing API for arbitrary multi-molecule operations."""
 
     def __init__(
@@ -49,7 +49,6 @@ class MolecularComplex:
         self._cache: LRUCache[Any, Any] = LRUCache(max_size=cache_size)
         self._protein_mol_cache: Optional["Chem.Mol"] = None
         self._ligand_mol_id: Optional[int] = self._current_ligand_mol_id()
-        self._owned_temp_paths: list[str] = []
 
     def _current_ligand_mol_id(self) -> Optional[int]:
         lig = self.molecules.get("ligand")
@@ -267,20 +266,7 @@ class MolecularComplex:
             cleanup = getattr(mol, "cleanup", None)
             if callable(cleanup):
                 cleanup()
-
-        for path in self._owned_temp_paths:
-            try:
-                if os.path.exists(path):
-                    os.unlink(path)
-            except OSError:
-                pass
-        self._owned_temp_paths.clear()
-
-    def __del__(self) -> None:
-        try:
-            self.cleanup()
-        except Exception:
-            pass
+        super().cleanup()
 
     # ------------------------------------------------------------------
     # Cache freshness

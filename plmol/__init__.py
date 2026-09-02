@@ -13,6 +13,7 @@ from .protein.esm_featurizer import ESMFeaturizer
 from .ligand.core import Ligand
 from .ligand.descriptors import MoleculeFeaturizer
 from .ligand.graph import MoleculeGraphFeaturizer
+from .base import BaseMolecule, TempFileOwner
 from .graph_view import FEATURE_DIMS, as_graph, collate, feature_dims
 from .ligand.fragment_graph import build_fragment_graph
 from .ligand.line_graph import build_bond_graph
@@ -51,5 +52,6 @@ __all__ = [
     "PLInteractionFeaturizer", "Complex", "MolecularComplex",
     "PlmolError", "InputError", "DependencyError", "FeatureError",
     "FeatureSpec", "FEATURE_SPECS",
+    "BaseMolecule", "TempFileOwner",
     "constants",
 ]

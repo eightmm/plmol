@@ -45,7 +45,6 @@ class NucleicAcid(BaseMolecule):
         self._chain_id = chain_id
         self._na_type = na_type  # "DNA", "RNA", or None (auto-detected)
         self._featurizer: Optional[NucleicFeaturizer] = None
-        self._owned_temp_paths: list[str] = []
 
     # ------------------------------------------------------------------
     # Constructors
@@ -77,22 +76,6 @@ class NucleicAcid(BaseMolecule):
         obj.metadata["source"] = path
         obj._owned_temp_paths.append(tmp_path)
         return obj
-
-    def cleanup(self) -> None:
-        """Remove temporary files created by constructors such as from_mmcif()."""
-        for path in self._owned_temp_paths:
-            try:
-                if os.path.exists(path):
-                    os.unlink(path)
-            except OSError:
-                pass
-        self._owned_temp_paths.clear()
-
-    def __del__(self) -> None:
-        try:
-            self.cleanup()
-        except Exception:
-            pass
 
     @classmethod
     def from_structure(cls, path: str, chain_id: Optional[str] = None) -> "NucleicAcid":

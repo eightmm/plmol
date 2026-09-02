@@ -49,7 +49,6 @@ class Protein(BaseMolecule):
         self._featurizer_path: Optional[str] = None
         self._graph_level: Optional[str] = None
         self._graph_distance_cutoff: Optional[float] = None
-        self._owned_temp_paths: list[str] = []
 
     @classmethod
     def from_pdb(
@@ -104,22 +103,6 @@ class Protein(BaseMolecule):
         obj._owned_temp_paths.append(tmp_path)
         return obj
 
-    def cleanup(self) -> None:
-        """Remove temporary files created by constructors such as from_mmcif()."""
-        for path in self._owned_temp_paths:
-            try:
-                if os.path.exists(path):
-                    os.unlink(path)
-            except OSError:
-                pass
-        self._owned_temp_paths.clear()
-
-    def __del__(self) -> None:
-        try:
-            self.cleanup()
-        except Exception:
-            pass
-
     @classmethod
     def from_structure(
         cls,
@@ -142,6 +125,17 @@ class Protein(BaseMolecule):
         obj = cls()
         obj._sequence = sequence
         return obj
+
+    def cleanup(self) -> None:
+        """Release temporary files, including the featurizer's standardized PDB.
+
+        Dropping the featurizer lets it delete the standardized copy it wrote.
+        A later featurize call simply rebuilds it, so this is safe to call at
+        any point.
+        """
+        super().cleanup()
+        self._featurizer = None
+        self._featurizer_path = None
 
     def _get_featurizer(self) -> ProteinFeaturizer:
         if self._pdb_path is None:
