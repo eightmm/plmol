@@ -38,6 +38,7 @@ result = protein.featurize(
 | Mode | Output Key | Description |
 |------|-----------|-------------|
 | `"graph"` | `"graph"` | Residue/atom-level graph (node_features, edge_index, ...) |
+| `"atom_graph"` | `"atom_graph"` | Atom-level graph; the mode spelling of `graph_kwargs={"level": "atom"}`. Not part of `"all"` |
 | `"backbone"` | `"backbone"` | Backbone features for inverse folding (dihedrals, kNN, local frames) |
 | `"surface"` | `"surface"` | dMaSIF point cloud with per-vertex features |
 | `"voxel"` | `"voxel"` | 16-channel 3D voxel grid |
@@ -126,13 +127,31 @@ Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA,
 
 ## Graph Mode -- Atom Level
 
+Two equivalent spellings; the second matches `NucleicAcid` and the ligand graph
+views.
+
 ```python
 result = protein.featurize(
     mode="graph",
     graph_kwargs={"level": "atom", "distance_cutoff": 4.0, "knn_cutoff": None},
 )
 graph = result["graph"]
+
+result = protein.featurize(
+    mode="atom_graph",
+    graph_kwargs={"distance_cutoff": 4.0, "knn_cutoff": None},
+)
+graph = result["atom_graph"]
 ```
+
+Asking for `mode=["graph", "atom_graph"]` returns a residue graph under
+`"graph"` and an atom graph under `"atom_graph"`. `"atom_graph"` is not part of
+`mode="all"`, which keeps `"all"` at its previous cost.
+
+For a shape shared with every other plmol graph, see
+[Graph View API](graph_view.md): `as_graph` folds the atom graph's token ids
+and loose per-edge arrays into `node_tokens`, `node_features` and
+`edge_features`.
 
 ### Output
 

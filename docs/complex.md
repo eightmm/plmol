@@ -49,7 +49,7 @@ cx.molecules["protein"] = new_protein
 ```python
 result = cx.featurize(
     requests="all",  # present components among "ligand", "protein", "nucleic_acid", "interaction"
-    ligand_kwargs={"mode": ["graph", "fingerprint"]},
+    ligand_kwargs={"mode": ["graph", "bond_graph", "fragment_graph", "fingerprint"]},
     protein_kwargs={"mode": ["graph", "sequence"]},
     nucleic_acid_kwargs={"mode": ["sequence", "graph"]},
     interaction_kwargs={"distance_cutoff": 6.0, "knn_cutoff": None},
@@ -63,8 +63,8 @@ result = cx.featurize(
 Individual access:
 
 ```python
-cx.molecules["ligand"].featurize(mode="graph")
-cx.molecules["protein"].featurize(mode="backbone")
+cx.molecules["ligand"].featurize(mode="graph")          # also: bond_graph, fragment_graph
+cx.molecules["protein"].featurize(mode="backbone")      # also: atom_graph
 cx.molecules["nucleic_acid"].featurize(mode="sequence")
 cx.interaction(distance_cutoff=6.0, pocket_cutoff=8.0, knn_cutoff=None)
 ```
