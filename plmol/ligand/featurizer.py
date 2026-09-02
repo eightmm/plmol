@@ -22,6 +22,7 @@ from ..errors import InputError, DependencyError
 from ..specs import LIGAND_SPEC, normalize_modes
 from .descriptors import MoleculeFeaturizer
 from .fragment import fragment_molecule, fragment_on_rotatable_bonds
+from .fragment_graph import build_fragment_graph
 from .line_graph import build_bond_graph
 from ..rdkit_utils import ensure_3d_conformer, has_3d, prepare_mol
 from ..surface import build_ligand_surface
@@ -108,8 +109,8 @@ class LigandFeaturizer:
 
         Args:
             mode: "all" or a single mode or list/tuple of modes.
-                Supported: graph, bond_graph, surface, voxel, fingerprint,
-                descriptor, smiles, sequence, fragment, morgan
+                Supported: graph, bond_graph, fragment_graph, surface, voxel,
+                fingerprint, descriptor, smiles, sequence, fragment, morgan
             graph_kwargs: Optional kwargs for graph featurization.
             surface_kwargs: Optional kwargs for surface extraction.
             fingerprint_kwargs: Optional kwargs for fingerprint extraction.
@@ -152,6 +153,11 @@ class LigandFeaturizer:
         if "bond_graph" in modes:
             graph_kwargs = graph_kwargs or {}
             results["bond_graph"] = self.get_bond_graph(**graph_kwargs)
+
+        if "fragment_graph" in modes:
+            results["fragment_graph"] = self.get_fragment_graph(
+                graph_kwargs=graph_kwargs, **dict(fragment_kwargs or {})
+            )
 
         if "fingerprint" in modes:
             fingerprint_kwargs = dict(fingerprint_kwargs or {})
@@ -428,6 +434,41 @@ class LigandFeaturizer:
             featurizer.get_rdkit_mol(),
             adjacency=graph["adjacency"],
             node_features=graph["node_features"],
+            coords=graph.get("coords"),
+        )
+
+    def get_fragment_graph(
+        self,
+        mol_or_smiles: Optional[Union[str, "Chem.Mol"]] = None,
+        method: str = "rotatable",
+        min_fragment_size: int = 1,
+        graph_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Return the fragment-level graph derived from the atom-wise graph.
+
+        Fragments become nodes and cleaved bonds become edges. This computes
+        per-fragment descriptors for the node features; use ``graph`` or
+        ``bond_graph`` if only the atom-to-fragment mappings are needed.
+
+        Args:
+            mol_or_smiles: Molecule override; defaults to the current ligand.
+            method: Fragmentation method, ``"rotatable"`` or ``"brics"``.
+            min_fragment_size: Merge fragments smaller than this.
+            graph_kwargs: Optional kwargs for the underlying atom graph.
+        """
+        featurizer = self._get_featurizer(mol_or_smiles)
+        fragment_result = fragment_molecule(
+            featurizer.get_rdkit_mol(),
+            method=method,
+            min_fragment_size=min_fragment_size,
+        )
+        graph = self.get_graph(
+            mol_or_smiles=mol_or_smiles, standardized=True, **(graph_kwargs or {})
+        )
+        return build_fragment_graph(
+            featurizer.get_rdkit_mol(),
+            fragment_result,
+            adjacency=graph["adjacency"],
             coords=graph.get("coords"),
         )
 

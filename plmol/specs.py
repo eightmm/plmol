@@ -19,13 +19,15 @@ class FeatureSpec:
 LIGAND_SPEC = FeatureSpec(
     name="ligand",
     allowed_modes=(
-        "graph", "bond_graph", "surface", "voxel", "fingerprint", "descriptor",
-        "smiles", "sequence", "fragment", "morgan", "all",
+        "graph", "bond_graph", "fragment_graph", "surface", "voxel",
+        "fingerprint", "descriptor", "smiles", "sequence", "fragment",
+        "morgan", "all",
     ),
     default_modes=("graph", "fingerprint", "smiles", "sequence"),
     output_keys=(
-        "graph", "bond_graph", "surface", "voxel", "fingerprint", "descriptor",
-        "smiles", "sequence", "fragment", "morgan",
+        "graph", "bond_graph", "fragment_graph", "surface", "voxel",
+        "fingerprint", "descriptor", "smiles", "sequence", "fragment",
+        "morgan",
     ),
 )
 

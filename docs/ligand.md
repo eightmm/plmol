@@ -34,6 +34,7 @@ Mode strings are normalized via `normalize_modes()` from `plmol.specs`. Invalid 
 |------|-----------|-------------|
 | `"graph"` | `"graph"` | Dense adjacency graph (node_features, adjacency, bond_mask, ...) |
 | `"bond_graph"` | `"bond_graph"` | Bond-wise (line) graph: bonds are nodes, shared atoms are edges |
+| `"fragment_graph"` | `"fragment_graph"` | Fragment-level graph: fragments are nodes, cleaved bonds are edges |
 | `"fingerprint"` | `"fingerprint"` | Descriptors + ECFP/Morgan, MACCS, RDKit FP, AtomPair, ErG |
 | `"descriptor"` | `"descriptor"` | 62-dim normalized descriptor vector + descriptor names |
 | `"fragment"` | `"fragment"` | Fragmentation result (rotatable-bond by default; BRICS optional) |
@@ -223,6 +224,75 @@ The molecule must be the one the atom graph was built from. `graph` mode
 canonicalizes atom order, so passing a differently ordered copy raises
 `InputError` on an atom-count mismatch and would otherwise map bonds wrongly.
 
+## Fragment Graph Mode
+
+Coarsens the atom-wise graph. Every fragment becomes a node, and two fragment
+nodes are connected by the bond that was cut between them.
+
+```python
+fragment_graph = ligand.featurize(mode="fragment_graph")["fragment_graph"]
+```
+
+It takes `fragment_kwargs` for the cut (`method`, `min_fragment_size`) and
+`graph_kwargs` for the atom graph it reads edge features from. Node features are
+per-fragment descriptors, so this mode does pay the descriptor pass that `graph`
+and `bond_graph` skip — use those if you only need the mappings.
+
+`"fragment_graph"` is not part of `mode="all"`; request it explicitly.
+
+### Output
+
+`F` = number of fragments, `E` = number of fragment-graph edges.
+
+| Key | Shape | Type | Description |
+|-----|-------|------|-------------|
+| `node_features` | `(F, 62)` | `float32` | Per-fragment descriptors, same space as `molecule_features` |
+| `edge_index` | `(2, E)` | `int64` | Fragment pairs joined by a cleaved bond, both directions |
+| `edge_features` | `(E, 39)` | `float32` | Cleaved bond's 37 adjacency channels + `[centroid distance, bond length]` |
+| `edge_cleaved_bond` | `(E, 2)` | `int64` | Atom pair cut for each edge |
+| `coords` | `(F, 3)` | `float32` | Fragment centroids (0 if no conformer) |
+| `adjacency` | `(F, F)` | `bool` | Fragment connectivity; equals `fragment_adjacency` from `fragment` mode |
+| `atom_to_fragment` | `(N,)` | `int64` | Atom → fragment index |
+| `fragment_atom_indices` | `List[List[int]]` | — | Fragment → atom indices (reverse) |
+| `fragment_smiles` | `List[str]` | — | SMILES per fragment |
+| `num_fragments` | `int` | — | F |
+| `num_fragment_edges` | `int` | — | E |
+
+### Geometry Features
+
+`edge_features[:, 37]` is the distance between the two fragment centroids and
+`edge_features[:, 38]` the length of the cleaved bond, both in Angstrom (the
+same convention as `distance_matrix` in `graph` mode). Both are zero without a
+3D conformer.
+
+### Edge Cases
+
+| Input | Result |
+|-------|--------|
+| No rotatable bonds (`"CCO"`, `"C1CC1"`) | `F = 1`, `E = 0` |
+| Disconnected input (`"CC.CC"`) | `F = 1` — fragmentation cuts bonds, it does not split connected components, so both components land in one fragment |
+| `min_fragment_size > 1` | Merged fragments absorb the bond between them; that edge disappears and `adjacency` stays in step with `edge_index` |
+
+### Low-Level Function
+
+```python
+from plmol import build_fragment_graph, MoleculeFeaturizer
+from plmol.ligand.fragment import fragment_molecule
+
+mol = MoleculeFeaturizer(smiles).get_rdkit_mol()
+graph = ligand.featurize(mode="graph")["graph"]
+fragment_graph = build_fragment_graph(
+    mol,
+    fragment_molecule(mol),
+    adjacency=graph["adjacency"],
+    coords=graph["coords"],
+)
+```
+
+The molecule must be the one the atom graph was built from, as with
+`build_bond_graph`. A fragmentation produced with `compute_features=False` has
+no `fragment_features` and raises `InputError`.
+
 ## Fingerprint Mode
 
 ```python
@@ -336,6 +406,7 @@ frag = result["fragment"]
 |-----|------|-------------|
 | `fragment_smiles` | `List[str]` | SMILES string for each fragment |
 | `atom_to_fragment` | `ndarray (N,)` int64 | Maps each atom index to its fragment index |
+| `cleaved_bond_atoms` | `ndarray (C, 2)` int64 | Atom pairs of the cut bonds, in cut order |
 | `fragment_atom_indices` | `List[List[int]]` | Atom indices per fragment (reverse of `atom_to_fragment`) |
 | `fragment_adjacency` | `ndarray (F, F)` int64 | Symmetric binary adjacency between fragments |
 | `fragment_features` | `ndarray (F, 62)` float32 | Per-fragment RDKit descriptors (same 62-dim space as molecule-level `descriptors`) |
@@ -388,13 +459,23 @@ The graph dict embeds a 3-level hierarchy enabling atom->fragment pooling and fr
 ```
 molecule_features (62,)           <- whole molecule descriptors
     ^ aggregate fragment_features
-fragment_features (F, 62)         <- per-fragment descriptors (in fragment dict)
-fragment_adjacency (F, F)         <- fragment connectivity
+fragment_features (F, 62)         <- per-fragment descriptors   | fragment_graph mode
+fragment_adjacency (F, F)         <- fragment connectivity      |
     ^ aggregate via fragment_atom_indices
     v lookup via atom_to_fragment
-node_features (N, 98)             <- per-atom features
-adjacency (N, N, 37)              <- atom connectivity
+node_features (N, 98)             <- per-atom features          | graph mode
+adjacency (N, N, 37)              <- atom connectivity          |
+    ^ lookup via bond_index
+    v lookup via atom_to_bonds
+bond node_features (B, 37)        <- per-bond features          | bond_graph mode
+bond adjacency (B, B)             <- bonds sharing an atom      |
 ```
+
+`graph`, `bond_graph` and `fragment_graph` are three views of the same molecule
+and share a dict shape: `node_features`, `edge_index`, `edge_features`,
+`coords`, `adjacency`. The bond and fragment views derive their features from
+the atom graph's dense adjacency rather than recomputing them, so the views
+never disagree.
 
 This mirrors the protein side's `atom_to_residue` / `residue_atom_indices` convention.
 

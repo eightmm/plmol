@@ -255,8 +255,8 @@ class Ligand(BaseMolecule):
 
         Args:
             mode: "all" or a single mode or list of modes.
-                Supported: graph, bond_graph, surface, voxel, fingerprint,
-                descriptor, smiles, sequence, fragment, morgan
+                Supported: graph, bond_graph, fragment_graph, surface, voxel,
+                fingerprint, descriptor, smiles, sequence, fragment, morgan
             graph_kwargs: Optional kwargs for graph featurization.
             surface_kwargs: Optional kwargs for surface extraction.
             fingerprint_kwargs: Optional kwargs for fingerprint extraction.
@@ -301,6 +301,13 @@ class Ligand(BaseMolecule):
             graph_kwargs = graph_kwargs or {}
             results["bond_graph"] = self._to_numpy_tree(
                 featurizer.get_bond_graph(**graph_kwargs)
+            )
+
+        if "fragment_graph" in modes:
+            results["fragment_graph"] = self._to_numpy_tree(
+                featurizer.get_fragment_graph(
+                    graph_kwargs=graph_kwargs, **dict(fragment_kwargs or {})
+                )
             )
 
         if "fingerprint" in modes:

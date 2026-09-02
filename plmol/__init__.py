@@ -13,6 +13,7 @@ from .protein.esm_featurizer import ESMFeaturizer
 from .ligand.core import Ligand
 from .ligand.descriptors import MoleculeFeaturizer
 from .ligand.graph import MoleculeGraphFeaturizer
+from .ligand.fragment_graph import build_fragment_graph
 from .ligand.line_graph import build_bond_graph
 from .ligand.featurizer import LigandFeaturizer
 from .ligand.fragment import fragment_by_brics, fragment_molecule, fragment_on_rotatable_bonds
@@ -42,7 +43,7 @@ __all__ = [
     "HierarchicalFeaturizer", "HierarchicalProteinData", "ESMFeaturizer",
     "Ligand", "MoleculeFeaturizer", "MoleculeGraphFeaturizer", "LigandFeaturizer",
     "fragment_by_brics", "fragment_molecule", "fragment_on_rotatable_bonds",
-    "build_bond_graph",
+    "build_bond_graph", "build_fragment_graph",
     "NucleicAcid", "NucleicFeaturizer",
     "StructureParser", "MMCIFParser",
     "PLInteractionFeaturizer", "Complex", "MolecularComplex",

@@ -29,7 +29,7 @@ def fragment_on_rotatable_bonds(
 
     Returns:
         Dict with keys: fragment_smiles, atom_to_fragment, fragment_adjacency,
-        num_fragments, num_rotatable_bonds.
+        cleaved_bond_atoms, num_fragments, num_rotatable_bonds.
     """
     matches = mol.GetSubstructMatches(_ROTATABLE_PATTERN)
     bond_atom_pairs: List[Tuple[int, int]] = []
@@ -160,6 +160,7 @@ def _fragment_on_bonds(
         "num_fragments": num_frags,
         "fragment_method": method,
         "num_cleaved_bonds": num_cleaved,
+        "cleaved_bond_atoms": np.asarray(deduped_pairs, dtype=np.int64).reshape(-1, 2),
         count_key: num_cleaved,
         "fragment_features": _compute_fragment_features(smiles_list) if compute_features else None,
     }
@@ -183,6 +184,7 @@ def _single_fragment_result(
         "num_fragments": 1,
         "fragment_method": method,
         "num_cleaved_bonds": 0,
+        "cleaved_bond_atoms": np.zeros((0, 2), dtype=np.int64),
         count_key: 0,
         "fragment_features": _compute_fragment_features(smiles_list) if compute_features else None,
     }
