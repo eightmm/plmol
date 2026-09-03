@@ -9,7 +9,8 @@ from typing import Sequence, Dict, List, Tuple, Optional, Union
 from dataclasses import dataclass
 import numpy as np
 from rdkit import Chem
-from ..constants import POCKET_MAX_ATOMS_PER_RESIDUE
+from ..constants import METAL_ELEMENTS, POCKET_MAX_ATOMS_PER_RESIDUE
+from ..parsers.pdb_parser import element_symbol, is_hydrogen
 from ..rdkit_utils import has_3d
 from ..errors import InputError
 
@@ -17,8 +18,10 @@ from ..errors import InputError
 # Maximum heavy atoms per residue (covers all standard amino acids)
 MAX_ATOMS_PER_RESIDUE = POCKET_MAX_ATOMS_PER_RESIDUE
 
-# Metal elements to preserve from HETATM records
-_METAL_ELEMENTS = {'ZN', 'FE', 'MG', 'CA', 'MN', 'CU', 'CO', 'NI'}
+# Metal elements to preserve from HETATM records. The shared set, not a copy:
+# the copy that used to live here was missing sodium and potassium, so a
+# thrombin sodium site or a potassium channel lost its ion from the pocket.
+_METAL_ELEMENTS = METAL_ELEMENTS
 
 
 @dataclass
@@ -279,8 +282,7 @@ class PocketExtractor:
             for line in f:
                 # Collect HETATM metal atoms for pocket metal preservation
                 if line.startswith('HETATM'):
-                    element = line[76:78].strip().upper() if len(line) > 76 else ''
-                    if element in _METAL_ELEMENTS:
+                    if element_symbol(line) in _METAL_ELEMENTS:
                         try:
                             x = float(line[30:38])
                             y = float(line[38:46])
@@ -295,14 +297,10 @@ class PocketExtractor:
                 if not line.startswith('ATOM'):
                     continue
 
-                # Skip hydrogens
-                element = line[76:78].strip() if len(line) > 76 else ''
-                if not element:
-                    # Fallback: check atom name
-                    atom_name = line[12:16].strip()
-                    if atom_name.startswith('H') or atom_name in ('1H', '2H', '3H'):
-                        continue
-                elif element == 'H':
+                # Skip hydrogens, by the parser's rule rather than a fourth
+                # one. Reading the atom name kept every hydrogen PDB numbered
+                # the pre-2007 way, 1HB, whose name starts with a digit.
+                if is_hydrogen(line):
                     continue
 
                 # Extract residue info
