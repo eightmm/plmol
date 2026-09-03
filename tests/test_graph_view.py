@@ -240,6 +240,53 @@ def test_feature_dims_rejects_unknown_keys():
         feature_dims("nope", "graph")
 
 
+@pytest.fixture
+def nucleic_views(dna_pdb):
+    """Function-scoped: dna_pdb writes into tmp_path, which is per test."""
+    from plmol import NucleicAcid
+
+    return {
+        mode: NucleicAcid.from_pdb(dna_pdb).featurize(mode=mode)[mode]
+        for mode in ("graph", "atom_graph")
+    }
+
+
+def test_every_recorded_width_is_the_width(ligand_views, protein_views, nucleic_views):
+    """FEATURE_DIMS is what a caller sizes a model from.
+
+    Only its mode *names* were checked. Three of its numbers moved in 0.4.x --
+    the ligand node block, the protein node block, the ligand bond edges -- and
+    nothing would have noticed if one of them had been left behind.
+    """
+    views = {("ligand", mode): view for mode, view in ligand_views.items()}
+    views.update({("protein", mode): view for mode, view in protein_views.items()})
+    views.update({("nucleic_acid", mode): view for mode, view in nucleic_views.items()})
+
+    # descriptor is not a graph: one flat row of numbers, no as_graph view.
+    from plmol import Ligand
+
+    descriptors = np.asarray(
+        Ligand.from_smiles("CC(=O)Oc1ccccc1C(=O)O").featurize(mode="descriptor")
+        ["descriptor"]["descriptors"]
+    )
+    assert descriptors.shape[-1] == FEATURE_DIMS["ligand"]["descriptor"]["descriptors"]
+    checked = 1
+
+    for (molecule, mode), view in views.items():
+        graph = as_graph(view)
+        for key, declared in FEATURE_DIMS[molecule][mode].items():
+            array = np.asarray(graph[key])
+            # A vector feature is (N, count, 3): the count is the second axis
+            # from the end, because the last one is always the three components.
+            axis = -2 if key.endswith("vector_features") else -1
+            assert array.shape[axis] == declared, (
+                f"{molecule}.{mode}.{key}: FEATURE_DIMS says {declared}, "
+                f"the array is {array.shape}"
+            )
+            checked += 1
+    assert checked == sum(len(m) for mol in FEATURE_DIMS.values() for m in mol.values())
+
+
 def test_every_recorded_mode_is_reachable():
     """FEATURE_DIMS must not name modes the specs do not allow."""
     from plmol.specs import FEATURE_SPECS
