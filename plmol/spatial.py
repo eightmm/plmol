@@ -41,8 +41,12 @@ SPATIAL_BACKENDS = ("auto", "scipy", "native")
 #: intermediate index arrays stay a few MB whatever the structure's size.
 _QUERY_BLOCK = 1 << 14
 
-#: Atom pairs are occlusion-tested in blocks of this many, for the same reason.
-_PAIR_BLOCK = 1 << 16
+#: Atom pairs are occlusion-tested in blocks of this many. The block sets the
+#: size of the (directions, pairs) dot-product array, and that array is the
+#: whole cost of the occlusion test: at 65536 pairs it is 26 MB and streams
+#: through memory, at 2048 it is under a megabyte and stays in cache. Measured
+#: over 512 to 65536 on a 133k-pair protein, 2048 is the floor of a flat basin.
+_PAIR_BLOCK = 2048
 
 #: Queries sampled to size the k-nearest-neighbour grid.
 _CELL_SIZE_SAMPLE = 128
@@ -383,8 +387,13 @@ def sphere_point_exposure(
         if count == 0:
             continue
         directions = np.ascontiguousarray(sphere_of(count), dtype=np.float32)
-        for start in range(lo, hi, _PAIR_BLOCK):
-            stop = min(start + _PAIR_BLOCK, hi)
+        # Blocks start where an owner's pairs start, so no atom is split across
+        # two of them and the scatter below can be a plain indexed OR rather
+        # than ufunc.at, which is several times slower.
+        own_all = owner[lo:hi]
+        run_starts = lo + np.flatnonzero(np.r_[True, own_all[1:] != own_all[:-1]])
+        edges = list(run_starts[:: max(1, _PAIR_BLOCK // _mean_degree(run_starts, hi))]) + [hi]
+        for start, stop in zip(edges[:-1], edges[1:]):
             own = owner[start:stop]
             radius = radii[own]
             threshold = (
@@ -397,9 +406,16 @@ def sphere_point_exposure(
             folded = np.logical_or.reduceat(covered, runs, axis=1)
             atoms = own[runs]
             slots = offset[atoms][None, :] + np.arange(count, dtype=np.int64)[:, None]
-            np.logical_or.at(occluded, slots, folded)
+            occluded[slots] |= folded
 
     return ~occluded
+
+
+def _mean_degree(run_starts: np.ndarray, end: int) -> int:
+    """Average pairs per owner, so a block of runs holds about _PAIR_BLOCK."""
+    if run_starts.size == 0:
+        return 1
+    return max(1, int(round((end - run_starts[0]) / run_starts.size)))
 
 
 # ---------------------------------------------------------------------------
