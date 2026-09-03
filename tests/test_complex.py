@@ -424,3 +424,65 @@ def test_adjacency_to_bond_edges_conversion():
     assert edge_index.shape[0] == 2
     assert edge_features.shape[0] == edge_index.shape[1]
     assert edge_features.shape[1] == graph["adjacency"].shape[-1]
+
+
+class TestTheTwoBlocksCanBeJoined:
+    """A complex result numbers the ligand's atoms twice.
+
+    ``graph`` mode canonicalises the atom order -- that is what lets the bond
+    and fragment graphs line up with it -- while the interaction featurizer
+    indexes the molecule as it was handed over, which for a file is the file's
+    own order. Both are self-consistent; nothing said they disagree, so
+    joining an interaction edge to a ligand node paired the wrong atoms.
+    """
+
+    @pytest.fixture
+    def both(self, example_pdb, example_sdf):
+        from plmol import Ligand, Protein
+        from plmol.complex import MolecularComplex
+
+        return MolecularComplex(
+            molecules={"protein": Protein.from_pdb(example_pdb),
+                       "ligand": Ligand.from_sdf(example_sdf)}
+        ).featurize(requests=["ligand", "interaction"])
+
+    def test_the_orders_really_do_differ(self, both):
+        """If they ever stop differing the mapping becomes the identity and
+        this test says so rather than quietly passing."""
+        graph = np.asarray(both["ligand"]["graph"]["coords"])
+        inter = np.asarray(both["interaction"]["ligand_coords"])
+        assert graph.shape == inter.shape
+        assert not np.allclose(graph, inter, atol=1e-4)
+
+    def test_the_mapping_lines_them_up(self, both):
+        order = np.asarray(both["interaction"]["ligand_atom_order"])
+        graph = np.asarray(both["ligand"]["graph"]["coords"])
+        inter = np.asarray(both["interaction"]["ligand_coords"])
+        assert order.shape == (graph.shape[0],)
+        assert np.allclose(inter[order], graph, atol=1e-4)
+
+    def test_it_is_a_permutation(self, both):
+        order = np.asarray(both["interaction"]["ligand_atom_order"])
+        assert sorted(order.tolist()) == list(range(len(order))), "no atom twice, none missing"
+
+    def test_an_interaction_edge_reaches_a_real_graph_node(self, both):
+        order = np.asarray(both["interaction"]["ligand_atom_order"])
+        inverse = np.full(len(order), -1, dtype=np.int64)
+        inverse[order] = np.arange(len(order))
+        ligand_endpoints = np.asarray(both["interaction"]["edges"])[1]
+        nodes = inverse[ligand_endpoints]
+        assert (nodes >= 0).all()
+        assert nodes.max() < np.asarray(both["ligand"]["graph"]["coords"]).shape[0]
+
+    def test_explicit_hydrogens_are_marked_rather_than_guessed(self):
+        """The graph keeps hydrogens when the molecule carries them and the
+        interaction block never does, so those nodes have no counterpart."""
+        from rdkit import Chem
+
+        from plmol.complex import _ligand_graph_to_interaction_index
+
+        mol = Chem.AddHs(Chem.MolFromSmiles("CCO"))
+        order = _ligand_graph_to_interaction_index(mol)
+        assert order.shape == (mol.GetNumAtoms(),)
+        assert (order == -1).sum() == mol.GetNumAtoms() - 3, "one per hydrogen"
+        assert sorted(order[order >= 0].tolist()) == [0, 1, 2]

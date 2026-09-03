@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Iterable, Optional, Union
 
+import numpy as np
+
 from .base import BaseMolecule, TempFileOwner
 from .cache import LRUCache
 from .constants import DEFAULT_DISTANCE_CUTOFF
@@ -29,6 +31,36 @@ try:
     from rdkit import Chem
 except ImportError:  # pragma: no cover - optional dependency typing
     Chem = None
+
+
+def _ligand_graph_to_interaction_index(mol: "Chem.Mol") -> "np.ndarray":
+    """Ligand graph node -> the same atom's index in the interaction block.
+
+    The two blocks of a complex result count the ligand's atoms differently.
+    ``graph`` mode canonicalises the atom order, which is what lets the bond
+    and fragment graphs line up with it; the interaction featurizer indexes
+    the molecule as it was given, which for a file is the file's own order.
+    Both are self-consistent and neither is wrong, but nothing said they
+    disagree, so joining an interaction edge to a ligand node silently paired
+    the wrong atoms.
+
+    ``interaction["ligand_coords"][order]`` equals ``ligand["graph"]["coords"]``,
+    and the same gather takes any per-atom interaction quantity into the
+    graph's numbering. An entry is -1 where the graph node has no counterpart,
+    which happens only when the molecule carries explicit hydrogens: the graph
+    keeps them and the interaction block is heavy atoms alone.
+    """
+    from .rdkit_utils import canonical_atom_order
+
+    order = canonical_atom_order(mol)
+    heavy = {
+        atom: slot
+        for slot, atom in enumerate(
+            i for i in range(mol.GetNumAtoms())
+            if mol.GetAtomWithIdx(i).GetAtomicNum() > 1
+        )
+    }
+    return np.array([heavy.get(original, -1) for original in order], dtype=np.int64)
 
 
 def _freeze(value: Any) -> Any:
@@ -492,6 +524,8 @@ class MolecularComplex(TempFileOwner):
             contact_cutoff=contact_cutoff,
             knn_cutoff=knn_cutoff,
         )
+        graph["ligand_atom_order"] = _ligand_graph_to_interaction_index(ligand_mol)
+
         if include_coords:
             protein_coords, ligand_coords = interaction.get_heavy_atom_coords()
             graph["protein_coords"] = protein_coords

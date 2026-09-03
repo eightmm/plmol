@@ -109,6 +109,7 @@ interaction = cx.interaction(
 | `interaction_counts` | `dict` | Per-type interaction counts |
 | `num_protein_atoms` | `int` | Number of protein heavy atoms |
 | `num_ligand_atoms` | `int` | Number of ligand heavy atoms |
+| `ligand_atom_order` | `(N,)` | Ligand graph node → this block's ligand index. See below |
 | `distance_cutoff` | `float` | Distance cutoff used |
 | `knn_cutoff` | `Optional[int]` | kNN cutoff used |
 | `feature_dim` | `int` | Edge feature dimension (79) |
@@ -117,6 +118,35 @@ interaction = cx.interaction(
 | `ligand_coords` | `(L, 3)` | Ligand heavy atom coordinates, when `include_coords=True` |
 | `metal_sites` | `List[MetalSite]` | Detected protein metal coordination sites, when `include_metal_sites=True` |
 | `metal_features` | `dict` | Encoded metal-site arrays from `encode_metal_features()` |
+
+### Joining the interaction block to the ligand graph
+
+The two blocks count the ligand's atoms differently. `graph` mode
+canonicalizes the atom order — that is what lets the bond and fragment graphs
+line up with it — while the interaction featurizer indexes the molecule as it
+was handed over, which for a file is the file's own order. Both are
+self-consistent, and an interaction edge's ligand endpoint is **not** a ligand
+graph node index.
+
+`ligand_atom_order` is the gather that lines them up:
+
+```python
+result = complex.featurize(requests=["ligand", "interaction"])
+order = result["interaction"]["ligand_atom_order"]
+
+# the same atoms, in the graph's numbering
+result["interaction"]["ligand_coords"][order]      # == result["ligand"]["graph"]["coords"]
+
+# an interaction edge's ligand endpoint, as a graph node
+import numpy as np
+to_node = np.full(len(order), -1)
+to_node[order] = np.arange(len(order))
+nodes = to_node[result["interaction"]["edges"][1]]
+```
+
+An entry is `-1` where the graph node has no counterpart, which happens only
+when the molecule carries explicit hydrogens: the graph keeps them and the
+interaction block is heavy atoms alone.
 
 ### Interaction Types
 

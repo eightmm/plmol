@@ -7,13 +7,23 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 
 
+def canonical_atom_order(mol: Chem.Mol) -> "list[int]":
+    """``order[i]`` is the atom of *mol* that becomes atom ``i`` once canonical.
+
+    The permutation :func:`canonicalize_mol` applies, on its own, so a caller
+    can line indices from a canonicalised graph back up against the molecule
+    it came from.
+    """
+    ranks = list(Chem.CanonicalRankAtoms(mol, breakTies=True))
+    order = [0] * len(ranks)
+    for old_idx, new_idx in enumerate(ranks):
+        order[new_idx] = old_idx
+    return order
+
+
 def canonicalize_mol(mol: Chem.Mol) -> Chem.Mol:
     """Reorder atoms to canonical order, preserving coordinates if present."""
-    ranks = list(Chem.CanonicalRankAtoms(mol, breakTies=True))
-    new_order = [0] * len(ranks)
-    for old_idx, new_idx in enumerate(ranks):
-        new_order[new_idx] = old_idx
-    new_mol = Chem.RenumberAtoms(mol, new_order)
+    new_mol = Chem.RenumberAtoms(mol, canonical_atom_order(mol))
     Chem.FastFindRings(new_mol)
     return new_mol
 
