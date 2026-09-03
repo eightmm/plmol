@@ -37,9 +37,12 @@ from .errors import DependencyError, InputError
 #: Selectable backends for :func:`knn`. ``"auto"`` prefers scipy.
 SPATIAL_BACKENDS = ("auto", "scipy", "native")
 
-#: Candidate pairs are generated in blocks of this many query points, so the
-#: intermediate index arrays stay a few MB whatever the structure's size.
-_QUERY_BLOCK = 1 << 14
+#: Candidate pairs are generated in blocks of this many query points. As with
+#: _PAIR_BLOCK the size is a cache decision, not a memory-safety one: one ring
+#: of cells offers a couple of hundred candidates per query, so 16384 queries
+#: made a 30 MB index array. Measured over 256 to 16384 on three workloads,
+#: everything below about 2048 is flat and 16384 is 1.4x worse.
+_QUERY_BLOCK = 1024
 
 #: Atom pairs are occlusion-tested in blocks of this many. The block sets the
 #: size of the (directions, pairs) dot-product array, and that array is the
