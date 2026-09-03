@@ -40,12 +40,15 @@ on the coordinates, so a Protein asked for `graph`, `atom_graph`, `voxel` and
 this path is 1.3 to 2.0 times faster on every mode that uses SASA, and one
 implementation the library owns beats two that disagree.
 
-| Mode | 0.3.x with freesasa | 0.4.0 |
-|------|--------------------|-------|
-| `graph` | 145 ms | 95 ms |
-| `atom_graph` | 110 ms | 56 ms |
-| `surface` | 335 ms | 254 ms |
-| `voxel` | 150 ms | 77 ms |
+| Mode | 0.3.x with freesasa | 0.4.0 | |
+|------|--------------------|-------|---|
+| `graph` | 130 ms | 64 ms | 2.0x |
+| `atom_graph` | 100 ms | 33 ms | 3.0x |
+| `surface` | 185 ms | 114 ms | 1.6x |
+| `voxel` | 128 ms | 56 ms | 2.3x |
+| `complex` (all) | 207 ms | 142 ms | 1.5x |
+
+Minimum of nine interleaved runs on a 3260-atom protein, idle machine.
 
 Values from 0.3.x and earlier were freesasa's, computed with Lee-Richards and
 ProtOr radii. Per atom the two correlate at r=0.982 and the totals differ by
@@ -72,13 +75,17 @@ set_spatial_backend("native")    # plmol's own uniform grid
 set_spatial_backend("auto")      # the default: scipy, else native
 ```
 
-**scipy stays the default where it is installed**, because a KD-tree is the
-right structure for this and scipy's is threaded C. Measured on a 3260-atom
-protein whose surface has 15465 points:
+**scipy stays the default where it is installed.** freesasa was removed in
+0.4.0 because plmol's own path was faster; scipy is not, and the gap is
+algorithmic rather than a matter of tuning -- a tree prunes to about
+`k log n` candidates per query where a uniform grid has to enumerate about
+`8k` of them. Measured on a 3260-atom protein whose surface has 15465 points,
+idle machine:
 
 | | scipy | native |
 |---|---|---|
-| `surface` mode, end to end | 276 ms | 452 ms |
+| `knn`, k=80, on the point cloud | 12.5 ms | 152.4 ms |
+| `surface` mode, end to end | 116 ms | 329 ms |
 | the 39 surface feature columns | — | agree to 4e-06, correlation 1.000000 |
 
 Nothing else in the library goes through a neighbour index. SASA and the
