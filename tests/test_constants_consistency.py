@@ -143,6 +143,31 @@ class TestTheModifiedResidueTablesStayInStep:
         assert set(K.STANDARD_ATOMS_PTM) <= set(K.PTM_RESIDUES)
 
 
+class TestInteractionTablesAgree:
+    def test_the_type_index_is_dense_and_matches_its_count(self):
+        assert sorted(K.INTERACTION_TYPE_IDX.values()) == list(range(K.NUM_INTERACTION_TYPES))
+        assert set(K.INTERACTION_TYPE_IDX) == set(K.INTERACTION_TYPES)
+
+    def test_the_pharmacophore_index_is_dense_and_matches_its_count(self):
+        assert sorted(K.PHARMACOPHORE_IDX.values()) == list(range(K.NUM_PHARMACOPHORE_TYPES))
+
+    def test_every_interaction_type_has_an_ideal_distance(self):
+        assert set(K.INTERACTION_TYPE_IDX) <= set(K.IDEAL_DISTANCES)
+
+    def test_compatibility_is_pharmacophore_pairs_to_interaction_types(self):
+        pharmacophores, types = set(K.PHARMACOPHORE_IDX), set(K.INTERACTION_TYPE_IDX)
+        for pair, interaction in K.INTERACTION_COMPATIBILITY.items():
+            assert set(pair) <= pharmacophores, pair
+            assert interaction in types, interaction
+
+    def test_compatibility_is_symmetric(self):
+        """The table is consulted with whichever endpoint comes first, so a
+        pair listed one way round has to be listed the other."""
+        missing = [(a, b) for (a, b) in K.INTERACTION_COMPATIBILITY
+                   if (b, a) not in K.INTERACTION_COMPATIBILITY]
+        assert missing == []
+
+
 class TestNucleotideTablesCoverDnaAndRna:
     RESIDUES = set(K.DNA_RESIDUES) | set(K.RNA_RESIDUES)
 
@@ -155,6 +180,39 @@ class TestNucleotideTablesCoverDnaAndRna:
 
     def test_every_nucleotide_is_a_purine_or_a_pyrimidine(self):
         assert self.RESIDUES <= set(K.PURINES) | set(K.PYRIMIDINES)
+
+
+class TestTheNucleotideNameMapping:
+    """Its counterpart on the protein side is RESIDUE_NAME_MAPPING; both must
+    land on a residue the rest of the library has a row for."""
+
+    def test_every_modified_base_maps_to_a_canonical_one(self):
+        canonical = set(K.DNA_RESIDUES) | set(K.RNA_RESIDUES)
+        assert set(K.NUCLEOTIDE_NAME_MAPPING.values()) <= canonical
+
+    def test_every_legacy_spelling_offers_an_rna_and_a_dna_form(self):
+        canonical = set(K.DNA_RESIDUES) | set(K.RNA_RESIDUES)
+        for name, forms in K.LEGACY_BASE_NAMES.items():
+            assert len(forms) == 2, name
+            assert set(forms) <= canonical, name
+
+    def test_the_mapped_names_are_names_the_parser_keeps(self):
+        known = set(K.NUCLEIC_ACID_RESIDUES)
+        assert set(K.NUCLEOTIDE_NAME_MAPPING) <= known
+        assert set(K.LEGACY_BASE_NAMES) <= known
+        assert set(K.UNMAPPED_NUCLEOTIDES) <= known
+
+    def test_nothing_is_both_mapped_and_deliberately_unmapped(self):
+        mapped = set(K.NUCLEOTIDE_NAME_MAPPING) | set(K.LEGACY_BASE_NAMES)
+        assert mapped & set(K.UNMAPPED_NUCLEOTIDES) == set()
+
+    def test_every_nucleic_name_is_accounted_for(self):
+        """Canonical, mapped, legacy, or explicitly left alone -- nothing may
+        sit in NUCLEIC_ACID_RESIDUES with no decision recorded about it."""
+        canonical = set(K.DNA_RESIDUES) | set(K.RNA_RESIDUES)
+        accounted = (canonical | set(K.NUCLEOTIDE_NAME_MAPPING)
+                     | set(K.LEGACY_BASE_NAMES) | set(K.UNMAPPED_NUCLEOTIDES))
+        assert set(K.NUCLEIC_ACID_RESIDUES) - accounted == set()
 
 
 class TestHydrogenBondTablesNameAtomsThatExist:

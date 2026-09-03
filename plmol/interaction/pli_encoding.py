@@ -25,6 +25,9 @@ from ..constants import (
     IDEAL_DISTANCE_FALLBACK,
     CROSS_CONTACT_DENSITY_CUTOFF,
     CROSS_CONTACT_DENSITY_NORM,
+    DEGREE_SCALE,
+    FORMAL_CHARGE_OFFSET,
+    FORMAL_CHARGE_SCALE,
 )
 from ..utils import knn_mask_bipartite_numpy
 from .pli_featurizer import Interaction
@@ -148,8 +151,8 @@ class InteractionGraphBuilder:
             # 5. Formal charges (2 dims)
             p_charge = p_feats.get('formal_charge', 0)
             l_charge = l_feats.get('formal_charge', 0)
-            features[i, offset] = (p_charge + 2) / 4.0
-            features[i, offset + 1] = (l_charge + 2) / 4.0
+            features[i, offset] = (p_charge + FORMAL_CHARGE_OFFSET) / FORMAL_CHARGE_SCALE
+            features[i, offset + 1] = (l_charge + FORMAL_CHARGE_OFFSET) / FORMAL_CHARGE_SCALE
             offset += 2
 
             # 6. Aromatic (2 dims)
@@ -160,8 +163,8 @@ class InteractionGraphBuilder:
             # 7. Ring membership + degree (4 dims)
             features[i, offset] = float(p_feats.get('is_in_ring', False))
             features[i, offset + 1] = float(l_feats.get('is_in_ring', False))
-            features[i, offset + 2] = p_feats.get('degree', 0) / 4.0
-            features[i, offset + 3] = l_feats.get('degree', 0) / 4.0
+            features[i, offset + 2] = p_feats.get('degree', 0) / DEGREE_SCALE
+            features[i, offset + 3] = l_feats.get('degree', 0) / DEGREE_SCALE
             offset += 4
 
             # 8. Residue type for protein (21 dims)

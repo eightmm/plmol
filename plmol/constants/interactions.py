@@ -117,8 +117,10 @@ INTERACTION_COMPATIBILITY = {
     ('aromatic', 'hydrophobic'): 'hydrophobic',
     ('hydrophobic', 'aromatic'): 'hydrophobic',
 
-    # Halogen bonds
+    # Halogen bonds. Both orders, as every other pair here has: the table is
+    # consulted with whichever endpoint comes first.
     ('hbond_acceptor', 'halogen_bond'): 'halogen_bond',
+    ('halogen_bond', 'hbond_acceptor'): 'halogen_bond',
 
     # Metal coordination
     ('metal_coord', 'metal_coord'): 'metal_coordination',

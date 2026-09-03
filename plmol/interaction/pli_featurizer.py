@@ -21,6 +21,7 @@ from rdkit.Chem import AllChem
 from ..rdkit_utils import has_3d
 
 from ..constants import (
+    BACKBONE_ATOM_SET,
     PHARMACOPHORE_SMARTS,
     PHARMACOPHORE_IDX,
     NUM_PHARMACOPHORE_TYPES,
@@ -44,7 +45,7 @@ from ..constants import (
 from ..rdkit_utils import has_3d, get_positions
 from ..errors import InputError
 
-_BACKBONE_ATOM_NAMES = frozenset(("N", "CA", "C", "O"))
+_BACKBONE_ATOM_NAMES = BACKBONE_ATOM_SET  # the shared set, not a second copy
 
 
 # =============================================================================
