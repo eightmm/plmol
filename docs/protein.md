@@ -191,6 +191,19 @@ Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA,
 > the mean spread to 18% and still leaves 133 atoms flipping. `burial_index` and
 > `relative_sasa` on the atom graph, the surface burial channel and the voxel's
 > inherit the same behaviour.
+>
+> A guard on the ratio does not cure it either, and this was measured rather
+> than assumed. Refusing to divide until the residue has at least *k* sample
+> points' worth of area, for *k* from 1 to 20: at k=1 all ten residues still
+> swing; at k=20 — which zeroes the ratio for 156 of the 416 residues — one
+> still swings the full range and six swing more than half. The count is not
+> even monotone in *k*, because the threshold becomes a boundary of its own that
+> the rotation crosses, trading one discontinuity for another. The cure is a
+> lattice oriented by the molecule, not a floor on the denominator.
+>
+> Sub-precision movement is not the cause: shifting every atom by 0.0004 Å,
+> which re-rounds all three decimals a PDB file stores, changes none of these
+> columns at all.
 
 ### Node Vector Features `(L, 31, 3)` -- tuple of 3 arrays
 

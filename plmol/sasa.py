@@ -91,7 +91,11 @@ def shrake_rupley(
        ``burial_index`` and ``relative_sasa`` on the atom graph, the surface
        point cloud's burial channel, and the voxel's. It is a property of
        point-sampled SASA rather than of this implementation, and the cure is
-       a lattice oriented by the molecule rather than by the axes.
+       a lattice oriented by the molecule rather than by the axes. A floor on
+       the denominator of ``polar_apolar_ratio`` was tried and measured
+       instead: for every threshold from one sample point to twenty it leaves
+       residues swinging the whole range, because the threshold becomes a
+       boundary of its own that the rotation crosses.
 
     Each atom's expanded sphere is sampled at ``n_points`` positions; a point is
     accessible unless it falls inside another atom's expanded sphere. The area
