@@ -59,6 +59,7 @@ from .ligand.fragment import fragment_by_brics, fragment_molecule, fragment_on_r
 
 # --- Nucleic Acid ---
 from .nucleic_acid.core import NucleicAcid
+from .nucleic_acid.base_pairs import BasePair, find_base_pairs
 from .nucleic_acid.featurizer import NucleicFeaturizer
 
 # --- Parsers ---
@@ -94,6 +95,7 @@ __all__ = [
     "resolve_sasa_backend", "shrake_rupley",
     "to_torch", "to_numpy",
     "Cavity", "detect_cavities", "element_vdw_radii",
+    "BasePair", "find_base_pairs",
     "SPATIAL_BACKENDS", "set_spatial_backend", "get_spatial_backend",
     "resolve_spatial_backend", "knn", "NeighbourIndex", "pairs_within",
     "NucleicAcid", "NucleicFeaturizer",

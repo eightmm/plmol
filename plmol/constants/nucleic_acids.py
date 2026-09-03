@@ -110,6 +110,25 @@ WC_BASE_PAIRS: dict[str, str] = {
 # Alias used by some downstream modules
 BASE_PAIR_PATTERNS = WC_BASE_PAIRS
 
+# The hydrogen bonds a Watson-Crick pair actually makes, as (purine atom,
+# pyrimidine atom). The first entry of each is the anchor: N1 of the purine to
+# N3 of the pyrimidine is the bond that defines the pair, and a partner needs
+# at least one of the others as well.
+WC_HBOND_ATOMS: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
+    ('A', 'T'): (('N1', 'N3'), ('N6', 'O4')),
+    ('A', 'U'): (('N1', 'N3'), ('N6', 'O4')),
+    ('G', 'C'): (('N1', 'N3'), ('N2', 'O2'), ('O6', 'N4')),
+}
+
+#: Longest a Watson-Crick hydrogen bond may be, in Angstrom. Real ones are
+#: 2.8-3.0; the slack admits lower-resolution structures and models.
+WC_HBOND_MAX_DISTANCE = 3.5
+
+#: Two bases must be within this angle of coplanar, in degrees. A pair sits
+#: near 0; stacked bases are also near 0 but far apart, which the hydrogen
+#: bond distance already rules out.
+WC_MAX_PLANE_ANGLE = 60.0
+
 # =============================================================================
 # Purine / Pyrimidine Classification
 # =============================================================================

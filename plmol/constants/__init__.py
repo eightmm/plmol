@@ -251,6 +251,9 @@ from .nucleic_acids import (
 
     # Base pairing
     WC_BASE_PAIRS,
+    WC_HBOND_ATOMS,
+    WC_HBOND_MAX_DISTANCE,
+    WC_MAX_PLANE_ANGLE,
     BASE_PAIR_PATTERNS,
 
     # Classification
@@ -433,6 +436,9 @@ __all__ = [
     'STANDARD_NUCLEOTIDE_ATOMS',
     'NUCLEOTIDE_MAX_SASA',
     'WC_BASE_PAIRS',
+    'WC_HBOND_ATOMS',
+    'WC_HBOND_MAX_DISTANCE',
+    'WC_MAX_PLANE_ANGLE',
     'BASE_PAIR_PATTERNS',
     'PURINES',
     'PYRIMIDINES',

@@ -7,6 +7,7 @@ import numpy as np
 
 from ..protein.utils import PDBParser, ParsedAtom
 from ..utils import dihedral_angles
+from .base_pairs import base_pair_arrays, find_base_pairs
 from ..constants import (
     NUCLEOTIDE_TOKEN,
     NUCLEOTIDE_TYPES,
@@ -259,6 +260,14 @@ class NucleicFeaturizer:
         Edge features:
           - edge_index: (2, E) int
           - edge_attr: (E, 3) float — [is_sequential, distance, 1/distance]
+
+        Watson-Crick pairing (alongside the edges, not folded into them, so
+        edge_attr keeps its width):
+          - pair_index: (2, P) int — purine row, pyrimidine row
+          - pair_kind: (P,) int — 0 AT, 1 AU, 2 GC
+          - pair_c1_distance: (P,) float — C1'-C1', about 10.5 for a real pair
+          - pair_plane_angle: (P,) float — degrees between the base planes
+          - is_paired: (N,) float — per nucleotide
         """
         residues = self._get_na_residues()
         n = len(residues)
@@ -328,6 +337,7 @@ class NucleicFeaturizer:
             "edge_index": edge_index,
             "edge_attr": edge_attr,
             "num_nodes": n,
+            **base_pair_arrays(find_base_pairs(residues), n),
         }
 
     def get_backbone(self) -> Dict[str, Any]:
