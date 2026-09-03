@@ -192,6 +192,33 @@ def _as_points(array: np.ndarray, name: str) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
+def _grid_pairs(coords: np.ndarray, cell_size: float, keep):
+    """Ordered index pairs a *keep* rule accepts, from one pass over the grid.
+
+    *keep* is called with ``(i, j, delta, squared_distance)`` for each candidate
+    and returns a boolean mask. Candidates come from one ring of cells, so
+    *cell_size* has to be at least the largest distance the rule can accept.
+    """
+    n = len(coords)
+    grid = _Grid(coords, max(float(cell_size), 1e-6))
+    parts = []
+    for start in range(0, n, _QUERY_BLOCK):
+        stop = min(start + _QUERY_BLOCK, n)
+        row, index = grid.candidates(coords[start:stop], ring=1)
+        if row.size == 0:
+            continue
+        row += start
+        delta = coords[index] - coords[row]
+        squared = np.einsum("ij,ij->i", delta, delta)
+        mask = keep(row, index, delta, squared)
+        mask &= row != index
+        parts.append((row[mask], index[mask], delta[mask], squared[mask]))
+    if not parts:
+        empty = np.zeros(0, dtype=np.int64)
+        return empty, empty.copy(), np.zeros((0, 3), np.float32), np.zeros(0, np.float32)
+    return tuple(np.concatenate(column) for column in zip(*parts))
+
+
 def overlapping_sphere_pairs(
     coords: np.ndarray, radii: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -213,39 +240,53 @@ def overlapping_sphere_pairs(
     if n != len(radii):
         raise InputError(f"coords has {n} rows but radii has {len(radii)}.")
     if n < 2:
-        empty_i = np.zeros(0, dtype=np.int64)
-        return empty_i, empty_i.copy(), np.zeros((0, 3), np.float32), np.zeros(0, np.float32)
+        empty = np.zeros(0, dtype=np.int64)
+        return empty, empty.copy(), np.zeros((0, 3), np.float32), np.zeros(0, np.float32)
+
+    def touching(row, index, delta, squared):
+        limit = radii[row] + radii[index]
+        return squared < limit * limit
 
     # Two spheres can only touch within the largest possible sum of radii, so
     # that is the cell size: one ring of cells then covers every candidate.
-    grid = _Grid(coords, max(float(2.0 * radii.max()), 1e-6))
+    return _grid_pairs(coords, 2.0 * radii.max(), touching)
 
-    parts_i, parts_j, parts_d, parts_d2 = [], [], [], []
-    for start in range(0, n, _QUERY_BLOCK):
-        stop = min(start + _QUERY_BLOCK, n)
-        row, index = grid.candidates(coords[start:stop], ring=1)
-        if row.size == 0:
-            continue
-        row += start
-        delta = coords[index] - coords[row]
-        squared = np.einsum("ij,ij->i", delta, delta)
-        limit = radii[row] + radii[index]
-        keep = squared < limit * limit
-        keep &= row != index
-        parts_i.append(row[keep])
-        parts_j.append(index[keep])
-        parts_d.append(delta[keep])
-        parts_d2.append(squared[keep])
 
-    if not parts_i:
-        empty_i = np.zeros(0, dtype=np.int64)
-        return empty_i, empty_i.copy(), np.zeros((0, 3), np.float32), np.zeros(0, np.float32)
-    return (
-        np.concatenate(parts_i),
-        np.concatenate(parts_j),
-        np.concatenate(parts_d),
-        np.concatenate(parts_d2),
-    )
+def pairs_within(
+    coords: np.ndarray, cutoff: float
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Ordered index pairs closer than *cutoff*, and how far apart they are.
+
+    The alternative is a full ``(N, N)`` distance matrix, which for a protein's
+    atoms computes ten million distances to keep the seventy thousand under a
+    few Angstrom. This visits only the cells that can contain one.
+
+    Args:
+        coords: Positions ``(N, 3)``.
+        cutoff: Maximum distance, exclusive.
+
+    Returns:
+        ``(i, j, distance)`` for every ordered pair with ``|c_i - c_j| < cutoff``
+        and ``i != j``, in row-major order -- the order a dense mask would give,
+        so the pairs can stand in for one.
+    """
+    coords = _as_points(coords, "coords")
+    if cutoff <= 0:
+        raise InputError(f"cutoff must be positive, got {cutoff}.")
+    if len(coords) < 2:
+        empty = np.zeros(0, dtype=np.int64)
+        return empty, empty.copy(), np.zeros(0, np.float32)
+
+    limit = float(cutoff) ** 2
+
+    def near(row, index, delta, squared):
+        return squared < limit
+
+    row, index, _, squared = _grid_pairs(coords, cutoff, near)
+    # The grid emits a row's neighbours in cell order; a dense mask would emit
+    # them by column. Downstream edge features index by position, so sort.
+    order = np.lexsort((index, row))
+    return row[order], index[order], np.sqrt(squared[order]).astype(np.float32)
 
 
 # ---------------------------------------------------------------------------

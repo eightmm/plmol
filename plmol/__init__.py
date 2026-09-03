@@ -32,6 +32,7 @@ from .spatial import (
     NeighbourIndex,
     get_spatial_backend,
     knn,
+    pairs_within,
     resolve_spatial_backend,
     set_spatial_backend,
 )
@@ -92,7 +93,7 @@ __all__ = [
     "resolve_sasa_backend", "shrake_rupley",
     "to_torch", "to_numpy",
     "SPATIAL_BACKENDS", "set_spatial_backend", "get_spatial_backend",
-    "resolve_spatial_backend", "knn", "NeighbourIndex",
+    "resolve_spatial_backend", "knn", "NeighbourIndex", "pairs_within",
     "NucleicAcid", "NucleicFeaturizer",
     "StructureParser", "MMCIFParser",
     "PLInteractionFeaturizer", "Complex", "MolecularComplex",

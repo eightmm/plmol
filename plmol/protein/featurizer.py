@@ -35,8 +35,9 @@ from ..constants import (
     VOXEL_DEFAULT_CUTOFF_SIGMA,
 )
 from ..surface import build_protein_surface
-from ..arrays import FLOAT, INT, one_hot, pairwise_distances
-from ..utils import dense_to_edges, knn_mask
+from ..arrays import FLOAT, INT, one_hot
+from ..spatial import NeighbourIndex, pairs_within
+from ..utils import dense_to_edges
 from ..voxel import build_protein_voxel
 from .utils import PDBParser
 
@@ -567,17 +568,32 @@ class ProteinFeaturizer:
             atom_features = atom_featurizer.get_all_atom_features(pdb_to_use)
 
             coords = np.asarray(atom_features['coords'], dtype=FLOAT)
-            dist_matrix = pairwise_distances(coords, coords)
 
-            # Create edges based on distance cutoff
-            edge_mask = (dist_matrix < distance_cutoff) & (dist_matrix > 0)
+            # Edges from a grid, not from a full distance matrix: for a protein
+            # that is ten million distances computed to keep seventy thousand.
+            src_idx, dst_idx, edge_distances = pairs_within(coords, distance_cutoff)
 
-            if knn_cutoff is not None and dist_matrix.shape[0] > 1:
-                edge_mask = edge_mask | knn_mask(dist_matrix, knn_cutoff)
+            if knn_cutoff is not None and len(coords) > 1:
+                # One extra neighbour because an atom is its own nearest, and
+                # dropped by index rather than by position: two atoms at the
+                # same coordinates would both sit at distance zero.
+                near = NeighbourIndex(coords).query(coords, min(knn_cutoff + 1, len(coords)))[1]
+                rows = np.arange(len(coords), dtype=INT)[:, None]
+                keep = near != rows
+                # Every row gives up exactly knn_cutoff neighbours: drop the
+                # last one where the atom did not appear among its own.
+                keep[np.cumsum(keep, axis=1) > knn_cutoff] = False
+                knn_src = np.repeat(rows.ravel(), keep.sum(axis=1))
+                knn_dst = near[keep].astype(INT)
+                src_idx = np.concatenate([src_idx, knn_src])
+                dst_idx = np.concatenate([dst_idx, knn_dst])
+                pairs = np.unique(np.stack([src_idx, dst_idx], axis=1), axis=0)
+                src_idx, dst_idx = pairs[:, 0], pairs[:, 1]
+                edge_distances = np.linalg.norm(
+                    coords[dst_idx] - coords[src_idx], axis=-1
+                ).astype(FLOAT)
 
-            src_idx, dst_idx = np.nonzero(edge_mask)
             edges = (src_idx.astype(INT), dst_idx.astype(INT))
-            edge_distances = dist_matrix[edge_mask].astype(FLOAT)
 
             # Package node features
             residue_nums = atom_features['metadata']['residue_numbers']

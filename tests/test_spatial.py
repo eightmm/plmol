@@ -10,6 +10,7 @@ from plmol.spatial import (
     get_spatial_backend,
     knn,
     overlapping_sphere_pairs,
+    pairs_within,
     resolve_spatial_backend,
     set_spatial_backend,
     sphere_point_exposure,
@@ -94,6 +95,64 @@ class TestOverlappingSpherePairs:
     def test_length_mismatch_is_rejected(self):
         with pytest.raises(InputError, match="radii"):
             overlapping_sphere_pairs(np.zeros((4, 3)), np.zeros(3))
+
+
+# -- Pairs within a cutoff ----------------------------------------------------
+
+
+class TestPairsWithin:
+    """This stands in for a dense distance matrix, so it has to match one
+    exactly -- same pairs, same order, same distances."""
+
+    @pytest.mark.parametrize("cutoff", [1.0, 3.0, 8.0])
+    def test_matches_a_dense_mask(self, cutoff):
+        rng = np.random.default_rng(30)
+        points = (rng.normal(size=(400, 3)) * 4).astype(np.float32)
+        dense = np.linalg.norm(points[:, None] - points[None], axis=-1)
+        expected_i, expected_j = np.nonzero((dense < cutoff) & (dense > 0))
+        got_i, got_j, distances = pairs_within(points, cutoff)
+        assert np.array_equal(got_i, expected_i)
+        assert np.array_equal(got_j, expected_j)
+        assert np.allclose(distances, dense[expected_i, expected_j], atol=1e-5)
+
+    def test_the_order_is_row_major(self):
+        rng = np.random.default_rng(31)
+        points = (rng.normal(size=(60, 3)) * 3).astype(np.float32)
+        i, j, _ = pairs_within(points, 5.0)
+        assert np.array_equal(np.lexsort((j, i)), np.arange(len(i)))
+
+    def test_no_pair_is_a_point_with_itself(self):
+        points = np.zeros((20, 3), dtype=np.float32)
+        i, j, _ = pairs_within(points, 1.0)
+        assert not (i == j).any()
+        assert len(i) == 20 * 19
+
+    def test_far_apart_points_make_no_pairs(self):
+        points = np.array([[0.0, 0, 0], [500.0, 0, 0]], dtype=np.float32)
+        assert pairs_within(points, 1.0)[0].size == 0
+
+    def test_a_single_point(self):
+        assert pairs_within(np.zeros((1, 3), np.float32), 5.0)[0].size == 0
+
+    def test_a_nonpositive_cutoff_is_rejected(self):
+        with pytest.raises(InputError, match="cutoff must be positive"):
+            pairs_within(np.zeros((4, 3), np.float32), 0.0)
+
+    def test_awkward_geometries(self):
+        """A rod fills one row of cells; two clusters leave most of them empty."""
+        rng = np.random.default_rng(32)
+        blob = rng.normal(size=(300, 3))
+        for points in (
+            rng.uniform([0, 0, 0], [400, 1, 1], size=(600, 3)),
+            np.vstack([blob, blob + 300.0]),
+            np.c_[rng.uniform(0, 30, size=(500, 2)), np.zeros(500)],
+        ):
+            points = points.astype(np.float32)
+            dense = np.linalg.norm(points[:, None] - points[None], axis=-1)
+            expected_i, expected_j = np.nonzero((dense < 4.0) & (dense > 0))
+            got_i, got_j, _ = pairs_within(points, 4.0)
+            assert np.array_equal(got_i, expected_i)
+            assert np.array_equal(got_j, expected_j)
 
 
 # -- Sphere point occlusion ---------------------------------------------------
