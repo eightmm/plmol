@@ -65,6 +65,10 @@ _BACKEND = "auto"
 #: tens of megabytes and this cache is not something a caller asked for.
 _PAIR_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()
 _PAIR_CACHE_MAX_BYTES = 64 << 20
+#: Nothing in plmol calls the pair search from a worker thread today, but this
+#: is a library and an OrderedDict torn by two of them fails in a way no test
+#: would reproduce.
+_PAIR_CACHE_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -282,10 +286,11 @@ def overlapping_sphere_pairs(
         return empty, empty.copy(), np.zeros((0, 3), np.float32), np.zeros(0, np.float32)
 
     key = (n, _digest(coords), _digest(radii))
-    cached = _PAIR_CACHE.get(key)
-    if cached is not None:
-        _PAIR_CACHE.move_to_end(key)
-        return cached
+    with _PAIR_CACHE_LOCK:
+        cached = _PAIR_CACHE.get(key)
+        if cached is not None:
+            _PAIR_CACHE.move_to_end(key)
+            return cached
 
     def touching(row, index, squared):
         limit = radii[row] + radii[index]
@@ -297,9 +302,11 @@ def overlapping_sphere_pairs(
     result = _grid_pairs(coords, 2.0 * radii.max(), touching)
     stored = sum(part.nbytes for part in result)
     if stored <= _PAIR_CACHE_MAX_BYTES:
-        _PAIR_CACHE[key] = result
-        while sum(sum(p.nbytes for p in v) for v in _PAIR_CACHE.values()) > _PAIR_CACHE_MAX_BYTES:
-            _PAIR_CACHE.popitem(last=False)
+        with _PAIR_CACHE_LOCK:
+            _PAIR_CACHE[key] = result
+            while (sum(sum(p.nbytes for p in v) for v in _PAIR_CACHE.values())
+                   > _PAIR_CACHE_MAX_BYTES):
+                _PAIR_CACHE.popitem(last=False)
     return result
 
 

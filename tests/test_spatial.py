@@ -413,3 +413,25 @@ class TestFeaturesAgreeAcrossBackends:
         native = shrake_rupley(coords, radii)
         set_spatial_backend("scipy")
         assert np.array_equal(native, shrake_rupley(coords, radii))
+
+
+class TestPairCacheIsThreadSafe:
+    def test_many_threads_asking_at_once_agree(self):
+        """Nothing calls this from a pool today; a library should survive it."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        from plmol.spatial import _PAIR_CACHE
+
+        rng = np.random.default_rng(50)
+        inputs = [
+            (rng.normal(scale=3.0, size=(200, 3)).astype(np.float32),
+             rng.uniform(1.0, 2.0, size=200).astype(np.float32))
+            for _ in range(4)
+        ]
+        expected = [overlapping_sphere_pairs(*pair) for pair in inputs]
+        _PAIR_CACHE.clear()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda pair: overlapping_sphere_pairs(*pair), inputs * 6))
+        for index, got in enumerate(results):
+            want = expected[index % len(inputs)]
+            assert all(np.array_equal(a, b) for a, b in zip(got, want))
