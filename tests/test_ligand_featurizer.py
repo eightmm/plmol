@@ -156,10 +156,10 @@ class TestAdjacencyToBondEdges:
     def test_numpy_input(self, ethanol_smiles):
         lf = LigandFeaturizer(ethanol_smiles)
         graph = lf.get_graph(standardized=True)
-        adj_np = graph["adjacency"].numpy() if isinstance(graph["adjacency"], torch.Tensor) else graph["adjacency"]
+        adj_np = graph["adjacency"] if isinstance(graph["adjacency"], np.ndarray) else graph["adjacency"]
         edge_index, edge_features = LigandFeaturizer.adjacency_to_bond_edges(adj_np)
         assert edge_index.shape[0] == 2
 
     def test_invalid_input(self):
         with pytest.raises(ValueError, match="adjacency"):
-            LigandFeaturizer.adjacency_to_bond_edges(torch.zeros(3, 3))
+            LigandFeaturizer.adjacency_to_bond_edges(np.zeros((3, 3)))

@@ -171,7 +171,7 @@ def _from_dense_adjacency(view: Dict[str, Any], source: str) -> Dict[str, Any]:
 
     mask = view.get("bond_mask")
     if mask is None:
-        mask = adjacency[..., :4].sum(dim=-1) > 0
+        mask = adjacency[..., :4].sum(axis=-1) > 0
     else:
         mask = _tensor(mask).bool()
     mask = mask.clone()

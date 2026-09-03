@@ -9,7 +9,8 @@ import logging
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 import numpy as np
-import torch
+
+from ..arrays import FLOAT
 
 from ..errors import InputError
 from rdkit import Chem, DataStructs
@@ -126,7 +127,7 @@ class FingerprintGenerator:
         self,
         mol: Chem.Mol,
         include_fps: Optional[Iterable[str]] = None,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Dict[str, np.ndarray]:
         """
         Extract various molecular fingerprints.
 
@@ -137,102 +138,102 @@ class FingerprintGenerator:
         gens = self._get_fp_generators()
         fingerprints = {}
 
-        def _bitvect_to_tensor(bitvect) -> torch.Tensor:
+        def _bitvect_to_array(bitvect) -> np.ndarray:
             arr = np.zeros((bitvect.GetNumBits(),), dtype=np.float32)
             DataStructs.ConvertToNumpyArray(bitvect, arr)
-            return torch.from_numpy(arr)
+            return arr
 
         # MACCS keys
         if 'maccs' in include:
-            fingerprints['maccs'] = _bitvect_to_tensor(MACCSkeys.GenMACCSKeys(mol))
+            fingerprints['maccs'] = _bitvect_to_array(MACCSkeys.GenMACCSKeys(mol))
 
         # ECFP4 fingerprints
         if 'ecfp4' in include:
-            fingerprints['ecfp4'] = torch.from_numpy(
+            fingerprints['ecfp4'] = (
                 gens['ecfp4'].GetFingerprintAsNumPy(mol)
-            ).float()
+            ).astype(FLOAT)
         if 'ecfp4_count' in include:
-            fingerprints['ecfp4_count'] = torch.from_numpy(
+            fingerprints['ecfp4_count'] = (
                 gens['ecfp4'].GetCountFingerprintAsNumPy(mol)
-            ).float()
+            ).astype(FLOAT)
 
         # ECFP4 feature-invariant variant
         if 'ecfp4_feature' in include:
-            fingerprints['ecfp4_feature'] = torch.from_numpy(
+            fingerprints['ecfp4_feature'] = (
                 gens['ecfp4_feature'].GetFingerprintAsNumPy(mol)
-            ).float()
+            ).astype(FLOAT)
 
         # ECFP6 / feature-invariant variants
         if 'ecfp6' in include:
-            fingerprints['ecfp6'] = torch.from_numpy(
+            fingerprints['ecfp6'] = (
                 gens['ecfp6'].GetFingerprintAsNumPy(mol)
-            ).float()
+            ).astype(FLOAT)
         if 'ecfp6_feature' in include:
-            fingerprints['ecfp6_feature'] = torch.from_numpy(
+            fingerprints['ecfp6_feature'] = (
                 gens['ecfp6_feature'].GetFingerprintAsNumPy(mol)
-            ).float()
+            ).astype(FLOAT)
 
         # RDKit fingerprint
         if 'rdkit' in include:
-            fingerprints['rdkit'] = torch.from_numpy(
+            fingerprints['rdkit'] = (
                 gens['rdkit'].GetFingerprintAsNumPy(mol)
-            ).float()
+            ).astype(FLOAT)
 
         # Atom pair fingerprint
         if 'atom_pair' in include:
-            fingerprints['atom_pair'] = torch.from_numpy(
+            fingerprints['atom_pair'] = (
                 gens['atom_pair'].GetFingerprintAsNumPy(mol)
-            ).float()
+            ).astype(FLOAT)
 
         # Topological torsion
         if 'topological_torsion' in include:
-            fingerprints['topological_torsion'] = torch.from_numpy(
+            fingerprints['topological_torsion'] = (
                 gens['topological_torsion'].GetFingerprintAsNumPy(mol)
-            ).float()
+            ).astype(FLOAT)
 
         # Pharmacophore 2D (lazy import)
         if 'pharmacophore2d' in include:
             from rdkit.Chem.Pharm2D import Generate, Gobbi_Pharm2D
             pharm_fp = Generate.Gen2DFingerprint(mol, Gobbi_Pharm2D.factory)
-            bit_vector = torch.zeros(1024)
+            bit_vector = np.zeros(1024, dtype=FLOAT)
             for bit_id in pharm_fp.GetOnBits():
                 if bit_id < 1024:
                     bit_vector[bit_id] = 1.0
-            fingerprints['pharmacophore2d'] = bit_vector.float()
+            fingerprints['pharmacophore2d'] = bit_vector
 
         # Avalon fingerprint (lazy import, optional)
         if 'avalon' in include:
             try:
                 from rdkit.Avalon import pyAvalonTools
                 avalon = pyAvalonTools.GetAvalonFP(mol, nBits=2048)
-                fingerprints['avalon'] = _bitvect_to_tensor(avalon)
+                fingerprints['avalon'] = _bitvect_to_array(avalon)
             except ImportError:
-                fingerprints['avalon'] = torch.zeros(2048, dtype=torch.float32)
+                fingerprints['avalon'] = np.zeros(2048, dtype=FLOAT)
 
         # ErG pharmacophore fingerprint (315 dims in RDKit)
         if 'erg' in include:
-            fingerprints['erg'] = torch.tensor(
-                rdReducedGraphs.GetErGFingerprint(mol), dtype=torch.float32
+            fingerprints['erg'] = np.array(
+                rdReducedGraphs.GetErGFingerprint(mol), dtype=FLOAT
             )
 
         # MOE-type VSA descriptors (property-partitioned surface area)
         if 'peoe_vsa' in include:
-            fingerprints['peoe_vsa'] = torch.tensor(
-                rdMolDescriptors.PEOE_VSA_(mol), dtype=torch.float32
+            fingerprints['peoe_vsa'] = np.array(
+                rdMolDescriptors.PEOE_VSA_(mol), dtype=FLOAT
             )
         if 'slogp_vsa' in include:
-            fingerprints['slogp_vsa'] = torch.tensor(
-                rdMolDescriptors.SlogP_VSA_(mol), dtype=torch.float32
+            fingerprints['slogp_vsa'] = np.array(
+                rdMolDescriptors.SlogP_VSA_(mol), dtype=FLOAT
             )
         if 'smr_vsa' in include:
-            fingerprints['smr_vsa'] = torch.tensor(
-                rdMolDescriptors.SMR_VSA_(mol), dtype=torch.float32
+            fingerprints['smr_vsa'] = np.array(
+                rdMolDescriptors.SMR_VSA_(mol), dtype=FLOAT
             )
 
         # Molecular Quantum Numbers (42-dim integer fingerprint)
         if 'mqn' in include:
-            fingerprints['mqn'] = torch.tensor(
-                rdMolDescriptors.MQNs_(mol), dtype=torch.float32
+            fingerprints['mqn'] = np.array(
+                rdMolDescriptors.MQNs_(mol), dtype=FLOAT
             )
 
         return fingerprints

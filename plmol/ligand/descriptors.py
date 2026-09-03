@@ -12,7 +12,8 @@ from typing import Any, Dict, Iterable, Optional, Tuple, Union
 logger = logging.getLogger(__name__)
 
 import numpy as np
-import torch
+
+from ..arrays import FLOAT
 from rdkit import Chem
 from rdkit.Chem import (
     AllChem,
@@ -491,7 +492,7 @@ class MoleculeFeaturizer:
         self,
         mol: Chem.Mol,
         include_fps: Optional[Iterable[str]] = None,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Dict[str, np.ndarray]:
         """
         Extract various molecular fingerprints.
 
@@ -504,19 +505,19 @@ class MoleculeFeaturizer:
     # Custom SMARTS Features
     # =========================================================================
 
-    def _get_custom_smarts_features(self, mol: Chem.Mol) -> Optional[torch.Tensor]:
+    def _get_custom_smarts_features(self, mol: Chem.Mol) -> Optional[np.ndarray]:
         """
         Compute custom SMARTS pattern matches for each atom.
 
         Returns:
-            torch.Tensor or None: Binary features [n_atoms, n_patterns] if patterns provided
+            np.ndarray or None: Binary features [n_atoms, n_patterns] if patterns provided
         """
         if not self.custom_smarts:
             return None
 
         num_atoms = mol.GetNumAtoms()
         num_patterns = len(self.custom_smarts)
-        features = torch.zeros(num_atoms, num_patterns)
+        features = np.zeros((num_atoms, num_patterns), dtype=FLOAT)
 
         for idx, (name, pattern) in enumerate(self.custom_smarts.items()):
             try:
@@ -589,7 +590,7 @@ class MoleculeFeaturizer:
         include_key = self._normalize_include_fps(include_fps)
         return self._compute_features(mol, include_fps=include_key)
 
-    def _compute_descriptor_tensor(self, mol: Chem.Mol) -> torch.Tensor:
+    def _compute_descriptor_tensor(self, mol: Chem.Mol) -> np.ndarray:
         """Build the 62-dim descriptor tensor for a prepared molecule."""
         physicochemical = self.get_physicochemical_features(mol)
         druglike = self.get_druglike_features(mol)
@@ -630,9 +631,9 @@ class MoleculeFeaturizer:
             [float(admet[key]) for key in admet_keys],
             dtype=np.float32,
         )
-        return torch.from_numpy(descriptors)
+        return descriptors
 
-    def _cached_descriptor_tensor(self) -> torch.Tensor:
+    def _cached_descriptor_tensor(self) -> np.ndarray:
         """Descriptor tensor for the initialized molecule, computed once."""
         if 'descriptors' not in self._cache:
             self._cache['descriptors'] = self._compute_descriptor_tensor(self._mol)
@@ -667,7 +668,7 @@ class MoleculeFeaturizer:
         include_custom_smarts: bool = True,
         knn_cutoff: Optional[int] = None,
         generate_conformer: bool = True,
-    ) -> Tuple[Dict, Dict, torch.Tensor]:
+    ) -> Tuple[Dict, Dict, np.ndarray]:
         """
         New interface for featurization.
         """
@@ -693,7 +694,7 @@ class MoleculeFeaturizer:
         include_custom_smarts: bool = True,
         knn_cutoff: Optional[int] = None,
         generate_conformer: bool = True,
-    ) -> Tuple[Dict, Dict, torch.Tensor]:
+    ) -> Tuple[Dict, Dict, np.ndarray]:
         """
         Create molecular graph with node and edge features.
         """
@@ -708,7 +709,7 @@ class MoleculeFeaturizer:
         include_custom_smarts: bool = True,
         knn_cutoff: Optional[int] = None,
         generate_conformer: bool = True,
-    ) -> Tuple[Dict, Dict, torch.Tensor]:
+    ) -> Tuple[Dict, Dict, np.ndarray]:
         """Compute graph representation for a prepared molecule."""
         node, edge, adj = self._graph_featurizer.featurize(
             mol,
@@ -722,7 +723,7 @@ class MoleculeFeaturizer:
             custom_features = self._get_custom_smarts_features(mol)
             if custom_features is not None:
                 original_feats = node['node_feats']
-                node['node_feats'] = torch.cat([original_feats, custom_features], dim=1)
+                node['node_feats'] = np.concatenate([original_feats, custom_features], axis=1)
 
         return node, edge, adj
 
@@ -730,18 +731,18 @@ class MoleculeFeaturizer:
     # Convenience Methods (Object-Oriented API)
     # =========================================================================
 
-    def get_descriptors(self) -> torch.Tensor:
+    def get_descriptors(self) -> np.ndarray:
         """
         Get only molecular descriptors (requires molecule initialization).
 
         Returns:
-            torch.Tensor: 62 normalized molecular descriptors
+            np.ndarray: 62 normalized molecular descriptors
         """
         if self._mol is None:
             raise InputError("No molecule provided. Either initialize with a molecule or pass one to this method.")
         return self._cached_descriptor_tensor()
 
-    def get_morgan_fingerprint(self, radius: int = 2, n_bits: int = 2048) -> torch.Tensor:
+    def get_morgan_fingerprint(self, radius: int = 2, n_bits: int = 2048) -> np.ndarray:
         """
         Get Morgan fingerprint (requires molecule initialization).
 
@@ -750,7 +751,7 @@ class MoleculeFeaturizer:
             n_bits: Number of bits (default: 2048)
 
         Returns:
-            torch.Tensor: Morgan fingerprint of shape [n_bits]
+            np.ndarray: Morgan fingerprint of shape [n_bits]
         """
         if self._mol is None:
             raise InputError("No molecule set. Initialize with a molecule first.")
@@ -764,7 +765,7 @@ class MoleculeFeaturizer:
         morgan_gen = rdFingerprintGenerator.GetMorganGenerator(
             radius=radius, fpSize=n_bits, countSimulation=True, includeChirality=True
         )
-        return torch.from_numpy(morgan_gen.GetFingerprintAsNumPy(self._mol)).float()
+        return morgan_gen.GetFingerprintAsNumPy(self._mol).astype(FLOAT)
 
     def get_custom_smarts_features(self) -> Optional[Dict[str, Any]]:
         """
@@ -792,12 +793,12 @@ class MoleculeFeaturizer:
                 }
         return self._cache[cache_key]
 
-    def get_3d_coordinates(self) -> Optional[torch.Tensor]:
+    def get_3d_coordinates(self) -> Optional[np.ndarray]:
         """
         Get 3D coordinates if available (requires molecule initialization).
 
         Returns:
-            torch.Tensor or None: 3D coordinates [n_atoms, 3]
+            np.ndarray or None: 3D coordinates [n_atoms, 3]
         """
         if self._mol is None:
             raise InputError("No molecule set. Initialize with a molecule first.")
@@ -839,7 +840,8 @@ class MoleculeFeaturizer:
         }
 
         if save_to:
-            torch.save(all_features, save_to)
+            # numpy arrays in a nested dict; np.load(path, allow_pickle=True) reads it.
+            np.save(save_to, all_features, allow_pickle=True)
 
         return all_features
 

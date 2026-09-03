@@ -1,6 +1,6 @@
 """Tests for plmol/ligand/graph.py — MoleculeGraphFeaturizer."""
 
-import torch
+import numpy as np
 import pytest
 
 from rdkit import Chem
@@ -62,7 +62,7 @@ class TestAtomFeatures:
             generate_conformer=False,
         )
         assert coords.shape == (aspirin_mol.GetNumAtoms(), 3)
-        assert torch.count_nonzero(coords) == 0
+        assert np.count_nonzero(coords) == 0
 
 
 class TestBondFeatures:
@@ -75,7 +75,7 @@ class TestBondFeatures:
         bond_feats = graph_featurizer.get_bond_features(ethanol_mol)
         # Bond features should be symmetric for undirected bonds
         for ch in range(bond_feats.shape[2]):
-            diff = (bond_feats[:, :, ch] - bond_feats[:, :, ch].T).abs().max()
+            diff = np.abs(bond_feats[:, :, ch] - bond_feats[:, :, ch].T).max()
             assert diff < 1e-5, f"Channel {ch} not symmetric"
 
 
@@ -87,7 +87,7 @@ class TestPartialCharges:
 
     def test_finite(self, graph_featurizer, ethanol_mol):
         charges = graph_featurizer.get_partial_charges(ethanol_mol)
-        assert torch.isfinite(charges).all()
+        assert np.isfinite(charges).all()
 
 
 class TestPhysicalProperties:
@@ -110,7 +110,7 @@ class TestPairFeatures:
         mol = Chem.AddHs(ethanol_mol)
         AllChem.EmbedMolecule(mol, randomSeed=42)
         mol = Chem.RemoveHs(mol)
-        coords = torch.tensor(mol.GetConformer().GetPositions(), dtype=torch.float32)
+        coords = np.array(mol.GetConformer().GetPositions(), dtype=np.float32)
         pair = graph_featurizer.get_pair_features(mol, coords)
         n = mol.GetNumAtoms()
         assert pair.shape[:2] == (n, n)
@@ -120,12 +120,12 @@ class TestPairFeatures:
         mol = Chem.AddHs(ethanol_mol)
         AllChem.EmbedMolecule(mol, randomSeed=42)
         mol = Chem.RemoveHs(mol)
-        coords = torch.tensor(mol.GetConformer().GetPositions(), dtype=torch.float32)
+        coords = np.array(mol.GetConformer().GetPositions(), dtype=np.float32)
         dm = graph_featurizer.get_distance_matrix(mol, coords)
         n = mol.GetNumAtoms()
         assert dm.shape == (n, n)
         # Diagonal should be zero
-        assert (dm.diag() < 1e-5).all()
+        assert (np.diag(dm) < 1e-5).all()
 
 
 class TestOneHot:

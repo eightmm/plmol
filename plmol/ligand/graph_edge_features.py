@@ -7,7 +7,6 @@ distance matrices, and distance bounds.
 """
 
 import numpy as np
-import torch
 from rdkit import Chem
 from rdkit.Chem import rdDistGeom
 from typing import Dict
@@ -17,7 +16,7 @@ from ..constants import (
     BOND_TYPES, BOND_STEREOS, BOND_DIRS,
     NORM_CONSTANTS,
 )
-from ..utils import knn_mask_torch
+from ..arrays import FLOAT, INT, pairwise_distances
 
 
 #: Width of the bond block at the front of the dense adjacency.
@@ -65,7 +64,7 @@ class EdgeFeatureMixin:
         - self._get_distance_matrix(mol) -> np.ndarray
     """
 
-    def get_bond_features(self, mol) -> torch.Tensor:
+    def get_bond_features(self, mol) -> np.ndarray:
         """
         Extract bond features as adjacency tensor.
 
@@ -111,13 +110,15 @@ class EdgeFeatureMixin:
 
         norm = NORM_CONSTANTS
 
-        adj = torch.zeros(num_atoms, num_atoms, num_edge_features)
-        bond_indices = torch.triu(
-            torch.tensor(Chem.GetAdjacencyMatrix(mol))
-        ).nonzero()
+        adj = np.zeros((num_atoms, num_atoms, num_edge_features), dtype=FLOAT)
+        # argwhere, not nonzero: numpy's nonzero returns one array per axis
+        # where torch's returned index pairs.
+        bond_indices = np.argwhere(
+            np.triu(np.asarray(Chem.GetAdjacencyMatrix(mol)))
+        )
 
         for src, dst in bond_indices:
-            src_idx, dst_idx = src.item(), dst.item()
+            src_idx, dst_idx = int(src), int(dst)
             bond = mol.GetBondBetweenAtoms(src_idx, dst_idx)
             features = []
 
@@ -137,8 +138,8 @@ class EdgeFeatureMixin:
 
             # ===== Basic Pair Distance (1) =====
             if coords is not None and coords.shape[0] == num_atoms:
-                if torch.any(coords):
-                    dist = torch.dist(coords[src_idx], coords[dst_idx]).item()
+                if np.any(coords):
+                    dist = float(np.linalg.norm(coords[src_idx] - coords[dst_idx]))
                 else:
                     dist = 0.0
             else:
@@ -156,10 +157,11 @@ class EdgeFeatureMixin:
                 )
             )
 
-            adj[src_idx, dst_idx] = torch.tensor(features, dtype=torch.float32)
+            adj[src_idx, dst_idx] = np.array(features, dtype=FLOAT)
 
         # Make symmetric
-        return adj + adj.transpose(0, 1)
+        # Swap the two atom axes only; the feature axis stays put.
+        return adj + adj.transpose(1, 0, 2)
 
     def _get_bond_topological_features(
         self, mol, bond, src_idx: int, dst_idx: int,
@@ -244,7 +246,7 @@ class EdgeFeatureMixin:
 
         return features
 
-    def get_pair_features(self, mol, coords: torch.Tensor) -> torch.Tensor:
+    def get_pair_features(self, mol, coords: np.ndarray) -> np.ndarray:
         """
         Build complementary pairwise features for all atom pairs [N, N, C].
 
@@ -276,8 +278,8 @@ class EdgeFeatureMixin:
             spd_bins[i, i, :] = 0.0
 
         euclid_norm = np.zeros((num_atoms, num_atoms), dtype=np.float32)
-        if coords is not None and coords.shape[0] == num_atoms and torch.any(coords):
-            euclid = torch.cdist(coords, coords).cpu().numpy()
+        if coords is not None and coords.shape[0] == num_atoms and np.any(coords):
+            euclid = pairwise_distances(coords, coords)
             euclid_norm = np.clip(
                 euclid / max(norm['dist_to_special'], 1.0),
                 0.0,
@@ -343,20 +345,20 @@ class EdgeFeatureMixin:
             ],
             axis=-1,
         )
-        return torch.from_numpy(stacked)
+        return stacked
 
-    def get_distance_matrix(self, mol, coords: torch.Tensor) -> torch.Tensor:
+    def get_distance_matrix(self, mol, coords: np.ndarray) -> np.ndarray:
         """
         Build pairwise Euclidean distance matrix [N, N].
 
         If valid 3D coordinates are unavailable, returns an all-zero matrix.
         """
         num_atoms = mol.GetNumAtoms()
-        if coords is None or coords.shape[0] != num_atoms or not torch.any(coords):
-            return torch.zeros((num_atoms, num_atoms), dtype=torch.float32)
-        return torch.cdist(coords, coords).to(torch.float32)
+        if coords is None or coords.shape[0] != num_atoms or not np.any(coords):
+            return np.zeros((num_atoms, num_atoms), dtype=FLOAT)
+        return pairwise_distances(coords, coords).astype(FLOAT)
 
-    def get_distance_bounds(self, mol, coords: torch.Tensor) -> torch.Tensor:
+    def get_distance_bounds(self, mol, coords: np.ndarray) -> np.ndarray:
         """
         Build pairwise distance lower/upper bounds [N, N, 2].
 
@@ -367,7 +369,7 @@ class EdgeFeatureMixin:
         """
         num_atoms = mol.GetNumAtoms()
         if num_atoms == 0:
-            return torch.zeros((0, 0, 2), dtype=torch.float32)
+            return np.zeros((0, 0, 2), dtype=FLOAT)
 
         try:
             bounds = np.asarray(rdDistGeom.GetMoleculeBoundsMatrix(mol), dtype=np.float32)
@@ -389,4 +391,4 @@ class EdgeFeatureMixin:
         lower[iu, ju] = lower_vals
         lower[ju, iu] = lower_vals
 
-        return torch.from_numpy(np.stack([lower, upper], axis=-1))
+        return np.stack([lower, upper], axis=-1)

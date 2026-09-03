@@ -9,7 +9,8 @@ topological features, SMARTS matching, and 3D coordinates.
 import logging
 import warnings
 import numpy as np
-import torch
+
+from ..arrays import FLOAT
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
 from typing import Dict, Tuple
@@ -28,10 +29,10 @@ from ..rdkit_utils import ensure_3d_conformer, has_3d
 logger = logging.getLogger(__name__)
 
 
-def _conformer_coords(conf, num_atoms: int) -> torch.Tensor:
+def _conformer_coords(conf, num_atoms: int) -> np.ndarray:
     """First ``num_atoms`` conformer positions as a float32 (num_atoms, 3) tensor."""
     positions = np.asarray(conf.GetPositions(), dtype=np.float32).reshape(-1, 3)
-    return torch.from_numpy(positions[:num_atoms].copy())
+    return positions[:num_atoms].copy()
 
 
 class AtomFeatureMixin:
@@ -159,7 +160,7 @@ class AtomFeatureMixin:
 
         return degree_info
 
-    def get_stereochemistry_features(self, mol) -> torch.Tensor:
+    def get_stereochemistry_features(self, mol) -> np.ndarray:
         """
         Extract stereochemistry features for all atoms (8 dimensions per atom).
 
@@ -170,7 +171,7 @@ class AtomFeatureMixin:
             - Aromatic / SP2 / SP
         """
         num_atoms = mol.GetNumAtoms()
-        features = torch.zeros(num_atoms, 8)
+        features = np.zeros((num_atoms, 8), dtype=FLOAT)
 
         for atom in mol.GetAtoms():
             idx = atom.GetIdx()
@@ -205,7 +206,7 @@ class AtomFeatureMixin:
 
         return features
 
-    def get_partial_charges(self, mol) -> torch.Tensor:
+    def get_partial_charges(self, mol) -> np.ndarray:
         """
         Compute Gasteiger partial charges (2 dimensions per atom).
 
@@ -214,7 +215,7 @@ class AtomFeatureMixin:
             - Absolute charge
         """
         num_atoms = mol.GetNumAtoms()
-        features = torch.zeros(num_atoms, 2)
+        features = np.zeros((num_atoms, 2), dtype=FLOAT)
 
         # Use cached charges
         charges = self._get_gasteiger_charges(mol)
@@ -225,7 +226,7 @@ class AtomFeatureMixin:
 
         return features
 
-    def get_extended_neighborhood(self, mol) -> torch.Tensor:
+    def get_extended_neighborhood(self, mol) -> np.ndarray:
         """
         Compute extended neighborhood features (16 dimensions per atom).
 
@@ -240,7 +241,7 @@ class AtomFeatureMixin:
             - Halogen ratio (F, Cl, Br, I)
         """
         num_atoms = mol.GetNumAtoms()
-        features = torch.zeros(num_atoms, 16)
+        features = np.zeros((num_atoms, 16), dtype=FLOAT)
         hetero_symbols = {'N', 'O', 'S'}
         halogen_symbols = {'F', 'Cl', 'Br', 'I'}
 
@@ -309,15 +310,15 @@ class AtomFeatureMixin:
 
             # 1-hop features (0-7)
             hop1_feats = compute_hop_features(neighbors_1)
-            features[idx, 0:8] = torch.tensor(hop1_feats)
+            features[idx, 0:8] = np.asarray(hop1_feats, dtype=FLOAT)
 
             # 2-hop features (8-15)
             hop2_feats = compute_hop_features(neighbors_2)
-            features[idx, 8:16] = torch.tensor(hop2_feats)
+            features[idx, 8:16] = np.asarray(hop2_feats, dtype=FLOAT)
 
         return features
 
-    def get_physical_properties(self, mol) -> torch.Tensor:
+    def get_physical_properties(self, mol) -> np.ndarray:
         """
         Compute physical property features (6 dimensions per atom).
 
@@ -330,7 +331,7 @@ class AtomFeatureMixin:
             - Lone pairs
         """
         num_atoms = mol.GetNumAtoms()
-        features = torch.zeros(num_atoms, 6)
+        features = np.zeros((num_atoms, 6), dtype=FLOAT)
         norm = NORM_CONSTANTS
 
         for atom in mol.GetAtoms():
@@ -365,12 +366,12 @@ class AtomFeatureMixin:
 
         return features
 
-    def get_crippen_contributions(self, mol) -> torch.Tensor:
+    def get_crippen_contributions(self, mol) -> np.ndarray:
         """
         Compute Crippen logP and MR contributions (2 dimensions per atom).
         """
         num_atoms = mol.GetNumAtoms()
-        features = torch.zeros(num_atoms, 2)
+        features = np.zeros((num_atoms, 2), dtype=FLOAT)
         norm = NORM_CONSTANTS
 
         contribs = rdMolDescriptors._CalcCrippenContribs(mol)
@@ -380,10 +381,10 @@ class AtomFeatureMixin:
 
         return features
 
-    def get_tpsa_contributions(self, mol) -> torch.Tensor:
+    def get_tpsa_contributions(self, mol) -> np.ndarray:
         """Compute TPSA contributions (1 dimension per atom)."""
         num_atoms = mol.GetNumAtoms()
-        features = torch.zeros(num_atoms, 1)
+        features = np.zeros((num_atoms, 1), dtype=FLOAT)
 
         contribs = rdMolDescriptors._CalcTPSAContribs(mol)
         for idx, tpsa in enumerate(contribs):
@@ -391,10 +392,10 @@ class AtomFeatureMixin:
 
         return features
 
-    def get_labute_asa_contributions(self, mol) -> torch.Tensor:
+    def get_labute_asa_contributions(self, mol) -> np.ndarray:
         """Compute Labute ASA contributions (1 dimension per atom)."""
         num_atoms = mol.GetNumAtoms()
-        features = torch.zeros(num_atoms, 1)
+        features = np.zeros((num_atoms, 1), dtype=FLOAT)
 
         contribs, _ = rdMolDescriptors._CalcLabuteASAContribs(mol)
         for idx, asa in enumerate(contribs):
@@ -402,7 +403,7 @@ class AtomFeatureMixin:
 
         return features
 
-    def get_topological_features(self, mol) -> torch.Tensor:
+    def get_topological_features(self, mol) -> np.ndarray:
         """
         Compute topological features based on distance matrix (5 dimensions per atom).
 
@@ -414,7 +415,7 @@ class AtomFeatureMixin:
             - Distance to nearest ring atom
         """
         num_atoms = mol.GetNumAtoms()
-        features = torch.zeros(num_atoms, 5)
+        features = np.zeros((num_atoms, 5), dtype=FLOAT)
 
         if num_atoms == 1:
             return features
@@ -442,14 +443,14 @@ class AtomFeatureMixin:
         dm_for_max = np.where(valid_mask, dm, -np.inf)
         max_dists = np.max(dm_for_max, axis=1)
         max_dists[max_dists < 0] = 0
-        features[:, 0] = torch.tensor(
-            np.clip(max_dists / norm['eccentricity'], 0, 1), dtype=torch.float32
+        features[:, 0] = np.asarray(
+            np.clip(max_dists / norm['eccentricity'], 0, 1), dtype=FLOAT
         )
 
         # Closeness centrality: (N-1) / sum(finite distances)
         dist_sums = dm_masked.sum(axis=1)
         closeness = np.where(dist_sums > 0, (num_atoms - 1) / dist_sums, 0)
-        features[:, 1] = torch.tensor(np.clip(closeness, 0, 1), dtype=torch.float32)
+        features[:, 1] = np.asarray(np.clip(closeness, 0, 1), dtype=FLOAT)
 
         # Distance to nearest heteroatom (vectorized)
         if hetero_indices:
@@ -477,8 +478,8 @@ class AtomFeatureMixin:
             features[:, 4] = 1.0
 
         # Betweenness centrality (vectorized)
-        features[:, 2] = torch.tensor(
-            self._calc_betweenness(dm, num_atoms), dtype=torch.float32
+        features[:, 2] = np.asarray(
+            self._calc_betweenness(dm, num_atoms), dtype=FLOAT
         )
 
         return features
@@ -509,7 +510,7 @@ class AtomFeatureMixin:
 
         return np.clip(betweenness, 0, 1)
 
-    def get_extended_neighbor_stats(self, mol) -> torch.Tensor:
+    def get_extended_neighbor_stats(self, mol) -> np.ndarray:
         """
         Compute extended neighbor statistics (6 dimensions per atom).
 
@@ -522,7 +523,7 @@ class AtomFeatureMixin:
             - Ring neighbor ratio
         """
         num_atoms = mol.GetNumAtoms()
-        features = torch.zeros(num_atoms, 6)
+        features = np.zeros((num_atoms, 6), dtype=FLOAT)
         norm = NORM_CONSTANTS
 
         for atom in mol.GetAtoms():
@@ -564,7 +565,7 @@ class AtomFeatureMixin:
 
         return features
 
-    def get_extended_ring_features(self, mol) -> torch.Tensor:
+    def get_extended_ring_features(self, mol) -> np.ndarray:
         """
         Compute extended ring features (4 dimensions per atom).
 
@@ -575,7 +576,7 @@ class AtomFeatureMixin:
             - Is spiro
         """
         num_atoms = mol.GetNumAtoms()
-        features = torch.zeros(num_atoms, 4)
+        features = np.zeros((num_atoms, 4), dtype=FLOAT)
 
         ring_info = mol.GetRingInfo()
         atom_rings = ring_info.AtomRings()
@@ -606,12 +607,12 @@ class AtomFeatureMixin:
 
         return features
 
-    def get_smarts_features(self, mol) -> torch.Tensor:
+    def get_smarts_features(self, mol) -> np.ndarray:
         """
         Compute SMARTS pattern matching features (5 dimensions per atom).
         """
         num_atoms = mol.GetNumAtoms()
-        features = torch.zeros(num_atoms, len(self._smarts_patterns))
+        features = np.zeros((num_atoms, len(self._smarts_patterns)), dtype=FLOAT)
 
         for i, (name, pattern) in enumerate(self._smarts_patterns.items()):
             if pattern is None:
@@ -629,7 +630,7 @@ class AtomFeatureMixin:
     # Coordinate Extraction
     # =========================================================================
 
-    def get_3d_coordinates(self, mol, generate_if_missing: bool = True) -> torch.Tensor:
+    def get_3d_coordinates(self, mol, generate_if_missing: bool = True) -> np.ndarray:
         """
         Extract or generate 3D coordinates.
 
@@ -652,7 +653,7 @@ class AtomFeatureMixin:
 
         # No coordinates exist
         if not generate_if_missing:
-            return torch.zeros((num_atoms, 3), dtype=torch.float32)
+            return np.zeros((num_atoms, 3), dtype=FLOAT)
 
         # Generate coordinates on a copy to avoid modifying original
         try:
@@ -665,7 +666,7 @@ class AtomFeatureMixin:
         except (RuntimeError, ValueError, ImportError):
             logger.debug("3D coordinate generation failed, using zero coordinates")
 
-        return torch.zeros((num_atoms, 3), dtype=torch.float32)
+        return np.zeros((num_atoms, 3), dtype=FLOAT)
 
     # =========================================================================
     # Main Atom Feature Assembly
@@ -675,7 +676,7 @@ class AtomFeatureMixin:
         self,
         mol,
         generate_conformer: bool = True,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Extract all atom features.
 
@@ -726,7 +727,7 @@ class AtomFeatureMixin:
 
             basic_features.append(basic)
 
-        atom_feat = torch.tensor(basic_features, dtype=torch.float32)
+        atom_feat = np.asarray(basic_features, dtype=FLOAT)
 
         # Advanced atom features
         stereochemistry_features = self.get_stereochemistry_features(mol)
@@ -741,7 +742,7 @@ class AtomFeatureMixin:
         tpsa_contributions = self.get_tpsa_contributions(mol)
         labute_asa_contributions = self.get_labute_asa_contributions(mol)
 
-        node_features = torch.cat(
+        node_features = np.concatenate(
             [
                 atom_feat,
                 stereochemistry_features,
@@ -754,7 +755,7 @@ class AtomFeatureMixin:
                 tpsa_contributions,
                 labute_asa_contributions,
             ],
-            dim=1,
+            axis=1,
         )
 
         coords = self.get_3d_coordinates(mol, generate_if_missing=generate_conformer)

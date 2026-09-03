@@ -9,7 +9,8 @@ ligands or SMILES strings.
 from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
-import torch
+
+from ..arrays import FLOAT
 
 try:
     from rdkit import Chem
@@ -495,22 +496,20 @@ class LigandFeaturizer:
         self, node: Dict[str, Any], edge: Dict[str, Any], adj: Any,
         featurizer: Optional["MoleculeFeaturizer"] = None,
     ) -> Dict[str, Any]:
-        if not isinstance(adj, torch.Tensor):
-            adj = torch.as_tensor(adj)
+        adj = np.asarray(adj)
         pair = edge.get("pair_features")
         if pair is not None:
-            if not isinstance(pair, torch.Tensor):
-                pair = torch.as_tensor(pair)
+            pair = np.asarray(pair)
             # merge bond adjacency and complementary pair channels
-            adjacency = torch.cat([adj, pair], dim=-1)
+            adjacency = np.concatenate([adj, pair], axis=-1)
         else:
             adjacency = adj
         # first 4 adjacency channels are bond-type one-hot
-        bond_mask = adjacency[..., :4].sum(dim=-1) > 0
-        bond_mask.fill_diagonal_(False)
+        bond_mask = adjacency[..., :4].sum(axis=-1) > 0
+        np.fill_diagonal(bond_mask, False)
         distance_bounds = edge.get("distance_bounds")
-        if distance_bounds is not None and not isinstance(distance_bounds, torch.Tensor):
-            distance_bounds = torch.as_tensor(distance_bounds)
+        if distance_bounds is not None:
+            distance_bounds = np.asarray(distance_bounds)
         graph = {
             "node_features": node.get("node_feats"),
             "adjacency": adjacency,
@@ -521,7 +520,7 @@ class LigandFeaturizer:
         coords = node.get("coords")
         if coords is None:
             n_atoms = int(graph["node_features"].shape[0]) if graph["node_features"] is not None else 0
-            coords = torch.zeros((n_atoms, 3), dtype=torch.float32)
+            coords = np.zeros((n_atoms, 3), dtype=FLOAT)
         graph["coords"] = coords
 
         # Hierarchical fragment mappings (mirrors protein atom_to_residue)
@@ -536,14 +535,14 @@ class LigandFeaturizer:
         graph["num_fragments"] = frag_result["num_fragments"]
 
         # Molecule-level descriptors (62-dim, same space as fragment_features)
-        graph["molecule_features"] = feat.get_descriptors().numpy().astype(np.float32)
+        graph["molecule_features"] = feat.get_descriptors().astype(np.float32)
 
         return graph
 
     @staticmethod
     def adjacency_to_bond_edges(
-        adjacency: Union[torch.Tensor, np.ndarray],
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        adjacency: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Convert dense adjacency [N, N, C] to sparse chemical bond edges.
 
@@ -551,15 +550,15 @@ class LigandFeaturizer:
         Returns directed edges to keep compatibility with existing conventions.
         """
         if isinstance(adjacency, np.ndarray):
-            adjacency = torch.from_numpy(adjacency)
+            adjacency = np.asarray(adjacency)
 
-        if adjacency.dim() != 3 or adjacency.size(-1) < 4:
+        if adjacency.ndim != 3 or adjacency.shape[-1] < 4:
             raise InputError("adjacency must be [N, N, C] with C >= 4")
 
-        bond_mask = adjacency[..., :4].sum(dim=-1) > 0
-        bond_mask.fill_diagonal_(False)
-        src, dst = torch.where(bond_mask)
-        edge_index = torch.stack([src, dst], dim=0)
+        bond_mask = adjacency[..., :4].sum(axis=-1) > 0
+        np.fill_diagonal(bond_mask, False)
+        src, dst = np.nonzero(bond_mask)
+        edge_index = np.stack([src, dst], axis=0)
         edge_features = adjacency[src, dst]
         return edge_index, edge_features
 

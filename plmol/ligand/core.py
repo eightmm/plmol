@@ -4,7 +4,6 @@ Ligand Representation
 from ..base import BaseMolecule
 from typing import Any, Dict, Iterable, Optional, Union
 import numpy as np
-import torch
 
 try:
     from rdkit import Chem
@@ -228,8 +227,8 @@ class Ligand(BaseMolecule):
 
     @staticmethod
     def _to_numpy_tree(value: Any) -> Any:
-        """Recursively convert torch tensors in nested outputs to numpy arrays."""
-        if isinstance(value, torch.Tensor):
+        """Recursively convert any tensors in nested outputs to numpy arrays."""
+        if hasattr(value, "detach"):
             return value.detach().cpu().numpy()
         if isinstance(value, dict):
             return {k: Ligand._to_numpy_tree(v) for k, v in value.items()}

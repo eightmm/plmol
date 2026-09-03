@@ -12,9 +12,9 @@ rather than recomputed, which keeps the two views numerically consistent.
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-import torch
 from rdkit import Chem
 
+from ..arrays import FLOAT, INT
 from ..errors import InputError
 from .graph_edge_features import bond_view_channels
 
@@ -56,8 +56,8 @@ def build_bond_graph(
             - ``adjacency`` ``(B, B)`` bool: bond-node connectivity.
             - ``num_bonds``, ``num_bond_edges``.
     """
-    adjacency = torch.as_tensor(adjacency)
-    node_features = torch.as_tensor(node_features)
+    adjacency = np.asarray(adjacency)
+    node_features = np.asarray(node_features)
     atom_feature_dim = int(node_features.shape[-1])
     channels = bond_view_channels(adjacency.shape[-1])
     bond_feature_dim = len(channels)
@@ -74,19 +74,19 @@ def build_bond_graph(
         )
 
     if coords is not None:
-        coords = torch.as_tensor(coords, dtype=torch.float32)
-    has_3d = coords is not None and coords.shape[0] == num_atoms and bool(torch.any(coords))
+        coords = np.asarray(coords, dtype=FLOAT)
+    has_3d = coords is not None and coords.shape[0] == num_atoms and bool(np.any(coords))
 
     if num_bonds == 0:
         return {
-            "node_features": torch.zeros((0, bond_feature_dim), dtype=adjacency.dtype),
-            "edge_index": torch.zeros((2, 0), dtype=torch.long),
-            "edge_features": torch.zeros((0, edge_feature_dim), dtype=torch.float32),
-            "edge_shared_atom": torch.zeros((0,), dtype=torch.long),
-            "bond_index": torch.zeros((0, 2), dtype=torch.long),
+            "node_features": np.zeros((0, bond_feature_dim), dtype=adjacency.dtype),
+            "edge_index": np.zeros((2, 0), dtype=INT),
+            "edge_features": np.zeros((0, edge_feature_dim), dtype=FLOAT),
+            "edge_shared_atom": np.zeros((0,), dtype=INT),
+            "bond_index": np.zeros((0, 2), dtype=INT),
             "atom_to_bonds": [[] for _ in range(num_atoms)],
-            "coords": torch.zeros((0, 3), dtype=torch.float32),
-            "adjacency": torch.zeros((0, 0), dtype=torch.bool),
+            "coords": np.zeros((0, 3), dtype=FLOAT),
+            "adjacency": np.zeros((0, 0), dtype=bool),
             "num_bonds": 0,
             "num_bond_edges": 0,
         }
@@ -103,7 +103,7 @@ def build_bond_graph(
         atom_to_bonds[begin].append(b_idx)
         atom_to_bonds[end].append(b_idx)
 
-    bond_index = torch.from_numpy(bond_pairs)
+    bond_index = bond_pairs
     begin_idx = bond_index[:, 0]
     end_idx = bond_index[:, 1]
 
@@ -129,30 +129,30 @@ def build_bond_graph(
                 shared.append(atom_idx)
 
     num_edges = len(src)
-    edge_index = torch.tensor([src, dst], dtype=torch.long) if num_edges else torch.zeros(
-        (2, 0), dtype=torch.long
+    edge_index = np.array([src, dst], dtype=INT) if num_edges else np.zeros(
+        (2, 0), dtype=INT
     )
-    edge_shared_atom = torch.tensor(shared, dtype=torch.long) if num_edges else torch.zeros(
-        (0,), dtype=torch.long
+    edge_shared_atom = np.array(shared, dtype=INT) if num_edges else np.zeros(
+        (0,), dtype=INT
     )
 
     if num_edges:
-        shared_atom_features = node_features[edge_shared_atom].to(torch.float32)
+        shared_atom_features = node_features[edge_shared_atom].astype(FLOAT)
         angle_features = _bond_angle_features(
             bond_index, edge_index, edge_shared_atom, coords if has_3d else None
         )
-        edge_features = torch.cat([shared_atom_features, angle_features], dim=-1)
+        edge_features = np.concatenate([shared_atom_features, angle_features], axis=-1)
     else:
-        edge_features = torch.zeros((0, edge_feature_dim), dtype=torch.float32)
+        edge_features = np.zeros((0, edge_feature_dim), dtype=FLOAT)
 
-    bond_adjacency = torch.zeros((num_bonds, num_bonds), dtype=torch.bool)
+    bond_adjacency = np.zeros((num_bonds, num_bonds), dtype=bool)
     if num_edges:
         bond_adjacency[edge_index[0], edge_index[1]] = True
 
     if has_3d:
         bond_coords = (coords[begin_idx] + coords[end_idx]) * 0.5
     else:
-        bond_coords = torch.zeros((num_bonds, 3), dtype=torch.float32)
+        bond_coords = np.zeros((num_bonds, 3), dtype=FLOAT)
 
     return {
         "node_features": bond_node_features,
@@ -169,30 +169,30 @@ def build_bond_graph(
 
 
 def _bond_angle_features(
-    bond_index: torch.Tensor,
-    edge_index: torch.Tensor,
-    edge_shared_atom: torch.Tensor,
-    coords: Optional[torch.Tensor],
-) -> torch.Tensor:
+    bond_index: np.ndarray,
+    edge_index: np.ndarray,
+    edge_shared_atom: np.ndarray,
+    coords: Optional[np.ndarray],
+) -> np.ndarray:
     """``[cos(theta), theta / pi]`` per bond-graph edge; zeros without 3D coords."""
     num_edges = edge_index.shape[1]
     if coords is None:
-        return torch.zeros((num_edges, BOND_ANGLE_FEATURE_DIM), dtype=torch.float32)
+        return np.zeros((num_edges, BOND_ANGLE_FEATURE_DIM), dtype=FLOAT)
 
     # Outer atom of each incident bond, i.e. the end that is not shared.
     src_pairs = bond_index[edge_index[0]]
     dst_pairs = bond_index[edge_index[1]]
-    src_outer = torch.where(src_pairs[:, 0] == edge_shared_atom, src_pairs[:, 1], src_pairs[:, 0])
-    dst_outer = torch.where(dst_pairs[:, 0] == edge_shared_atom, dst_pairs[:, 1], dst_pairs[:, 0])
+    src_outer = np.where(src_pairs[:, 0] == edge_shared_atom, src_pairs[:, 1], src_pairs[:, 0])
+    dst_outer = np.where(dst_pairs[:, 0] == edge_shared_atom, dst_pairs[:, 1], dst_pairs[:, 0])
 
     center = coords[edge_shared_atom]
     v1 = coords[src_outer] - center
     v2 = coords[dst_outer] - center
-    n1 = torch.linalg.norm(v1, dim=-1)
-    n2 = torch.linalg.norm(v2, dim=-1)
+    n1 = np.linalg.norm(v1, axis=-1)
+    n2 = np.linalg.norm(v2, axis=-1)
     valid = (n1 > 1e-8) & (n2 > 1e-8)
-    denom = torch.where(valid, n1 * n2, torch.ones_like(n1))
-    cos_theta = torch.clamp((v1 * v2).sum(dim=-1) / denom, -1.0, 1.0)
-    cos_theta = torch.where(valid, cos_theta, torch.zeros_like(cos_theta))
-    theta = torch.where(valid, torch.arccos(cos_theta) / torch.pi, torch.zeros_like(cos_theta))
-    return torch.stack([cos_theta, theta], dim=-1)
+    denom = np.where(valid, n1 * n2, np.ones_like(n1))
+    cos_theta = np.clip((v1 * v2).sum(axis=-1) / denom, -1.0, 1.0)
+    cos_theta = np.where(valid, cos_theta, np.zeros_like(cos_theta))
+    theta = np.where(valid, np.arccos(cos_theta) / np.pi, np.zeros_like(cos_theta))
+    return np.stack([cos_theta, theta], axis=-1)

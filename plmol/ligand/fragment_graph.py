@@ -13,9 +13,9 @@ views stay numerically consistent.
 from typing import Any, Dict, Optional
 
 import numpy as np
-import torch
 from rdkit import Chem
 
+from ..arrays import FLOAT, INT
 from ..errors import InputError
 from .graph_edge_features import bond_view_channels
 
@@ -62,7 +62,7 @@ def build_fragment_graph(
         InputError: If the atom graph does not match the molecule, or the
             fragmentation result was produced without fragment features.
     """
-    adjacency = torch.as_tensor(adjacency)
+    adjacency = np.asarray(adjacency)
     channels = bond_view_channels(adjacency.shape[-1])
     edge_feature_dim = len(channels) + FRAGMENT_GEOMETRY_FEATURE_DIM
 
@@ -83,20 +83,20 @@ def build_fragment_graph(
             "per-fragment descriptors, so fragment it with compute_features=True."
         )
 
-    node_features = torch.as_tensor(np.asarray(fragment_features, dtype=np.float32))
+    node_features = np.asarray(fragment_features, dtype=FLOAT)
     num_fragments = int(fragment_result["num_fragments"])
     fragment_atom_indices = [list(atoms) for atoms in fragment_result["fragment_atom_indices"]]
 
     if coords is not None:
-        coords = torch.as_tensor(coords, dtype=torch.float32)
-    has_3d = coords is not None and coords.shape[0] == num_atoms and bool(torch.any(coords))
+        coords = np.asarray(coords, dtype=FLOAT)
+    has_3d = coords is not None and coords.shape[0] == num_atoms and bool(np.any(coords))
 
     # Fragment centroid, i.e. the mean position of its atoms.
-    fragment_coords = torch.zeros((num_fragments, 3), dtype=torch.float32)
+    fragment_coords = np.zeros((num_fragments, 3), dtype=FLOAT)
     if has_3d:
         for frag_idx, atoms in enumerate(fragment_atom_indices):
             if atoms and frag_idx < num_fragments:
-                fragment_coords[frag_idx] = coords[torch.tensor(atoms, dtype=torch.long)].mean(0)
+                fragment_coords[frag_idx] = coords[np.array(atoms, dtype=INT)].mean(0)
 
     # Each cleaved bond joins the two fragments its endpoints landed in. Bonds
     # whose endpoints ended up in one fragment (small-fragment merging) are
@@ -121,21 +121,21 @@ def build_fragment_graph(
 
     num_edges = len(src)
     if num_edges:
-        edge_index = torch.tensor([src, dst], dtype=torch.long)
-        edge_cleaved_bond = torch.tensor(cut_atoms, dtype=torch.long)
+        edge_index = np.array([src, dst], dtype=INT)
+        edge_cleaved_bond = np.array(cut_atoms, dtype=INT)
         bond_features = adjacency[
             edge_cleaved_bond[:, 0], edge_cleaved_bond[:, 1]
-        ][:, channels].to(torch.float32)
+        ][:, channels].astype(FLOAT)
         geometry = _fragment_geometry_features(
             edge_index, edge_cleaved_bond, fragment_coords, coords if has_3d else None
         )
-        edge_features = torch.cat([bond_features, geometry], dim=-1)
+        edge_features = np.concatenate([bond_features, geometry], axis=-1)
     else:
-        edge_index = torch.zeros((2, 0), dtype=torch.long)
-        edge_cleaved_bond = torch.zeros((0, 2), dtype=torch.long)
-        edge_features = torch.zeros((0, edge_feature_dim), dtype=torch.float32)
+        edge_index = np.zeros((2, 0), dtype=INT)
+        edge_cleaved_bond = np.zeros((0, 2), dtype=INT)
+        edge_features = np.zeros((0, edge_feature_dim), dtype=FLOAT)
 
-    fragment_adjacency = torch.zeros((num_fragments, num_fragments), dtype=torch.bool)
+    fragment_adjacency = np.zeros((num_fragments, num_fragments), dtype=bool)
     if num_edges:
         fragment_adjacency[edge_index[0], edge_index[1]] = True
 
@@ -146,7 +146,7 @@ def build_fragment_graph(
         "edge_cleaved_bond": edge_cleaved_bond,
         "coords": fragment_coords,
         "adjacency": fragment_adjacency,
-        "atom_to_fragment": torch.from_numpy(atom_to_fragment.copy()),
+        "atom_to_fragment": atom_to_fragment.copy(),
         "fragment_atom_indices": fragment_atom_indices,
         "fragment_smiles": list(fragment_result["fragment_smiles"]),
         "num_fragments": num_fragments,
@@ -155,20 +155,20 @@ def build_fragment_graph(
 
 
 def _fragment_geometry_features(
-    edge_index: torch.Tensor,
-    edge_cleaved_bond: torch.Tensor,
-    fragment_coords: torch.Tensor,
-    coords: Optional[torch.Tensor],
-) -> torch.Tensor:
+    edge_index: np.ndarray,
+    edge_cleaved_bond: np.ndarray,
+    fragment_coords: np.ndarray,
+    coords: Optional[np.ndarray],
+) -> np.ndarray:
     """``[centroid distance, cleaved bond length]`` in Angstrom; zeros without 3D."""
     num_edges = edge_index.shape[1]
     if coords is None:
-        return torch.zeros((num_edges, FRAGMENT_GEOMETRY_FEATURE_DIM), dtype=torch.float32)
+        return np.zeros((num_edges, FRAGMENT_GEOMETRY_FEATURE_DIM), dtype=FLOAT)
 
-    centroid_distance = torch.linalg.norm(
-        fragment_coords[edge_index[0]] - fragment_coords[edge_index[1]], dim=-1
+    centroid_distance = np.linalg.norm(
+        fragment_coords[edge_index[0]] - fragment_coords[edge_index[1]], axis=-1
     )
-    bond_length = torch.linalg.norm(
-        coords[edge_cleaved_bond[:, 0]] - coords[edge_cleaved_bond[:, 1]], dim=-1
+    bond_length = np.linalg.norm(
+        coords[edge_cleaved_bond[:, 0]] - coords[edge_cleaved_bond[:, 1]], axis=-1
     )
-    return torch.stack([centroid_distance, bond_length], dim=-1)
+    return np.stack([centroid_distance, bond_length], axis=-1)

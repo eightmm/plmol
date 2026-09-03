@@ -199,7 +199,7 @@ def _compute_fragment_features(fragment_smiles: List[str]) -> np.ndarray:
     feats = []
     for smi in fragment_smiles:
         feat = MoleculeFeaturizer(smi)
-        feats.append(feat.get_descriptors().numpy())
+        feats.append(feat.get_descriptors())
     return np.stack(feats, axis=0).astype(np.float32)
 
 

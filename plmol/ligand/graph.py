@@ -8,7 +8,6 @@ for molecular graph representations.
 import logging
 import warnings
 import numpy as np
-import torch
 from rdkit import Chem, RDLogger
 from rdkit.Chem import rdPartialCharges
 from typing import Dict, Tuple, Optional
@@ -21,7 +20,8 @@ RDLogger.DisableLog('rdApp.*')
 from ..constants import (
     CHEMICAL_SMARTS, ROTATABLE_BOND_SMARTS,
 )
-from ..utils import knn_mask_torch
+from ..arrays import FLOAT, INT, pairwise_distances
+from ..utils import knn_mask
 from .graph_atom_features import AtomFeatureMixin
 from .graph_edge_features import EdgeFeatureMixin
 
@@ -149,7 +149,7 @@ class MoleculeGraphFeaturizer(AtomFeatureMixin, EdgeFeatureMixin):
         distance_cutoff: Optional[float] = None,
         knn_cutoff: Optional[int] = None,
         generate_conformer: bool = True,
-    ) -> Tuple[Dict, Dict, torch.Tensor]:
+    ) -> Tuple[Dict, Dict, np.ndarray]:
         """
         Extract complete graph representation with separate bond and distance edges.
 
@@ -184,30 +184,30 @@ class MoleculeGraphFeaturizer(AtomFeatureMixin, EdgeFeatureMixin):
             bond_adj = self.get_bond_features(mol)
 
         # 1. Bond edges (RDKit Bond 기반)
-        src_b, dst_b = torch.where(bond_adj.sum(dim=-1) > 0)
+        src_b, dst_b = np.nonzero(bond_adj.sum(axis=-1) > 0)
         bond_edge_features = bond_adj[src_b, dst_b]
 
         # 2. Distance edges (3D Cutoff 기반)
-        dist_edge_index = torch.empty((2, 0), dtype=torch.long)
-        dist_edge_features = torch.empty((0, 1), dtype=torch.float32)
+        dist_edge_index = np.empty((2, 0), dtype=INT)
+        dist_edge_features = np.empty((0, 1), dtype=FLOAT)
         pair_features = self.get_pair_features(mol, coords)
         distance_matrix = self.get_distance_matrix(mol, coords)
         distance_bounds = self.get_distance_bounds(mol, coords)
 
         has_spatial = (distance_cutoff is not None or knn_cutoff is not None) and coords is not None
         if has_spatial:
-            dist_matrix = torch.cdist(coords, coords)
-            mask = torch.zeros(coords.size(0), coords.size(0), dtype=torch.bool)
+            dist_matrix = pairwise_distances(coords, coords)
+            mask = np.zeros((coords.shape[0], coords.shape[0]), dtype=bool)
 
             if distance_cutoff is not None:
-                mask = mask | ((dist_matrix <= distance_cutoff) & (~torch.eye(coords.size(0), dtype=torch.bool)))
+                mask = mask | ((dist_matrix <= distance_cutoff) & (~np.eye(coords.shape[0], dtype=bool)))
 
             if knn_cutoff is not None and coords.size(0) > 1:
-                mask = mask | knn_mask_torch(dist_matrix, knn_cutoff)
+                mask = mask | knn_mask(dist_matrix, knn_cutoff)
 
-            src_d, dst_d = torch.where(mask)
-            dist_edge_index = torch.stack([src_d, dst_d], dim=0)
-            dist_edge_features = dist_matrix[src_d, dst_d].unsqueeze(-1)
+            src_d, dst_d = np.nonzero(mask)
+            dist_edge_index = np.stack([src_d, dst_d], axis=0)
+            dist_edge_features = dist_matrix[src_d, dst_d][:, None]
 
         node_dict = {
             'node_feats': node_features,
@@ -215,9 +215,9 @@ class MoleculeGraphFeaturizer(AtomFeatureMixin, EdgeFeatureMixin):
         }
 
         edge_dict = {
-            'edges': torch.stack([src_b, dst_b], dim=0),  # Legacy compatibility
+            'edges': np.stack([src_b, dst_b], axis=0),  # Legacy compatibility
             'edge_feats': bond_edge_features,              # Legacy compatibility
-            'bond_edges': torch.stack([src_b, dst_b], dim=0),
+            'bond_edges': np.stack([src_b, dst_b], axis=0),
             'bond_edge_feats': bond_edge_features,
             'dist_edges': dist_edge_index,
             'dist_edge_feats': dist_edge_features,

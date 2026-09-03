@@ -20,14 +20,14 @@ class TestGetDescriptors:
     def test_shape(self, ethanol_smiles):
         mf = MoleculeFeaturizer(ethanol_smiles)
         desc = mf.get_descriptors()
-        assert isinstance(desc, torch.Tensor)
+        assert isinstance(desc, np.ndarray)
         assert desc.ndim == 1
         assert desc.shape[0] == 62
 
     def test_finite(self, aspirin_smiles):
         mf = MoleculeFeaturizer(aspirin_smiles)
         desc = mf.get_descriptors()
-        assert torch.isfinite(desc).all()
+        assert np.isfinite(desc).all()
 
 
 class TestGetFingerprints:
@@ -38,7 +38,7 @@ class TestGetFingerprints:
         expected = ["ecfp4", "ecfp6", "maccs", "rdkit"]
         for key in expected:
             assert key in fps, f"Missing fingerprint: {key}"
-            assert isinstance(fps[key], torch.Tensor)
+            assert isinstance(fps[key], np.ndarray)
 
     def test_ecfp4_shape(self, aspirin_smiles):
         mf = MoleculeFeaturizer(aspirin_smiles)
@@ -70,7 +70,7 @@ class TestGetMorganFingerprint:
     def test_default(self, ethanol_smiles):
         mf = MoleculeFeaturizer(ethanol_smiles)
         fp = mf.get_morgan_fingerprint()
-        assert isinstance(fp, torch.Tensor)
+        assert isinstance(fp, np.ndarray)
         assert fp.shape[0] == 2048
 
     def test_custom_params(self, aspirin_smiles):
@@ -102,7 +102,7 @@ class TestGet3dCoordinates:
         mf = MoleculeFeaturizer(ethanol_smiles)
         coords = mf.get_3d_coordinates()
         if coords is not None:
-            assert isinstance(coords, torch.Tensor)
+            assert isinstance(coords, np.ndarray)
             assert coords.shape[1] == 3
 
 
