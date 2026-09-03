@@ -97,7 +97,11 @@ NUCLEOTIDE_MAX_SASA: dict[str, float] = {
 # Watson-Crick Base Pairing
 # =============================================================================
 
-# Canonical Watson-Crick pairs (using 1-letter codes)
+# Canonical Watson-Crick pairs, keyed on the *base* letter. Note this is a
+# different alphabet from NUCLEOTIDE_TYPES and the IS_PURINE/IS_PYRIMIDINE maps
+# built from it, which are keyed on PDB *residue* names -- there thymine is only
+# ever "DT" and a lone "T" is not a key at all. Code that classifies a residue
+# uses the residue name; code that looks up a pairing uses the letter.
 # BASE_PAIR_PATTERNS is an alias for WC_BASE_PAIRS
 WC_BASE_PAIRS: dict[str, str] = {
     'A': 'T',  # DNA A-T

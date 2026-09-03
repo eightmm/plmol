@@ -226,7 +226,7 @@ class TestFeaturizeMode:
         not silently pay for it."""
         from plmol import Protein
 
-        assert "cavity" in Protein.from_pdb(example_pdb).featurize(mode="all")
+        assert "cavity" not in Protein.from_pdb(example_pdb).featurize(mode="all")
 
     def test_kwargs_reach_the_detector(self, example_pdb):
         from plmol import Protein

@@ -569,7 +569,23 @@ What it is not: cavity detection ranks by volume, not by druggability. The
 largest cavity is where a ligand usually sits -- on the bundled 10gs structure
 it is the one the crystallographic ligand occupies, and its lining covers 92%
 of the residues `extract_pocket` finds from that ligand -- but a large cleft
-can merge neighbouring grooves. Raise `psp_threshold` to 6 for a tighter site.
+can merge neighbouring grooves.
+
+Tightening it is not free. Measured on 10gs against the residues
+`extract_pocket` finds from the ligand:
+
+| `psp_threshold` | `scan_length` | Rank of the ligand's cavity | Its coverage of the pocket |
+|---|---|---|---|
+| 4 | 8 A | 0 | 100% |
+| **5** | **8 A** | **0** | **92%** |
+| 6 | 8 A | 0 | 50% |
+| 6 | 10 A | 0 | 88% |
+| 7 | 8 A | 2 | 33% |
+
+At 6 the site is still ranked first but half of it stops counting as enclosed,
+and a longer scan is needed to get it back. At 7 the pocket is not enclosed
+enough to rank first at all. Raise the threshold with `scan_length` together,
+or leave both alone.
 
 ```python
 # featurize_cavity is featurize_pocket for a structure with nothing bound

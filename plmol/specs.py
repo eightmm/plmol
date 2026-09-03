@@ -38,7 +38,10 @@ PROTEIN_SPEC = FeatureSpec(
         "cavity", "embedding", "all",
     ),
     default_modes=("graph", "sequence"),
-    output_keys=("graph", "surface", "voxel", "sequence", "backbone", "cavity"),
+    # "cavity" is allowed but not in output_keys, so "all" does not pay the
+    # ~120 ms of detection unless it was asked for -- the same reason ligand
+    # keeps bond_graph and fragment_graph out of its own "all".
+    output_keys=("graph", "surface", "voxel", "sequence", "backbone"),
 )
 
 INTERACTION_SPEC = FeatureSpec(

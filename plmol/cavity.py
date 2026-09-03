@@ -319,6 +319,9 @@ def _connected_components(mask: np.ndarray):
 def _describe(points, indices, enclosed, coords, reach,
               resolution, lining_margin, residues):
     """Build the Cavity record for one cluster of grid points."""
+    # spatial's cell grid, used privately: the query here is "atoms near these
+    # points", which no public function in that module spells. If spatial ever
+    # grows one, this should use it.
     from .spatial import _Grid
 
     center = points.mean(axis=0).astype(FLOAT)
