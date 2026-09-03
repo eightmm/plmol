@@ -344,19 +344,37 @@ Edge construction: all atom pairs within `distance_cutoff`. When `knn_cutoff` is
 | `residue_token` | 22 | Residue type per atom (20 AA + Metal + UNK) |
 | `atom_element` | 19 | Element type per atom (H, C, N, O, S, P, Se, metals, UNK) |
 
-### Node Scalar Features -- float32, total 11-dim
+### Node Scalar Features
 
-| Index | Key | Dim | Range | Description |
-|-------|-----|-----|-------|-------------|
-| `[0]` | `sasa` | 1 | [0, ~) | Per-atom absolute SASA (A^2) |
-| `[1]` | `relative_sasa` | 1 | [0, 1] | SASA / residue_max_sasa (Tien et al. 2013) |
-| `[2]` | `burial_index` | 1 | [0, 1] | Burial index (1.0 = fully buried, 0.0 = fully exposed) |
-| `[3]` | `is_polar_sasa` | 1 | {0, 1} | 1.0 when the element is N, O or S |
-| `[4]` | `is_backbone` | 1 | {0, 1} | 1.0 if backbone atom (N, CA, C, O), 0.0 if sidechain |
-| `[5]` | `formal_charge` | 1 | [-0.5, 1] | Partial charge at physiological pH |
-| `[6]` | `is_hbond_donor` | 1 | {0, 1} | 1.0 if H-bond donor |
-| `[7]` | `is_hbond_acceptor` | 1 | {0, 1} | 1.0 if H-bond acceptor |
-| `[8:11]` | `secondary_structure` | 3 | {0, 1} | One-hot [helix, sheet, coil] from phi/psi Ramachandran |
+The raw `atom_graph` dict returns these as **separate keys**, not as one
+array. There are eleven of them:
+
+| Key | Dim | Range | Description |
+|-----|-----|-------|-------------|
+| `sasa` | 1 | [0, ~) | Per-atom absolute SASA (A^2) |
+| `relative_sasa` | 1 | [0, 1] | SASA / residue_max_sasa (Tien et al. 2013) |
+| `burial_index` | 1 | [0, 1] | Burial index (1.0 = fully buried, 0.0 = fully exposed) |
+| `is_polar_sasa` | 1 | {0, 1} | 1.0 when the element is N, O or S |
+| `is_backbone` | 1 | {0, 1} | 1.0 if backbone atom (N, CA, C, O), 0.0 if sidechain |
+| `formal_charge` | 1 | [-0.5, 1] | Partial charge at physiological pH |
+| `is_hbond_donor` | 1 | {0, 1} | 1.0 if H-bond donor |
+| `is_hbond_acceptor` | 1 | {0, 1} | 1.0 if H-bond acceptor |
+| `secondary_structure` | 3 | {0, 1} | One-hot [helix, sheet, coil] from phi/psi Ramachandran |
+
+`as_graph` concatenates them into `node_features`, **10-dim**, in this order.
+`relative_sasa` is left out because `burial_index` is exactly `1 -
+relative_sasa`; it stays available under its own key in the raw dict.
+
+| Index | Key | Dim |
+|-------|-----|-----|
+| `[0:1]` | `burial_index` | 1 |
+| `[1:2]` | `formal_charge` | 1 |
+| `[2:3]` | `is_backbone` | 1 |
+| `[3:4]` | `is_hbond_acceptor` | 1 |
+| `[4:5]` | `is_hbond_donor` | 1 |
+| `[5:6]` | `is_polar_sasa` | 1 |
+| `[6:7]` | `sasa` | 1 |
+| `[7:10]` | `secondary_structure` | 3 |
 
 ### Edge Features -- total 6-dim
 

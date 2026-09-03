@@ -287,6 +287,30 @@ def test_every_recorded_width_is_the_width(ligand_views, protein_views, nucleic_
     assert checked == sum(len(m) for mol in FEATURE_DIMS.values() for m in mol.values())
 
 
+def test_the_documented_stacking_order_is_the_stacking_order(protein_views):
+    """docs/protein.md gives an index for each column of the protein atom
+    graph's node_features. It used to give eleven of them, in an order that
+    was not the order -- indexing [0] for the SASA got the burial index -- so
+    the numbering is checked against the arrays rather than maintained by
+    hand."""
+    from plmol.graph_view import _ATOM_GRAPH_NODE_KEYS
+
+    raw = protein_views["atom_graph"]
+    stacked = np.asarray(as_graph(raw)["node_features"])
+    column = 0
+    for key in _ATOM_GRAPH_NODE_KEYS:
+        block = np.asarray(raw[key])
+        width = 1 if block.ndim == 1 else block.shape[1]
+        assert np.allclose(
+            stacked[:, column:column + width],
+            block.reshape(len(block), width).astype(stacked.dtype),
+        ), f"{key} is not at [{column}:{column + width}]"
+        column += width
+    assert column == stacked.shape[1]
+    assert "relative_sasa" in raw, "still reachable under its own key"
+    assert "relative_sasa" not in _ATOM_GRAPH_NODE_KEYS, "and not stacked twice"
+
+
 def test_every_recorded_mode_is_reachable():
     """FEATURE_DIMS must not name modes the specs do not allow."""
     from plmol.specs import FEATURE_SPECS
