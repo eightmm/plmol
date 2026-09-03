@@ -159,7 +159,11 @@ class PLInteractionFeaturizer:
         Args:
             protein_mol: RDKit mol object for protein (must have 3D coordinates)
             ligand_mol: RDKit mol object for ligand (must have 3D coordinates)
-            distance_cutoff: Maximum distance for interaction detection (Angstrom)
+            distance_cutoff: Maximum distance in Angstrom for the contact edges. Each pharmacophore
+            interaction is detected at its own physically motivated range from
+            INTERACTION_TYPES -- 3.5 A for a hydrogen bond, 6.0 for a cation-pi
+            -- so raising this finds more contacts and not one more hydrogen
+            bond.
             knn_cutoff: Optional k-nearest neighbors cutoff for bipartite edges
 
         Raises:

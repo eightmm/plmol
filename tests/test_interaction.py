@@ -259,3 +259,46 @@ class TestSolventIsNotProtein:
         ).featurize(requests=["interaction"])["interaction"]
         assert result["num_protein_atoms"] == 3262, "3431 with the waters counted"
         assert np.asarray(result["protein_coords"]).shape[0] == result["num_protein_atoms"]
+
+
+class TestWhatDistanceCutoffActuallyBounds:
+    """It reads like the interaction range and it is not.
+
+    Every detector uses its own entry from INTERACTION_TYPES -- 3.5 A for a
+    hydrogen bond, 6.0 for a cation-pi -- and distance_cutoff bounds the
+    optional contact edges. Three docstrings said otherwise until 0.4.x, so a
+    caller raising it saw nothing change and had no way to know why.
+    """
+
+    @staticmethod
+    def _run(example_pdb, example_sdf, cutoff):
+        from plmol import Ligand, Protein
+        from plmol.complex import MolecularComplex
+
+        return MolecularComplex(
+            molecules={"protein": Protein.from_pdb(example_pdb),
+                       "ligand": Ligand.from_sdf(example_sdf)}
+        ).featurize(
+            requests=["interaction"],
+            interaction_kwargs={"distance_cutoff": cutoff, "include_contacts": True},
+        )["interaction"]
+
+    def test_the_pharmacophore_count_does_not_move(self, example_pdb, example_sdf):
+        counts = {c: self._run(example_pdb, example_sdf, c)["num_interactions"]
+                  for c in (3.5, 4.5, 8.0)}
+        assert len(set(counts.values())) == 1, counts
+
+    def test_the_contact_edges_do_move(self, example_pdb, example_sdf):
+        narrow = self._run(example_pdb, example_sdf, 3.5)
+        wide = self._run(example_pdb, example_sdf, 8.0)
+        n = np.asarray(narrow["contact_edges"]).shape[1]
+        w = np.asarray(wide["contact_edges"]).shape[1]
+        assert w > n * 10, f"{n} -> {w}"
+
+    def test_the_per_type_ranges_are_what_the_detectors_read(self):
+        from plmol.constants import INTERACTION_TYPES
+
+        ranges = {t: spec["distance_cutoff"] for t, spec in INTERACTION_TYPES.items()}
+        assert ranges["hydrogen_bond"] == 3.5
+        assert ranges["cation_pi"] == 6.0
+        assert len(set(ranges.values())) > 1, "one range for all types would make the parameter honest"

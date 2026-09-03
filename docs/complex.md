@@ -78,7 +78,7 @@ are included when both a ligand and structure-backed protein are available.
 
 ```python
 interaction = cx.interaction(
-    distance_cutoff=6.0,     # Max distance for interaction detection (A)
+    distance_cutoff=6.0,     # Max distance for the contact edges (A)
     pocket_cutoff=None,      # Optional pocket extraction cutoff
     knn_cutoff=None,         # Optional bipartite kNN for contact edges
     include_contacts=False,  # Include raw distance/contact edges
@@ -90,7 +90,7 @@ interaction = cx.interaction(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `distance_cutoff` | `float` | `4.5` | Max distance for interaction detection |
+| `distance_cutoff` | `float` | `4.5` | Max distance for the **contact** edges. Pharmacophore interactions use their own per-type range — see below |
 | `pocket_cutoff` | `Optional[float]` | `None` | If set, extract pocket first, then detect interactions |
 | `knn_cutoff` | `Optional[int]` | `None` | Bipartite kNN: each protein atom's k nearest ligand atoms + each ligand atom's k nearest protein atoms. Unioned with distance-based edges |
 | `include_contacts` | `bool` | `False` | Add raw protein-ligand contact edges and distances |
@@ -110,7 +110,7 @@ interaction = cx.interaction(
 | `num_protein_atoms` | `int` | Number of protein heavy atoms |
 | `num_ligand_atoms` | `int` | Number of ligand heavy atoms |
 | `ligand_atom_order` | `(N,)` | Ligand graph node → this block's ligand index. See below |
-| `distance_cutoff` | `float` | Distance cutoff used |
+| `distance_cutoff` | `float` | Contact-edge cutoff used. Not the pharmacophore ranges |
 | `knn_cutoff` | `Optional[int]` | kNN cutoff used |
 | `feature_dim` | `int` | Edge feature dimension (79) |
 | `metadata` | `dict` | Interaction type indices, pharmacophore indices, element types, residue types |
@@ -147,6 +147,27 @@ nodes = to_node[result["interaction"]["edges"][1]]
 An entry is `-1` where the graph node has no counterpart, which happens only
 when the molecule carries explicit hydrogens: the graph keeps them and the
 interaction block is heavy atoms alone.
+
+### `distance_cutoff` does not widen interaction detection
+
+Each interaction type is detected at its own physically motivated range, from
+`INTERACTION_TYPES`:
+
+| Type | Range (Å) |
+|------|-----------|
+| `hydrogen_bond` | 3.5 |
+| `salt_bridge` | 4.0 |
+| `pi_stacking` | 5.5 |
+| `cation_pi` | 6.0 |
+| `hydrophobic` | 4.5 |
+| `halogen_bond` | 3.5 |
+| `metal_coordination` | 2.8 |
+
+`distance_cutoff` bounds the optional **contact** edges instead. On the
+example complex, raising it from 3.5 to 8.0 takes the contact edges from 29
+to 1849 and leaves the pharmacophore interactions at 53 throughout. If you
+want a wider hydrogen bond you have to change its entry in
+`INTERACTION_TYPES`, not this parameter.
 
 ### Interaction Types
 

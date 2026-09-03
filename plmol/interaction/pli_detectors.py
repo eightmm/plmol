@@ -43,7 +43,11 @@ class InteractionDetector:
         ligand_full_to_heavy: full_idx -> heavy_idx mapping.
         protein_h_neighbors: {full_idx: [h_full_idx, ...]}.
         ligand_h_neighbors: {full_idx: [h_full_idx, ...]}.
-        distance_cutoff: Maximum distance for interaction detection.
+        distance_cutoff: Maximum distance for the contact edges. Each pharmacophore
+            interaction is detected at its own physically motivated range from
+            INTERACTION_TYPES -- 3.5 A for a hydrogen bond, 6.0 for a cation-pi
+            -- so raising this finds more contacts and not one more hydrogen
+            bond.
         knn_cutoff: Optional k-nearest neighbors cutoff.
     """
 
