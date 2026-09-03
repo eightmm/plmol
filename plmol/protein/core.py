@@ -7,7 +7,6 @@ import tempfile
 from ..base import BaseMolecule
 from typing import Any, Dict, Iterable, Optional, Union
 import numpy as np
-import torch
 
 from .featurizer import ProteinFeaturizer
 from ..errors import InputError, DependencyError
@@ -257,7 +256,7 @@ class Protein(BaseMolecule):
     ) -> Dict[str, Any]:
         edge_index = edge.get("edges")
         if isinstance(edge_index, tuple):
-            edge_index = torch.stack(edge_index, dim=0)
+            edge_index = np.stack(edge_index, axis=0)
 
         graph = {
             # Token features (int64, for nn.Embedding)
@@ -310,7 +309,7 @@ class Protein(BaseMolecule):
     ) -> Dict[str, Any]:
         edge_index = edge.get("edges")
         if isinstance(edge_index, tuple):
-            edge_index = torch.stack(edge_index, dim=0)
+            edge_index = np.stack(edge_index, axis=0)
 
         graph = {
             "node_features": node.get("node_scalar_features"),

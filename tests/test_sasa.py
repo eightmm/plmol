@@ -169,7 +169,7 @@ class TestFeaturesWithoutFreesasa:
     def test_residue_sasa_is_not_zeros(self, example_pdb):
         set_sasa_backend("native")
         graph = Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]
-        block = [t for t in graph["node_features"] if t.shape[-1] == 12][0].numpy()
+        block = [t for t in graph["node_features"] if t.shape[-1] == 12][0]
         assert np.abs(block).sum() > 0
         assert block.std() > 0.01
 
@@ -184,7 +184,7 @@ class TestFeaturesWithoutFreesasa:
         """Different algorithm and radii, so agreement is high but not exact."""
         def residue_block():
             graph = Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]
-            return [t for t in graph["node_features"] if t.shape[-1] == 12][0].numpy()
+            return [t for t in graph["node_features"] if t.shape[-1] == 12][0]
 
         set_sasa_backend("freesasa")
         with_freesasa = residue_block()
@@ -201,7 +201,7 @@ class TestResidueBurialIndexIsInformative:
 
     def test_burial_column_spans_a_real_range(self, example_pdb):
         graph = Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]
-        burial = [t for t in graph["node_features"] if t.shape[-1] == 12][0].numpy()[:, 10]
+        burial = [t for t in graph["node_features"] if t.shape[-1] == 12][0][:, 10]
         assert burial.std() > 0.1, "a near-constant column means the /100 bug is back"
         assert burial.max() > 0.9 and burial.min() < 0.5
 
@@ -219,7 +219,7 @@ class TestEveryModeWorksWithoutFreesasa:
 
     def test_residue_graph(self, example_pdb):
         graph = Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]
-        block = [t for t in graph["node_features"] if t.shape[-1] == 12][0].numpy()
+        block = [t for t in graph["node_features"] if t.shape[-1] == 12][0]
         assert block.shape[0] > 0 and np.abs(block).sum() > 0
 
     def test_atom_graph_keeps_every_atom(self, example_pdb):

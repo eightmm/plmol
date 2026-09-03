@@ -28,17 +28,17 @@ Usage:
     atom_to_residue = data.atom_to_residue   # [num_atoms] index
 
     # Convert to one-hot in model if needed:
-    # atom_tokens_onehot = F.one_hot(data.atom_tokens, num_classes=187)
+    # atom_tokens_onehot = one_hot(data.atom_tokens, 187)
 """
 
 from dataclasses import dataclass
 from typing import Any, List, Tuple, Optional, Dict, Union
 from collections import defaultdict
 
-import torch
 import numpy as np
 
 from .residue_featurizer import ResidueFeaturizer
+from ..arrays import FLOAT, INT, to_torch
 from .plm import load_plm, resolve_device
 from .atom_featurizer import AtomFeaturizer
 from .utils import PDBParser, normalize_residue_name, calculate_sidechain_centroid
@@ -104,41 +104,41 @@ class HierarchicalProteinData:
         esm3_eos: [1536] - ESM3 EOS token
 
     Note:
-        Use torch.nn.Embedding or F.one_hot() in your model to convert indices to vectors.
+        Use nn.Embedding or one_hot() in your model to convert indices to vectors.
     """
     # Atom-level (integer indices for embedding lookup)
-    atom_tokens: torch.Tensor           # [N_atom] token indices (0-186)
-    atom_coords: torch.Tensor           # [N_atom, 3] raw coordinates
-    atom_sasa: torch.Tensor             # [N_atom] normalized SASA
-    atom_elements: torch.Tensor         # [N_atom] element indices (0-7)
-    atom_residue_types: torch.Tensor    # [N_atom] residue type indices (0-21)
+    atom_tokens: np.ndarray           # [N_atom] token indices (0-186)
+    atom_coords: np.ndarray           # [N_atom, 3] raw coordinates
+    atom_sasa: np.ndarray             # [N_atom] normalized SASA
+    atom_elements: np.ndarray         # [N_atom] element indices (0-7)
+    atom_residue_types: np.ndarray    # [N_atom] residue type indices (0-21)
     atom_names: List[str]               # atom names (CA, CB, etc.)
 
     # Residue-level
-    residue_features: torch.Tensor      # [N_res, 81]
-    residue_ca_coords: torch.Tensor     # [N_res, 3]
-    residue_sc_coords: torch.Tensor     # [N_res, 3]
+    residue_features: np.ndarray      # [N_res, 81]
+    residue_ca_coords: np.ndarray     # [N_res, 3]
+    residue_sc_coords: np.ndarray     # [N_res, 3]
     residue_names: List[str]
     residue_ids: List[Tuple[str, int]]
 
     # Residue vector features (optional) [N_res, 31, 3]
-    residue_vector_features: Optional[torch.Tensor] = None
+    residue_vector_features: Optional[np.ndarray] = None
 
     # ESMC embeddings (3 tensors)
-    esmc_embeddings: Optional[torch.Tensor] = None   # [N_res, 1152]
-    esmc_bos: Optional[torch.Tensor] = None          # [1152]
-    esmc_eos: Optional[torch.Tensor] = None          # [1152]
+    esmc_embeddings: Optional[np.ndarray] = None   # [N_res, 1152]
+    esmc_bos: Optional[np.ndarray] = None          # [1152]
+    esmc_eos: Optional[np.ndarray] = None          # [1152]
 
     # ESM3 embeddings (3 tensors)
-    esm3_embeddings: Optional[torch.Tensor] = None   # [N_res, 1536]
-    esm3_bos: Optional[torch.Tensor] = None          # [1536]
-    esm3_eos: Optional[torch.Tensor] = None          # [1536]
+    esm3_embeddings: Optional[np.ndarray] = None   # [N_res, 1536]
+    esm3_bos: Optional[np.ndarray] = None          # [1536]
+    esm3_eos: Optional[np.ndarray] = None          # [1536]
 
     # Mapping
-    atom_to_residue: torch.Tensor = None
-    residue_atom_indices: torch.Tensor = None
-    residue_atom_mask: torch.Tensor = None
-    num_atoms_per_residue: torch.Tensor = None
+    atom_to_residue: np.ndarray = None
+    residue_atom_indices: np.ndarray = None
+    residue_atom_mask: np.ndarray = None
+    num_atoms_per_residue: np.ndarray = None
 
     @property
     def num_atoms(self) -> int:
@@ -183,38 +183,19 @@ class HierarchicalProteinData:
         """Check if ESM embeddings are available."""
         return self.esmc_embeddings is not None or self.esm3_embeddings is not None
 
-    def to(self, device: torch.device) -> 'HierarchicalProteinData':
-        """Move all tensors to device. Optional tensors that are unset stay None."""
-        def move(tensor):
-            return tensor.to(device) if tensor is not None else None
+    def to(self, device=None) -> 'HierarchicalProteinData':
+        """A copy with every array as a torch tensor, optionally on *device*.
 
-        return HierarchicalProteinData(
-            atom_tokens=self.atom_tokens.to(device),
-            atom_coords=self.atom_coords.to(device),
-            atom_sasa=self.atom_sasa.to(device),
-            atom_elements=self.atom_elements.to(device),
-            atom_residue_types=self.atom_residue_types.to(device),
-            atom_names=self.atom_names,
-            residue_features=self.residue_features.to(device),
-            residue_ca_coords=self.residue_ca_coords.to(device),
-            residue_sc_coords=self.residue_sc_coords.to(device),
-            residue_names=self.residue_names,
-            residue_ids=self.residue_ids,
-            residue_vector_features=move(self.residue_vector_features),
-            esmc_embeddings=move(self.esmc_embeddings),
-            esmc_bos=move(self.esmc_bos),
-            esmc_eos=move(self.esmc_eos),
-            esm3_embeddings=move(self.esm3_embeddings),
-            esm3_bos=move(self.esm3_bos),
-            esm3_eos=move(self.esm3_eos),
-            atom_to_residue=move(self.atom_to_residue),
-            residue_atom_indices=move(self.residue_atom_indices),
-            residue_atom_mask=move(self.residue_atom_mask),
-            num_atoms_per_residue=move(self.num_atoms_per_residue),
-        )
+        The fields are numpy arrays; this is the one call that hands the whole
+        container to a model. Fields that are unset stay None.
+
+        Raises:
+            DependencyError: If torch is not installed.
+        """
+        return to_torch(self, device)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Flat mapping of every field, ready for ``torch.save``.
+        """Flat mapping of every field.
 
         Unset optional tensors stay None, so a container built without
         language model embeddings round-trips unchanged.
@@ -240,7 +221,7 @@ class HierarchicalProteinData:
 
     def select_residues(
         self,
-        residue_indices: Union[List[int], torch.Tensor],
+        residue_indices: Union[List[int], np.ndarray],
     ) -> 'HierarchicalProteinData':
         """
         Select specific residues and their corresponding atoms.
@@ -251,19 +232,18 @@ class HierarchicalProteinData:
         Returns:
             New HierarchicalProteinData with only selected residues/atoms
         """
-        if not isinstance(residue_indices, torch.Tensor):
-            residue_indices = torch.tensor(residue_indices, dtype=torch.long)
+        residue_indices = np.asarray(residue_indices, dtype=INT)
 
         # Get atom mask for selected residues
-        atom_mask = torch.isin(self.atom_to_residue, residue_indices)
-        atom_indices = atom_mask.nonzero(as_tuple=True)[0]
+        atom_mask = np.isin(self.atom_to_residue, residue_indices)
+        atom_indices = np.flatnonzero(atom_mask)
 
         # Remap residue indices to 0, 1, 2, ...
-        old_to_new = {old.item(): new for new, old in enumerate(residue_indices)}
-        new_atom_to_residue = torch.tensor([
-            old_to_new[self.atom_to_residue[i].item()]
+        old_to_new = {int(old): new for new, old in enumerate(residue_indices)}
+        new_atom_to_residue = np.array([
+            old_to_new[int(self.atom_to_residue[i])]
             for i in atom_indices
-        ], dtype=torch.long)
+        ], dtype=INT)
 
         # Extract atom-level data
         new_atom_tokens = self.atom_tokens[atom_mask]
@@ -289,25 +269,25 @@ class HierarchicalProteinData:
         num_new_residues = len(residue_indices)
 
         # Vectorized atom count per residue using bincount
-        new_num_atoms_per_residue = torch.bincount(
+        new_num_atoms_per_residue = np.bincount(
             new_atom_to_residue, minlength=num_new_residues
         )
-        max_atoms = new_num_atoms_per_residue.max().item() if num_new_residues > 0 else 1
+        max_atoms = int(new_num_atoms_per_residue.max()) if num_new_residues > 0 else 1
 
-        new_residue_atom_indices = torch.full((num_new_residues, max_atoms), -1, dtype=torch.long)
-        new_residue_atom_mask = torch.zeros(num_new_residues, max_atoms, dtype=torch.bool)
+        new_residue_atom_indices = np.full((num_new_residues, max_atoms), -1, dtype=INT)
+        new_residue_atom_mask = np.zeros((num_new_residues, max_atoms), dtype=bool)
 
         # Vectorized: sort atoms by residue index, then fill
-        sorted_indices = torch.argsort(new_atom_to_residue)
+        sorted_indices = np.argsort(new_atom_to_residue, kind="stable")
         sorted_residues = new_atom_to_residue[sorted_indices]
 
         # Use cumsum to find position within each residue
-        residue_starts = torch.zeros(num_new_residues + 1, dtype=torch.long)
-        residue_starts[1:] = torch.cumsum(new_num_atoms_per_residue, dim=0)
+        residue_starts = np.zeros(num_new_residues + 1, dtype=INT)
+        residue_starts[1:] = np.cumsum(new_num_atoms_per_residue)
 
         for new_res_idx in range(num_new_residues):
-            start = residue_starts[new_res_idx].item()
-            end = residue_starts[new_res_idx + 1].item()
+            start = int(residue_starts[new_res_idx])
+            end = int(residue_starts[new_res_idx + 1])
             n_atoms = end - start
             if n_atoms > 0:
                 atom_indices = sorted_indices[start:end]
@@ -462,18 +442,15 @@ class HierarchicalFeaturizer:
 
         # Build residue coordinate tensor
         num_residues = len(residues)
-        residue_coords_full = torch.zeros(num_residues, MAX_ATOMS_PER_RESIDUE, 3)
-        residue_types = torch.from_numpy(np.array(residues)[:, 2].astype(int))
+        residue_coords_full = np.zeros((num_residues, MAX_ATOMS_PER_RESIDUE, 3), dtype=FLOAT)
+        residue_types = np.array(residues)[:, 2].astype(int)
 
         for idx, residue in enumerate(residues):
             # Use cached coordinates (O(1) lookup instead of pandas xs)
             residue_coord_np = residue_featurizer.get_residue_coordinates_numpy(residue)
-            residue_coord = torch.from_numpy(residue_coord_np)
-            residue_coords_full[idx, :residue_coord.shape[0], :] = residue_coord
+            residue_coords_full[idx, :residue_coord_np.shape[0], :] = residue_coord_np
             # Sidechain centroid (using unified calculate_sidechain_centroid)
-            residue_coords_full[idx, -1, :] = torch.from_numpy(
-                calculate_sidechain_centroid(residue_coord_np)
-            )
+            residue_coords_full[idx, -1, :] = calculate_sidechain_centroid(residue_coord_np)
 
         # Extract residue features
         scalar_features, vector_features = residue_featurizer._extract_residue_features(
@@ -482,16 +459,16 @@ class HierarchicalFeaturizer:
 
         # Concatenate scalar features
         residue_one_hot, terminal_flags, self_distance, degree_feature, has_chi, sasa, rf_distance, physchem = scalar_features
-        residue_features = torch.cat([
-            residue_one_hot.float(),      # 21
-            terminal_flags.float(),       # 2
-            self_distance,                # 10
-            degree_feature,               # 20
-            has_chi.float(),              # 5
-            sasa,                         # 10
-            rf_distance,                  # 8
-            physchem,                     # 5
-        ], dim=-1)  # Total: 81
+        residue_features = np.concatenate([
+            residue_one_hot.astype(FLOAT),   # 21
+            terminal_flags.astype(FLOAT),    # 2
+            self_distance,                   # 10
+            degree_feature,                  # 20
+            has_chi.astype(FLOAT),           # 5
+            sasa,                            # 10
+            rf_distance,                     # 8
+            physchem,                        # 5
+        ], axis=-1)  # Total: 81
 
         # Residue coordinates: CA and sidechain centroid
         residue_ca_coords = residue_coords_full[:, 1, :]   # CA atom (index 1)
@@ -512,14 +489,14 @@ class HierarchicalFeaturizer:
 
         # Residue vector features [N_res, 31, 3]
         self_vector, rf_vector, local_frames = vector_features
-        residue_vector_features = torch.cat([
+        residue_vector_features = np.concatenate([
             self_vector,      # [N_res, 20, 3]
             rf_vector,        # [N_res, 8, 3]
             local_frames,     # [N_res, 3, 3]
-        ], dim=1)
+        ], axis=1)
 
         # Step 7: Keep categorical features as integer indices (more efficient)
-        # Models can use nn.Embedding or F.one_hot() as needed
+        # Models can use nn.Embedding or one_hot() as needed
 
         # Step 8: Extract language model embeddings for whichever models were
         # requested. All six tensors stay None when both are disabled.
@@ -544,8 +521,8 @@ class HierarchicalFeaturizer:
                 if emb.shape[0] > target_len:
                     return emb[:target_len]
                 else:
-                    pad = torch.zeros(target_len - emb.shape[0], emb.shape[1])
-                    return torch.cat([emb, pad], dim=0)
+                    pad = np.zeros((target_len - emb.shape[0], emb.shape[1]), dtype=emb.dtype)
+                    return np.concatenate([emb, pad], axis=0)
             return emb
 
         if esmc_embeddings is not None:
@@ -656,8 +633,8 @@ class HierarchicalFeaturizer:
             residue_keys.append((atom.chain_id, atom.res_num))
 
         return {
-            'elements': torch.tensor(elements, dtype=torch.long),
-            'residue_tokens': torch.tensor(residue_tokens, dtype=torch.long),
+            'elements': np.array(elements, dtype=INT),
+            'residue_tokens': np.array(residue_tokens, dtype=INT),
             'atom_names': atom_names,
             'residue_keys': residue_keys,
         }
@@ -666,7 +643,7 @@ class HierarchicalFeaturizer:
         self,
         atom_residue_keys: List[Tuple[str, int]],
         residues: List[Tuple],
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Build atom-residue mapping tensors.
 
@@ -693,15 +670,15 @@ class HierarchicalFeaturizer:
             atom_to_residue_list.append(res_idx)
             residue_to_atoms[res_idx].append(atom_idx)
 
-        atom_to_residue = torch.tensor(atom_to_residue_list, dtype=torch.long)
+        atom_to_residue = np.array(atom_to_residue_list, dtype=INT)
 
         # Max atoms per residue
         max_atoms_per_res = max(len(atoms) for atoms in residue_to_atoms.values()) if residue_to_atoms else 1
 
         # Build residue -> atoms mapping
-        residue_atom_indices = torch.full((num_residues, max_atoms_per_res), -1, dtype=torch.long)
-        residue_atom_mask = torch.zeros(num_residues, max_atoms_per_res, dtype=torch.bool)
-        num_atoms_per_residue = torch.zeros(num_residues, dtype=torch.long)
+        residue_atom_indices = np.full((num_residues, max_atoms_per_res), -1, dtype=INT)
+        residue_atom_mask = np.zeros((num_residues, max_atoms_per_res), dtype=bool)
+        num_atoms_per_residue = np.zeros(num_residues, dtype=INT)
 
         for res_idx in range(num_residues):
             atom_indices = residue_to_atoms.get(res_idx, [])
@@ -738,7 +715,7 @@ def extract_hierarchical_features(
 
     Note:
         Categorical features are stored as integer indices.
-        Use F.one_hot() or nn.Embedding in your model as needed.
+        Use one_hot() or nn.Embedding in your model as needed.
     """
     featurizer = HierarchicalFeaturizer(
         esmc_model=esmc_model,

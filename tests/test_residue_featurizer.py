@@ -1,6 +1,6 @@
 """Tests for plmol/protein/residue_featurizer.py."""
 
-import torch
+import numpy as np
 import pytest
 
 from plmol.protein.residue_featurizer import ResidueFeaturizer
@@ -33,8 +33,8 @@ class TestResidueFeaturizerMini:
         PDBParser.clear_cache()
         rf = ResidueFeaturizer(mini_pdb)
         n_term, c_term = rf.get_terminal_flags()
-        assert n_term.dtype == torch.bool
-        assert c_term.dtype == torch.bool
+        assert n_term.dtype == np.bool_
+        assert c_term.dtype == np.bool_
         assert n_term.shape[0] == 10
         # At least 2 n-terminals (one per chain)
         assert n_term.sum() >= 2
@@ -68,12 +68,12 @@ class TestResidueFeaturizerReal:
         # node_scalar_features is a tuple of tensors
         scalar = node_dict["node_scalar_features"]
         assert isinstance(scalar, tuple)
-        assert all(isinstance(t, torch.Tensor) for t in scalar)
+        assert all(isinstance(t, np.ndarray) for t in scalar)
 
     def test_calculate_sasa(self, example_pdb):
         PDBParser.clear_cache()
         rf = ResidueFeaturizer(example_pdb)
         sasa = rf.calculate_sasa()
-        assert isinstance(sasa, torch.Tensor)
+        assert isinstance(sasa, np.ndarray)
         assert sasa.ndim == 2
         assert sasa.shape[1] == 12

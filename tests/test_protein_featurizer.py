@@ -1,7 +1,6 @@
 """Tests for plmol/protein/protein_featurizer.py — main orchestrator."""
 
 import numpy as np
-import torch
 import pytest
 
 from plmol.protein.featurizer import ProteinFeaturizer
@@ -74,7 +73,7 @@ class TestProteinFeaturizerMini:
         PDBParser.clear_cache()
         pf = ProteinFeaturizer(mini_pdb, standardize=False)
         sasa = pf.get_sasa_features()
-        assert isinstance(sasa, torch.Tensor)
+        assert isinstance(sasa, np.ndarray)
 
     def test_get_geometric_features(self, mini_pdb):
         PDBParser.clear_cache()
@@ -86,7 +85,7 @@ class TestProteinFeaturizerMini:
         PDBParser.clear_cache()
         pf = ProteinFeaturizer(mini_pdb, standardize=False)
         rp = pf.get_relative_position()
-        assert isinstance(rp, torch.Tensor)
+        assert isinstance(rp, np.ndarray)
 
     def test_get_atom_graph(self, mini_pdb):
         PDBParser.clear_cache()

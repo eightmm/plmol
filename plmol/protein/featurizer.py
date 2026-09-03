@@ -8,7 +8,6 @@ with efficient caching of parsed PDB data.
 import os
 import tempfile
 from typing import Optional, Dict, Any, Tuple
-import torch
 import numpy as np
 
 from .pdb_standardizer import PDBStandardizer
@@ -36,33 +35,10 @@ from ..constants import (
     VOXEL_DEFAULT_CUTOFF_SIGMA,
 )
 from ..surface import build_protein_surface
-from ..utils import dense_to_edges_torch, knn_mask_torch
+from ..arrays import FLOAT, INT, one_hot, pairwise_distances
+from ..utils import dense_to_edges, knn_mask
 from ..voxel import build_protein_voxel
 from .utils import PDBParser
-
-
-# --- migration bridge -------------------------------------------------------
-# protein/geometry.py computes in numpy now. These convert at its call sites and
-# go away when this file converts too.
-
-
-def _np(value):
-    """torch in, numpy out."""
-    if isinstance(value, tuple):
-        return tuple(_np(item) for item in value)
-    return value.detach().cpu().numpy() if hasattr(value, "detach") else value
-
-
-def _pt(value):
-    """numpy in, torch out."""
-    import numpy as _numpy
-
-    if isinstance(value, tuple):
-        return tuple(_pt(item) for item in value)
-    return torch.from_numpy(value) if isinstance(value, _numpy.ndarray) else value
-
-
-
 
 
 class ProteinFeaturizer:
@@ -122,10 +98,8 @@ class ProteinFeaturizer:
         self.num_residues = len(self.residues)
 
         # Build coordinate tensor
-        self.coords = torch.zeros(self.num_residues, MAX_ATOMS_PER_RESIDUE, 3)
-        self.residue_types = torch.from_numpy(
-            np.array(self.residues)[:, 2].astype(int)
-        )
+        self.coords = np.zeros((self.num_residues, MAX_ATOMS_PER_RESIDUE, 3), dtype=FLOAT)
+        self.residue_types = np.array(self.residues)[:, 2].astype(int)
 
         for idx, residue in enumerate(self.residues):
             # For unknown residues (type 20), only use backbone + CB atoms
@@ -142,17 +116,14 @@ class ProteinFeaturizer:
                 # Use cached coordinates (O(1) dict lookup)
                 residue_coord_np = self._featurizer.get_residue_coordinates_numpy(residue)
 
-            residue_coord = torch.from_numpy(residue_coord_np)
-            self.coords[idx, :residue_coord.shape[0], :] = residue_coord
+            self.coords[idx, :residue_coord_np.shape[0], :] = residue_coord_np
             # Sidechain centroid (using unified calculate_sidechain_centroid)
-            self.coords[idx, -1, :] = torch.from_numpy(
-                calculate_sidechain_centroid(residue_coord_np)
-            )
+            self.coords[idx, -1, :] = calculate_sidechain_centroid(residue_coord_np)
 
         # Extract CA and SC coordinates
         self.coords_CA = self.coords[:, 1:2, :]
         self.coords_SC = self.coords[:, -1:, :]
-        self.coords_ca_sc = torch.cat([self.coords_CA, self.coords_SC], dim=1)
+        self.coords_ca_sc = np.concatenate([self.coords_CA, self.coords_SC], axis=1)
 
     def __del__(self):
         """Clean up temporary files."""
@@ -168,10 +139,8 @@ class ProteinFeaturizer:
         """
         if 'sequence' not in self._cache:
             # Bounds checking for one-hot encoding
-            residue_types_clamped = torch.clamp(self.residue_types, 0, NUM_RESIDUE_TYPES - 1)
-            residue_one_hot = torch.nn.functional.one_hot(
-                residue_types_clamped, num_classes=NUM_RESIDUE_TYPES
-            )
+            residue_types_clamped = np.clip(self.residue_types, 0, NUM_RESIDUE_TYPES - 1)
+            residue_one_hot = one_hot(residue_types_clamped, NUM_RESIDUE_TYPES, dtype=INT)
 
             self._cache['sequence'] = {
                 'residue_types': self.residue_types,
@@ -194,12 +163,10 @@ class ProteinFeaturizer:
                 self.coords, self.residue_types
             )
             terminal_flags = self.get_terminal_flags()
-            flags = _np((terminal_flags['n_terminal'], terminal_flags['c_terminal']))
-            curvature = _pt(calculate_backbone_curvature(_np(self.coords), flags))
-            torsion = _pt(calculate_backbone_torsion(_np(self.coords), flags))
-            self_distance, self_vector = _pt(
-                calculate_self_distances_vectors(_np(self.coords))
-            )
+            flags = (terminal_flags['n_terminal'], terminal_flags['c_terminal'])
+            curvature = calculate_backbone_curvature(self.coords, flags)
+            torsion = calculate_backbone_torsion(self.coords, flags)
+            self_distance, self_vector = calculate_self_distances_vectors(self.coords)
 
             self._cache['geometric'] = {
                 'dihedrals': dihedrals,
@@ -213,7 +180,7 @@ class ProteinFeaturizer:
 
         return self._cache['geometric']
 
-    def get_sasa_features(self) -> torch.Tensor:
+    def get_sasa_features(self) -> np.ndarray:
         """
         Get Solvent Accessible Surface Area features.
 
@@ -245,7 +212,7 @@ class ProteinFeaturizer:
             )
 
             # Dense adjacency to edge list
-            src, dst, distances = dense_to_edges_torch(distance_adj)
+            src, dst, distances = dense_to_edges(distance_adj)
 
             self._cache[cache_key] = {
                 'adjacency_matrix': adj,
@@ -257,7 +224,7 @@ class ProteinFeaturizer:
 
         return self._cache[cache_key]
 
-    def get_relative_position(self, cutoff: int = 32) -> torch.Tensor:
+    def get_relative_position(self, cutoff: int = 32) -> np.ndarray:
         """
         Get relative position encoding between residues.
 
@@ -324,7 +291,7 @@ class ProteinFeaturizer:
 
         return self._cache[cache_key]
 
-    def get_terminal_flags(self) -> Dict[str, torch.Tensor]:
+    def get_terminal_flags(self) -> Dict[str, np.ndarray]:
         """
         Get N-terminal and C-terminal residue flags.
 
@@ -408,7 +375,10 @@ class ProteinFeaturizer:
         }
 
         if save_to:
-            torch.save(features, save_to)
+            # The features are numpy arrays in a nested dict, so this is a
+            # pickle rather than torch.save; np.load(path, allow_pickle=True)
+            # reads it back.
+            np.save(save_to, features, allow_pickle=True)
 
         return features
 
@@ -596,33 +566,26 @@ class ProteinFeaturizer:
             # Get atom features with SASA and enriched features
             atom_features = atom_featurizer.get_all_atom_features(pdb_to_use)
 
-            # Build distance matrix using torch
-            coords = atom_features['coords']
-            if not isinstance(coords, torch.Tensor):
-                coords = torch.tensor(coords, dtype=torch.float32)
-            coords = coords.float()
-            dist_matrix = torch.cdist(coords, coords, p=2)
+            coords = np.asarray(atom_features['coords'], dtype=FLOAT)
+            dist_matrix = pairwise_distances(coords, coords)
 
             # Create edges based on distance cutoff
             edge_mask = (dist_matrix < distance_cutoff) & (dist_matrix > 0)
 
-            if knn_cutoff is not None and dist_matrix.size(0) > 1:
-                edge_mask = edge_mask | knn_mask_torch(dist_matrix, knn_cutoff)
+            if knn_cutoff is not None and dist_matrix.shape[0] > 1:
+                edge_mask = edge_mask | knn_mask(dist_matrix, knn_cutoff)
 
-            edge_index = edge_mask.nonzero(as_tuple=False)
-            edges = (edge_index[:, 0].long(), edge_index[:, 1].long())
-            edge_distances = dist_matrix[edge_mask].float()
+            src_idx, dst_idx = np.nonzero(edge_mask)
+            edges = (src_idx.astype(INT), dst_idx.astype(INT))
+            edge_distances = dist_matrix[edge_mask].astype(FLOAT)
 
             # Package node features
             residue_nums = atom_features['metadata']['residue_numbers']
-            if isinstance(residue_nums, torch.Tensor):
-                residue_number_tensor = residue_nums.clone()
-            else:
-                residue_number_tensor = torch.tensor(residue_nums, dtype=torch.long)
+            residue_number_tensor = np.array(residue_nums, dtype=INT)
 
             # Create residue_count: sequential index starting from 0
             chain_labels = atom_features['metadata']['chain_labels']
-            residue_count = torch.zeros_like(residue_number_tensor)
+            residue_count = np.zeros_like(residue_number_tensor)
             if len(residue_number_tensor) > 0:
                 current_count = 0
                 residue_count[0] = current_count
@@ -634,24 +597,24 @@ class ProteinFeaturizer:
                     residue_count[i] = current_count
 
             # Build residue_atom_indices (reverse mapping)
-            num_residues = int(residue_count.max().item()) + 1 if len(residue_count) > 0 else 0
+            num_residues = int(residue_count.max()) + 1 if len(residue_count) > 0 else 0
             residue_atom_indices = [[] for _ in range(num_residues)]
             for atom_idx in range(len(residue_count)):
-                residue_atom_indices[residue_count[atom_idx].item()].append(atom_idx)
+                residue_atom_indices[int(residue_count[atom_idx])].append(atom_idx)
 
             # --- Edge features ---
             src, dst = edges
 
             # same_residue: 1 if both atoms belong to same residue
-            same_residue = (residue_count[src] == residue_count[dst]).float()
+            same_residue = (residue_count[src] == residue_count[dst]).astype(FLOAT)
 
             # sequence_separation: |residue_count_i - residue_count_j|, capped at 32
-            seq_sep = (residue_count[src] - residue_count[dst]).abs().float()
-            seq_sep = torch.clamp(seq_sep, max=32.0)
+            seq_sep = np.abs(residue_count[src] - residue_count[dst]).astype(FLOAT)
+            seq_sep = np.minimum(seq_sep, 32.0)
 
             # unit_vector: normalized direction from src to dst
             diff = coords[dst] - coords[src]  # (E, 3)
-            dist_safe = edge_distances.clamp(min=1e-6).unsqueeze(-1)  # (E, 1)
+            dist_safe = np.maximum(edge_distances, 1e-6)[:, None]  # (E, 1)
             unit_vector = diff / dist_safe  # (E, 3)
 
             node = {
@@ -694,7 +657,7 @@ class ProteinFeaturizer:
     # Primary alias for atom-level graph
     get_atom_features = get_atom_graph
 
-    def get_atom_tokens_and_coords(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_atom_tokens_and_coords(self) -> Tuple[np.ndarray, np.ndarray]:
         """
         Get atom-level tokenized features and coordinates.
 
@@ -724,22 +687,22 @@ class ProteinFeaturizer:
             self._cache['atom_features_sasa'] = features
         return self._cache['atom_features_sasa']
 
-    def get_atom_coordinates(self) -> torch.Tensor:
+    def get_atom_coordinates(self) -> np.ndarray:
         """
         Get only atom-level 3D coordinates.
 
         Returns:
-            torch.Tensor: [n_atoms, 3] coordinates
+            np.ndarray: [n_atoms, 3] coordinates
         """
         token, coord = self.get_atom_tokens_and_coords()
         return coord
 
-    def get_atom_tokens_only(self) -> torch.Tensor:
+    def get_atom_tokens_only(self) -> np.ndarray:
         """
         Get only atom-level tokens without coordinates.
 
         Returns:
-            torch.Tensor: [n_atoms] token IDs (0-174)
+            np.ndarray: [n_atoms] token IDs (0-174)
         """
         token, coord = self.get_atom_tokens_and_coords()
         return token
@@ -772,7 +735,7 @@ class ProteinFeaturizer:
             return self._cache[cache_key]
 
         result = compute_backbone_features(
-            _np(self.coords), self.residues, _np(self.residue_types), k_neighbors
+            self.coords, self.residues, self.residue_types, k_neighbors
         )
 
         self._cache[cache_key] = result

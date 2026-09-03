@@ -15,8 +15,6 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 import numpy as np
-import torch
-import torch.nn.functional as F
 
 from .geometry import (
     calculate_dihedral,
@@ -40,7 +38,8 @@ from .utils import (
     normalize_residue_name,
 )
 
-from ..utils import dense_to_edges_torch, knn_mask_torch, sasa_structure_result
+from ..arrays import FLOAT, INT, one_hot, pairwise_distances
+from ..utils import dense_to_edges, knn_mask, sasa_structure_result
 
 # Import amino acid constants from centralized module
 from ..constants import (
@@ -57,44 +56,20 @@ from ..constants import (
 )
 
 
-# --- migration bridge -------------------------------------------------------
-# protein/geometry.py computes in numpy now. These convert at its call sites and
-# go away when this file converts too.
-
-
-def _np(value):
-    """torch in, numpy out."""
-    if isinstance(value, tuple):
-        return tuple(_np(item) for item in value)
-    return value.detach().cpu().numpy() if hasattr(value, "detach") else value
-
-
-def _pt(value):
-    """numpy in, torch out."""
-    import numpy as _numpy
-
-    if isinstance(value, tuple):
-        return tuple(_pt(item) for item in value)
-    return torch.from_numpy(value) if isinstance(value, _numpy.ndarray) else value
-
-
-
-
-
 # =============================================================================
 # Chi Angle Constants (cached at module level)
 # =============================================================================
 # Residue indices that have each chi angle
 CHI_ANGLE_RESIDUE_INDICES = {
-    'chi1': torch.tensor([1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]),
-    'chi2': torch.tensor([2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 19]),
-    'chi3': torch.tensor([3, 8, 10, 13, 14]),
-    'chi4': torch.tensor([8, 14]),
-    'chi5': torch.tensor([14]),
+    'chi1': np.array([1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]),
+    'chi2': np.array([2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 19]),
+    'chi3': np.array([3, 8, 10, 13, 14]),
+    'chi4': np.array([8, 14]),
+    'chi5': np.array([14]),
 }
 
 # ILE residue index for special handling
-ILE_RESIDUE_INDEX = torch.tensor([7])
+ILE_RESIDUE_INDEX = np.array([7])
 
 
 @contextlib.contextmanager
@@ -256,7 +231,7 @@ class ResidueFeaturizer:
         """
         return self._coord_cache.get(residue_index, np.zeros((1, 3), dtype=np.float32))
 
-    def get_terminal_flags(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_terminal_flags(self) -> Tuple[np.ndarray, np.ndarray]:
         """
         Identify N-terminal and C-terminal residues.
 
@@ -286,9 +261,9 @@ class ResidueFeaturizer:
             n_terminal[min_idx] = True
             c_terminal[max_idx] = True
 
-        return torch.tensor(n_terminal, dtype=torch.bool), torch.tensor(c_terminal, dtype=torch.bool)
+        return n_terminal, c_terminal
 
-    def get_relative_position(self, cutoff: int = 32, onehot: bool = True) -> torch.Tensor:
+    def get_relative_position(self, cutoff: int = 32, onehot: bool = True) -> np.ndarray:
         """
         Calculate relative position encoding for residue pairs.
 
@@ -308,30 +283,30 @@ class ResidueFeaturizer:
                 chain_indices[chain] = []
             chain_indices[chain].append(idx)
 
-        relative_positions = torch.full((num_residues, num_residues), -1, dtype=torch.long)
+        relative_positions = np.full((num_residues, num_residues), -1, dtype=INT)
 
         for chain, indices in chain_indices.items():
             if len(indices) <= 1:
                 continue
 
-            indices_tensor = torch.tensor(indices, dtype=torch.long)
+            indices_tensor = np.array(indices, dtype=INT)
             num_chain_residues = len(indices)
 
-            arrange = torch.arange(num_chain_residues, dtype=torch.long)
-            chain_relative_positions = (arrange[:, None] - arrange[None, :]).abs()
-            chain_relative_positions = torch.clamp(chain_relative_positions, max=cutoff+1)
-            chain_relative_positions = torch.where(chain_relative_positions > cutoff, 33, chain_relative_positions)
+            arrange = np.arange(num_chain_residues, dtype=INT)
+            chain_relative_positions = np.abs(arrange[:, None] - arrange[None, :])
+            chain_relative_positions = np.minimum(chain_relative_positions, cutoff + 1)
+            chain_relative_positions = np.where(chain_relative_positions > cutoff, 33, chain_relative_positions)
 
             relative_positions[indices_tensor[:, None], indices_tensor[None, :]] = chain_relative_positions
 
         if onehot:
-            relative_positions_mapped = torch.where(relative_positions == -1, 34, relative_positions)
-            relative_positions_onehot = F.one_hot(relative_positions_mapped, num_classes=35).float()
+            relative_positions_mapped = np.where(relative_positions == -1, 34, relative_positions)
+            relative_positions_onehot = one_hot(relative_positions_mapped, 35, dtype=FLOAT)
             return relative_positions_onehot
 
         return relative_positions
 
-    def calculate_sasa(self) -> torch.Tensor:
+    def calculate_sasa(self) -> np.ndarray:
         """
         Calculate Solvent Accessible Surface Area (SASA) for each residue.
 
@@ -386,7 +361,7 @@ class ResidueFeaturizer:
                         polar_apolar_ratio,
                     ])
 
-            sasa_tensor = torch.nan_to_num(torch.as_tensor(sasas))
+            sasa_tensor = np.nan_to_num(np.asarray(sasas, dtype=FLOAT))
 
             # Validate dimensions
             if sasa_tensor.shape[0] != num_residues:
@@ -398,16 +373,16 @@ class ResidueFeaturizer:
                 if sasa_tensor.shape[0] > num_residues:
                     sasa_tensor = sasa_tensor[:num_residues]
                 else:
-                    padding = torch.zeros(num_residues - sasa_tensor.shape[0], sasa_dim)
-                    sasa_tensor = torch.cat([sasa_tensor, padding], dim=0)
+                    padding = np.zeros((num_residues - sasa_tensor.shape[0], sasa_dim), dtype=FLOAT)
+                    sasa_tensor = np.concatenate([sasa_tensor, padding], axis=0)
 
             return sasa_tensor
 
         except Exception as e:
             logger.warning(f"FreeSASA calculation failed: {e}. Returning zeros for SASA features.")
-            return torch.zeros(num_residues, sasa_dim)
+            return np.zeros((num_residues, sasa_dim), dtype=FLOAT)
 
-    def get_dihedral_angles(self, coords: torch.Tensor, res_types: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_dihedral_angles(self, coords: np.ndarray, res_types: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
         Calculate backbone and sidechain dihedral angles.
 
@@ -419,31 +394,31 @@ class ResidueFeaturizer:
             Tuple of (dihedral_angles, has_chi_angles)
         """
         # Use cached chi angle constants
-        is_ILE = torch.isin(res_types, ILE_RESIDUE_INDEX).int().unsqueeze(1).unsqueeze(2)
+        is_ILE = np.isin(res_types, ILE_RESIDUE_INDEX).astype(FLOAT)[:, None, None]
         is_not_ILE = 1 - is_ILE
 
-        has_chi = torch.stack([
-            torch.isin(res_types, CHI_ANGLE_RESIDUE_INDICES[f'chi{i}']).int()
+        has_chi = np.stack([
+            np.isin(res_types, CHI_ANGLE_RESIDUE_INDICES[f'chi{i}']).astype(np.int32)
             for i in range(1, 6)
-        ], dim=1)
+        ], axis=1)
 
         # Backbone dihedrals
         N_CA_C = coords[:, :3, :]
-        backbone_dihedrals = _pt(calculate_dihedral(_np(N_CA_C)))
+        backbone_dihedrals = calculate_dihedral(N_CA_C)
 
         # Sidechain dihedrals
-        N_A_B_G_D_E_Z_ILE = torch.cat([coords[:, :2, :], coords[:, 4:6, :], coords[:, 7:11, :]], dim=1) * is_ILE
-        N_A_B_G_D_E_Z_no_ILE = torch.cat([coords[:, :2, :], coords[:, 4:10, :]], dim=1) * is_not_ILE
+        N_A_B_G_D_E_Z_ILE = np.concatenate([coords[:, :2, :], coords[:, 4:6, :], coords[:, 7:11, :]], axis=1) * is_ILE
+        N_A_B_G_D_E_Z_no_ILE = np.concatenate([coords[:, :2, :], coords[:, 4:10, :]], axis=1) * is_not_ILE
         N_A_B_G_D_E_Z = N_A_B_G_D_E_Z_ILE + N_A_B_G_D_E_Z_no_ILE
 
-        side_chain_dihedrals = _pt(calculate_dihedral(_np(N_A_B_G_D_E_Z)))[:, 1:-2] * has_chi
+        side_chain_dihedrals = calculate_dihedral(N_A_B_G_D_E_Z)[:, 1:-2] * has_chi.astype(FLOAT)
 
-        dihedrals = torch.cat([backbone_dihedrals, side_chain_dihedrals], dim=1)
+        dihedrals = np.concatenate([backbone_dihedrals, side_chain_dihedrals], axis=1)
 
         return dihedrals, has_chi
 
-    def _calculate_forward_reverse(self, coord: torch.Tensor, terminal_flags: Tuple[torch.Tensor, torch.Tensor]) -> \
-            Tuple[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
+    def _calculate_forward_reverse(self, coord: np.ndarray, terminal_flags: Tuple[np.ndarray, np.ndarray]) -> \
+            Tuple[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]:
         """
         Calculate forward and reverse residue connection features.
 
@@ -459,10 +434,10 @@ class ResidueFeaturizer:
 
         n_terminal, c_terminal = terminal_flags
 
-        forward_vector = torch.zeros(coord.shape[0], 4, 3)
-        forward_distance = torch.zeros(coord.shape[0], 4)
-        reverse_vector = torch.zeros(coord.shape[0], 4, 3)
-        reverse_distance = torch.zeros(coord.shape[0], 4)
+        forward_vector = np.zeros((coord.shape[0], 4, 3), dtype=FLOAT)
+        forward_distance = np.zeros((coord.shape[0], 4), dtype=FLOAT)
+        reverse_vector = np.zeros((coord.shape[0], 4, 3), dtype=FLOAT)
+        reverse_distance = np.zeros((coord.shape[0], 4), dtype=FLOAT)
 
         if coord.shape[0] > 1:
             ca_diff = ca_coords[1:] - ca_coords[:-1]
@@ -470,31 +445,31 @@ class ResidueFeaturizer:
             ca_sc_diff = sc_coords[1:] - ca_coords[:-1]
             sc_ca_diff = ca_coords[1:] - sc_coords[:-1]
 
-            forward_vector[:-1] = torch.stack([ca_diff, sc_diff, ca_sc_diff, sc_ca_diff], dim=1)
-            forward_distance[:-1] = torch.norm(forward_vector[:-1], dim=-1)
+            forward_vector[:-1] = np.stack([ca_diff, sc_diff, ca_sc_diff, sc_ca_diff], axis=1)
+            forward_distance[:-1] = np.linalg.norm(forward_vector[:-1], axis=-1)
 
             c_mask = ~c_terminal[:-1]
             forward_vector[:-1] *= c_mask[:, None, None]
             forward_distance[:-1] *= c_mask[:, None]
 
-            reverse_vector[1:] = torch.stack([-ca_diff, -sc_diff, ca_coords[:-1] - sc_coords[1:],
-                                             sc_coords[:-1] - ca_coords[1:]], dim=1)
-            reverse_distance[1:] = torch.norm(reverse_vector[1:], dim=-1)
+            reverse_vector[1:] = np.stack([-ca_diff, -sc_diff, ca_coords[:-1] - sc_coords[1:],
+                                           sc_coords[:-1] - ca_coords[1:]], axis=1)
+            reverse_distance[1:] = np.linalg.norm(reverse_vector[1:], axis=-1)
 
             n_mask = (~n_terminal[1:])
             reverse_vector[1:] *= n_mask[:, None, None]
             reverse_distance[1:] *= n_mask[:, None]
 
-        forward_vector = torch.nan_to_num(forward_vector)
-        reverse_vector = torch.nan_to_num(reverse_vector)
-        forward_distance = torch.nan_to_num(forward_distance)
-        reverse_distance = torch.nan_to_num(reverse_distance)
+        forward_vector = np.nan_to_num(forward_vector)
+        reverse_vector = np.nan_to_num(reverse_vector)
+        forward_distance = np.nan_to_num(forward_distance)
+        reverse_distance = np.nan_to_num(reverse_distance)
 
         return (forward_vector, forward_distance), (reverse_vector, reverse_distance)
 
-    def _calculate_interaction_features(self, coords: torch.Tensor, distance_cutoff: float = 8,
+    def _calculate_interaction_features(self, coords: np.ndarray, distance_cutoff: float = 8,
                                         knn_cutoff: Optional[int] = None) -> \
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Calculate inter-residue interaction features.
 
@@ -507,14 +482,14 @@ class ResidueFeaturizer:
         Returns:
             Tuple of (distances, adjacency_matrix, interaction_vectors)
         """
-        coord_CA = coords[:, 1:2, :].transpose(0, 1)
-        coord_SC = coords[:, -1:, :].transpose(0, 1)
-        mask = (1 - torch.eye(coords.shape[0])).int()
+        coord_CA = coords[:, 1, :]
+        coord_SC = coords[:, -1, :]
+        mask = (1 - np.eye(coords.shape[0], dtype=FLOAT)).astype(np.int32)
 
-        dm_CA_CA = torch.cdist(coord_CA, coord_CA)[0]
-        dm_SC_SC = torch.cdist(coord_SC, coord_SC)[0]
-        dm_CA_SC = torch.cdist(coord_CA, coord_SC)[0]
-        dm_SC_CA = torch.cdist(coord_SC, coord_CA)[0]
+        dm_CA_CA = pairwise_distances(coord_CA, coord_CA)
+        dm_SC_SC = pairwise_distances(coord_SC, coord_SC)
+        dm_CA_SC = pairwise_distances(coord_CA, coord_SC)
+        dm_SC_CA = pairwise_distances(coord_SC, coord_CA)
 
         adj_CA_CA = (dm_CA_CA < distance_cutoff) * mask
         adj_SC_SC = (dm_SC_SC < distance_cutoff) * mask
@@ -524,27 +499,27 @@ class ResidueFeaturizer:
         adj = adj_CA_CA | adj_SC_SC | adj_CA_SC | adj_SC_CA
 
         if knn_cutoff is not None and coords.shape[0] > 1:
-            min_dm = torch.minimum(torch.minimum(dm_CA_CA, dm_SC_SC),
-                                   torch.minimum(dm_CA_SC, dm_SC_CA))
-            knn_adj = knn_mask_torch(min_dm, knn_cutoff).int()
-            knn_adj = (knn_adj * mask).int()
+            min_dm = np.minimum(np.minimum(dm_CA_CA, dm_SC_SC),
+                                np.minimum(dm_CA_SC, dm_SC_CA))
+            knn_adj = knn_mask(min_dm, knn_cutoff).astype(np.int32)
+            knn_adj = (knn_adj * mask).astype(np.int32)
             adj = adj | knn_adj
 
-        dm_all = torch.stack((dm_CA_CA, dm_SC_SC, dm_CA_SC, dm_SC_CA), dim=-1)
-        dm_select = dm_all * adj[:, :, None]
+        dm_all = np.stack((dm_CA_CA, dm_SC_SC, dm_CA_SC, dm_SC_CA), axis=-1)
+        dm_select = dm_all * adj[:, :, None].astype(FLOAT)
 
         # Calculate interaction vectors
-        coord_CA_SC = torch.cat([coords[:, 1:2, :], coords[:, -1:, :]], dim=1)
-        coord_SC_CA = torch.cat([coords[:, -1:, :], coords[:, 1:2, :]], dim=1)
+        coord_CA_SC = np.concatenate([coords[:, 1:2, :], coords[:, -1:, :]], axis=1)
+        coord_SC_CA = np.concatenate([coords[:, -1:, :], coords[:, 1:2, :]], axis=1)
 
         vector1 = coord_CA_SC[:, None, :] - coord_CA_SC[:, :, :]
         vector3 = coord_CA_SC[:, None, :] - coord_SC_CA[:, :, :]
-        vectors = torch.cat([vector1, -vector1, vector3, -vector3], dim=2).nan_to_num()
-        vectors = vectors * adj[:, :, None, None]
+        vectors = np.nan_to_num(np.concatenate([vector1, -vector1, vector3, -vector3], axis=2))
+        vectors = vectors * adj[:, :, None, None].astype(FLOAT)
 
-        return torch.nan_to_num(dm_select), adj, vectors
+        return np.nan_to_num(dm_select), adj, vectors
 
-    def _extract_residue_features(self, coords: torch.Tensor, residue_types: torch.Tensor) -> \
+    def _extract_residue_features(self, coords: np.ndarray, residue_types: np.ndarray) -> \
             Tuple[Tuple, Tuple]:
         """
         Extract all residue-level features.
@@ -557,23 +532,23 @@ class ResidueFeaturizer:
             Tuple of (scalar_features, vector_features)
         """
         # One-hot encoding of residue types (with bounds checking)
-        residue_types_clamped = torch.clamp(residue_types, 0, NUM_RESIDUE_TYPES - 1)
-        residue_one_hot = F.one_hot(residue_types_clamped, num_classes=NUM_RESIDUE_TYPES)
+        residue_types_clamped = np.clip(residue_types, 0, NUM_RESIDUE_TYPES - 1)
+        residue_one_hot = one_hot(residue_types_clamped, NUM_RESIDUE_TYPES, dtype=INT)
         terminal_flags = self.get_terminal_flags()
 
         # Local self features
-        self_distance, self_vector = _pt(calculate_self_distances_vectors(_np(coords)))
+        self_distance, self_vector = calculate_self_distances_vectors(coords)
 
         # Local frames
-        local_frames = _pt(calculate_local_frames(_np(coords)))
+        local_frames = calculate_local_frames(coords)
 
         # Dihedral angles and curvature
         dihedrals, has_chi_angles = self.get_dihedral_angles(coords, residue_types)
-        backbone_curvature = _pt(calculate_backbone_curvature(_np(coords), _np(terminal_flags)))
-        backbone_torsion = _pt(calculate_backbone_torsion(_np(coords), _np(terminal_flags)))
+        backbone_curvature = calculate_backbone_curvature(coords, terminal_flags)
+        backbone_torsion = calculate_backbone_torsion(coords, terminal_flags)
 
-        degree = torch.cat([dihedrals, backbone_curvature[:, None], backbone_torsion[:, None]], dim=1)
-        degree_feature = torch.cat([torch.cos(degree), torch.sin(degree)], dim=1)
+        degree = np.concatenate([dihedrals, backbone_curvature[:, None], backbone_torsion[:, None]], axis=1)
+        degree_feature = np.concatenate([np.cos(degree), np.sin(degree)], axis=1)
 
         # SASA features
         sasa = self.calculate_sasa()
@@ -583,8 +558,8 @@ class ResidueFeaturizer:
         forward_vector, forward_distance = forward
         reverse_vector, reverse_distance = reverse
 
-        rf_vector = torch.cat([forward_vector, reverse_vector], dim=1)
-        rf_distance = torch.cat([forward_distance, reverse_distance], dim=1)
+        rf_vector = np.concatenate([forward_vector, reverse_vector], axis=1)
+        rf_distance = np.concatenate([forward_distance, reverse_distance], axis=1)
 
         # Physicochemical properties (5-dim per residue, vectorized via lookup table)
         default_props = RESIDUE_PROPERTIES.get('Other', [0.0] * NUM_RESIDUE_PROPERTIES)
@@ -592,14 +567,14 @@ class ResidueFeaturizer:
         for res_name in RESIDUE_TYPES:
             property_rows.append(RESIDUE_PROPERTIES.get(res_name, default_props))
         property_rows.append(default_props)  # for out-of-range indices
-        property_table = torch.tensor(property_rows, dtype=torch.float32)
-        idx_clamped = torch.clamp(residue_types.long(), 0, len(RESIDUE_TYPES))
+        property_table = np.array(property_rows, dtype=FLOAT)
+        idx_clamped = np.clip(residue_types.astype(INT), 0, len(RESIDUE_TYPES))
         physchem = property_table[idx_clamped]
 
         # Collect all features
         scalar_features = (
             residue_one_hot,
-            torch.stack(terminal_flags, dim=1),
+            np.stack(terminal_flags, axis=1),
             self_distance,
             degree_feature,
             has_chi_angles,
@@ -616,10 +591,10 @@ class ResidueFeaturizer:
 
         return scalar_features, vector_features
 
-    def _extract_interaction_features(self, coords: torch.Tensor, distance_cutoff: float = 8,
+    def _extract_interaction_features(self, coords: np.ndarray, distance_cutoff: float = 8,
                                      relative_position_cutoff: int = 32,
                                      knn_cutoff: Optional[int] = None) -> \
-            Tuple[Tuple[torch.Tensor, torch.Tensor], Tuple, Tuple]:
+            Tuple[Tuple[np.ndarray, np.ndarray], Tuple, Tuple]:
         """
         Extract interaction features between residues.
 
@@ -638,7 +613,7 @@ class ResidueFeaturizer:
         )
 
         # Dense adjacency to edge list
-        src, dst, distance = dense_to_edges_torch(distance_adj)
+        src, dst, distance = dense_to_edges(distance_adj)
 
         relative_position = relative_position[src, dst]
         vectors = interaction_vectors[src, dst, :]
@@ -657,23 +632,20 @@ class ResidueFeaturizer:
             Tuple of (node_features, edge_features) dictionaries
         """
         residues = self.get_residues()
-        coords = torch.zeros(len(residues), MAX_ATOMS_PER_RESIDUE, 3)
-        residue_types = torch.from_numpy(np.array(residues)[:, 2].astype(int))
+        coords = np.zeros((len(residues), MAX_ATOMS_PER_RESIDUE, 3), dtype=FLOAT)
+        residue_types = np.array(residues)[:, 2].astype(int)
 
         # Build coordinate tensor using cached coordinates (O(1) lookup)
         for idx, residue in enumerate(residues):
             residue_coord_np = self.get_residue_coordinates_numpy(residue)
-            residue_coord = torch.from_numpy(residue_coord_np)
-            coords[idx, :residue_coord.shape[0], :] = residue_coord
+            coords[idx, :residue_coord_np.shape[0], :] = residue_coord_np
             # Sidechain centroid (using calculate_sidechain_centroid logic)
-            coords[idx, -1, :] = torch.from_numpy(
-                calculate_sidechain_centroid(residue_coord_np)
-            )
+            coords[idx, -1, :] = calculate_sidechain_centroid(residue_coord_np)
 
         # Extract CA and SC coordinates
         coords_CA = coords[:, 1:2, :]
         coords_SC = coords[:, -1:, :]
-        coord = torch.cat([coords_CA, coords_SC], dim=1)
+        coord = np.concatenate([coords_CA, coords_SC], axis=1)
 
         # Extract features
         node_scalar_features, node_vector_features = self._extract_residue_features(coords, residue_types)
