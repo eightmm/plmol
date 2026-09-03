@@ -113,7 +113,8 @@ def _base_geometry(residue: Dict):
     codes, while PURINES and PYRIMIDINES list residue names, and thymine is
     only ever "DT" -- there is no lone "T" in either set.
     """
-    name = residue.get("res_name", "")
+    # The canonical base, so a modified or legacy-named residue still pairs.
+    name = residue.get("base") or residue.get("res_name", "")
     if name not in BASE_ATOMS:
         return None
     letter = name[-1] if name.startswith("D") else name

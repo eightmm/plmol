@@ -113,7 +113,9 @@ class NucleicAcid(BaseMolecule):
             return self._na_type
         if self._pdb_path is not None:
             featurizer = self._get_featurizer()
-            res_names = [r["res_name"] for r in featurizer._get_na_residues()]
+            # The normalised base, not the file's name: ADE says nothing
+            # about the sugar and DA/A say everything.
+            res_names = [r["base"] for r in featurizer._get_na_residues()]
             self._na_type = _detect_chain_type(res_names)
         return self._na_type or "UNKNOWN"
 

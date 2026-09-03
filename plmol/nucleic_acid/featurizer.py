@@ -5,6 +5,7 @@ NucleicFeaturizer — residue-level and atom-level features for nucleic acids.
 from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 
+from ..parsers.pdb_parser import normalize_nucleotide_name
 from ..protein.utils import PDBParser, ParsedAtom
 from ..utils import dihedral_angles
 from .base_pairs import base_pair_arrays, find_base_pairs
@@ -18,6 +19,7 @@ from ..constants import (
     PURINES,
     PYRIMIDINES,
     DNA_RESIDUES,
+    NUCLEIC_ACID_RESIDUES,
     RNA_RESIDUES,
 )
 
@@ -74,8 +76,13 @@ class NucleicFeaturizer:
 
         # Group nucleic-acid atoms by (chain, resnum, resname)
         residue_map: Dict[Tuple, Dict] = {}
+        pending_normalisation: List[Dict] = []
         for atom in self._parser.protein_atoms:
-            if atom.res_name not in (DNA_RESIDUES | RNA_RESIDUES):
+            # Every nucleic residue the parser kept, not just the eight
+            # canonical names. Selecting on those dropped the modified bases a
+            # tRNA is made of, and the older ADE/CYT/GUA/THY spellings with
+            # them -- silently, leaving an empty featurization.
+            if atom.res_name not in NUCLEIC_ACID_RESIDUES:
                 continue
             if self.chain_id is not None and atom.chain_id != self.chain_id:
                 continue
@@ -87,7 +94,16 @@ class NucleicFeaturizer:
                     "res_name": atom.res_name,
                     "atoms": {},
                 }
+                pending_normalisation.append(residue_map[key])
             residue_map[key]["atoms"][atom.atom_name] = atom.coords
+
+        # The file's own name is kept; every table is keyed on the base it
+        # normalises to, which needs the atom names because ADE is adenosine
+        # or deoxyadenosine depending on the sugar.
+        for residue in pending_normalisation:
+            residue["base"] = normalize_nucleotide_name(
+                residue["res_name"], residue["atoms"].keys()
+            )
 
         # Sort by (chain, res_num, insertion_code)
         self._residues = [
@@ -107,7 +123,7 @@ class NucleicFeaturizer:
         """Return the nucleotide sequence as a string of 1-letter codes."""
         from ..constants import NUCLEOTIDE_3TO1
         residues = self._get_na_residues()
-        return "".join(NUCLEOTIDE_3TO1.get(r["res_name"], "N") for r in residues)
+        return "".join(NUCLEOTIDE_3TO1.get(r["base"], "N") for r in residues)
 
     def get_sequence_features(self) -> Dict[str, Any]:
         """
@@ -129,7 +145,7 @@ class NucleicFeaturizer:
         gc_count = 0
 
         for i, res in enumerate(residues):
-            rname = res["res_name"]
+            rname = res["base"]
             tokens[i] = NUCLEOTIDE_TOKEN.get(rname, NUCLEOTIDE_TOKEN["UNK_NT"])
             is_purine[i] = float(rname in PURINES)
             is_pyrimidine[i] = float(rname in PYRIMIDINES)
@@ -201,7 +217,7 @@ class NucleicFeaturizer:
                     torsions[i, 5] = _dihedral(p0, p1, p2, p3)
 
             # chi (glycosidic): O4' - C1' - N9/N1 - C4(purine) or C2(pyrimidine)
-            rname = res["res_name"]
+            rname = res["base"]
             if rname in PURINES:
                 chi_atoms = ("O4'", "C1'", "N9", "C4")
             else:
@@ -284,7 +300,7 @@ class NucleicFeaturizer:
         coords = np.zeros((n, 3), dtype=np.float32)
 
         for i, res in enumerate(residues):
-            rname = res["res_name"]
+            rname = res["base"]
             tok = NUCLEOTIDE_TOKEN.get(rname, NUCLEOTIDE_TOKEN["UNK_NT"])
             tokens[i] = tok
             one_hot[i, tok] = 1.0
@@ -389,7 +405,7 @@ class NucleicFeaturizer:
 
         atom_idx = 0
         for res_idx, res in enumerate(residues):
-            rname = res["res_name"]
+            rname = res["base"]
             rtok = NUCLEOTIDE_TOKEN.get(rname, NUCLEOTIDE_TOKEN["UNK_NT"])
             standard_order = STANDARD_NUCLEOTIDE_ATOMS.get(rname, list(res["atoms"].keys()))
             res_atoms = []

@@ -23,7 +23,10 @@ from ..constants import (
     AMINO_ACID_LETTERS,
     RESIDUE_NAME_MAPPING,
     METAL_RESIDUES,
+    LEGACY_BASE_NAMES,
     NUCLEIC_ACID_RESIDUES,
+    NUCLEOTIDE_NAME_MAPPING,
+    RIBOSE_MARKER_ATOM,
 )
 
 logger = logging.getLogger(__name__)
@@ -285,6 +288,31 @@ def is_protein_atom(atom: ParsedAtom, include_nucleic_acids: bool = False) -> bo
             return False
 
     return True
+
+
+def normalize_nucleotide_name(res_name: str, atom_names: "Sequence[str]" = ()) -> str:
+    """Canonical base name for a nucleotide residue.
+
+    The counterpart of :func:`normalize_residue_name`. Modified bases resolve
+    through :data:`NUCLEOTIDE_NAME_MAPPING`; the pre-sugar-in-the-name
+    spellings -- ADE, CYT, GUA, THY, URA -- need the atoms, because ADE is
+    adenosine when the ribose 2' oxygen is present and deoxyadenosine when it
+    is not. Anything else comes back unchanged, so an unknown residue is still
+    itself rather than a guess.
+
+    Args:
+        res_name: Residue name from the file.
+        atom_names: The residue's atom names, used only for the legacy
+            spellings. Without them those resolve to the DNA form, which is
+            what a file old enough to use them usually holds.
+    """
+    name = res_name.strip().upper()
+    if name in NUCLEOTIDE_NAME_MAPPING:
+        return NUCLEOTIDE_NAME_MAPPING[name]
+    if name in LEGACY_BASE_NAMES:
+        rna, dna = LEGACY_BASE_NAMES[name]
+        return rna if RIBOSE_MARKER_ATOM in set(atom_names) else dna
+    return name
 
 
 # ============================================================================

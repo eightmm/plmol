@@ -342,3 +342,67 @@ def test_top_level_import():
     from plmol import NucleicAcid, NucleicFeaturizer
     assert NucleicAcid is not None
     assert NucleicFeaturizer is not None
+
+
+class TestNucleotideNameNormalization:
+    """A nucleotide keeps its identity whatever the file calls it.
+
+    NucleicFeaturizer selected residues by the eight canonical names, so a
+    structure written with the older ADE/CYT/GUA/THY spellings -- or a tRNA,
+    which is largely modified bases -- came back empty rather than wrong.
+    """
+
+    @staticmethod
+    def _renamed(source, tmp_path, mapping, name):
+        text = []
+        for line in open(source):
+            if line[:6].strip() in ("ATOM", "HETATM"):
+                res = line[17:20].strip()
+                if res in mapping:
+                    line = line[:17] + mapping[res].rjust(3) + line[20:]
+            text.append(line)
+        path = tmp_path / name
+        path.write_text("".join(text))
+        return str(path)
+
+    def test_the_legacy_spellings_give_the_same_features(self, dna_pdb, tmp_path):
+        from plmol import NucleicAcid
+
+        legacy = self._renamed(
+            dna_pdb, tmp_path,
+            {"DA": "ADE", "DT": "THY", "DG": "GUA", "DC": "CYT"}, "legacy.pdb",
+        )
+        modern = NucleicAcid.from_pdb(dna_pdb).featurize(mode="sequence")["sequence"]
+        older = NucleicAcid.from_pdb(legacy).featurize(mode="sequence")["sequence"]
+        assert np.array_equal(older["tokens"], modern["tokens"])
+        assert np.array_equal(older["is_purine"], modern["is_purine"])
+        assert older["res_names"] != modern["res_names"], "the file's own names are reported"
+
+    @pytest.mark.parametrize("name,atoms,expected", [
+        ("ADE", ["O2'"], "A"), ("ADE", [], "DA"),
+        ("CYT", ["O2'"], "C"), ("CYT", [], "DC"),
+        ("THY", [], "DT"), ("URA", ["O2'"], "U"),
+        ("PSU", [], "U"), ("5MC", [], "C"), ("1MA", [], "A"), ("M2G", [], "G"),
+        ("DU", [], "DT"),
+        ("DA", [], "DA"), ("G", [], "G"),
+        ("I", [], "I"), ("DI", [], "DI"),
+    ])
+    def test_the_base_a_name_stands_for(self, name, atoms, expected):
+        """The legacy spellings need the sugar: ADE is adenosine with the
+        ribose 2' oxygen and deoxyadenosine without it. Inosine stays itself --
+        hypoxanthine pairs with C, U and A rather than as any one base."""
+        from plmol.parsers.pdb_parser import normalize_nucleotide_name
+
+        assert normalize_nucleotide_name(name, atoms) == expected
+
+    def test_a_modified_base_is_not_dropped(self, dna_pdb, tmp_path):
+        from plmol import NucleicAcid
+
+        from plmol.constants import NUCLEOTIDE_TOKEN
+
+        plain = NucleicAcid.from_pdb(dna_pdb).featurize(mode="sequence")["sequence"]
+        modified = self._renamed(dna_pdb, tmp_path, {"DA": "1MA"}, "modified.pdb")
+        residues = NucleicAcid.from_pdb(modified).featurize(mode="sequence")["sequence"]
+        assert len(residues["res_names"]) == len(plain["res_names"]), "still there"
+        assert residues["res_names"][0] == "1MA", "reported as the file names it"
+        assert residues["tokens"][0] == NUCLEOTIDE_TOKEN["A"], "counted as an adenosine"

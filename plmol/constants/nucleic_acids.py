@@ -134,6 +134,48 @@ WC_HBOND_MAX_DISTANCE = 3.5
 WC_MAX_PLANE_ANGLE = 60.0
 
 # =============================================================================
+# Nucleotide Name Normalization
+# =============================================================================
+
+#: Modified nucleotides and the canonical base they are, the nucleic-acid
+#: counterpart of RESIDUE_NAME_MAPPING. All of these carry a ribose, so the
+#: base alone settles it. Written from recall of the PDB chemical component
+#: dictionary's parent field rather than from a copy of it.
+NUCLEOTIDE_NAME_MAPPING: dict[str, str] = {
+    'PSU': 'U',   # Pseudouridine, the commonest RNA modification there is
+    '5MU': 'U',   # 5-methyluridine (ribothymidine)
+    '4SU': 'U',   # 4-thiouridine
+    'H2U': 'U',   # Dihydrouridine
+    '5MC': 'C',   # 5-methylcytidine
+    'OMC': 'C',   # 2'-O-methylcytidine
+    '1MA': 'A',   # 1-methyladenosine
+    '2MG': 'G',   # 2-methylguanosine
+    'M2G': 'G',   # N2,N2-dimethylguanosine
+    'OMG': 'G',   # 2'-O-methylguanosine
+    'DU': 'DT',   # Deoxyuridine: uracil on deoxyribose, pairing where T does
+}
+
+#: Base names from before the PDB distinguished the sugar in the residue name.
+#: ADE is adenosine or deoxyadenosine depending on whether the ribose 2' oxygen
+#: is there, so these resolve to ``(rna, dna)`` and the atoms decide.
+LEGACY_BASE_NAMES: dict[str, tuple[str, str]] = {
+    'ADE': ('A', 'DA'),
+    'CYT': ('C', 'DC'),
+    'GUA': ('G', 'DG'),
+    'THY': ('U', 'DT'),   # thymine on ribose is ribothymidine, which pairs as U
+    'URA': ('U', 'DT'),   # uracil on deoxyribose pairs where T does
+}
+
+#: The atom that says a nucleotide carries a ribose rather than a deoxyribose.
+RIBOSE_MARKER_ATOM = "O2'"
+
+#: Left unmapped on purpose. Inosine's base is hypoxanthine, which pairs with
+#: C, U and A rather than behaving as any one of the four; calling it a
+#: guanosine would put a wrong partner in the base-pair features.
+UNMAPPED_NUCLEOTIDES = frozenset({'I', 'DI'})
+
+
+# =============================================================================
 # Purine / Pyrimidine Classification
 # =============================================================================
 
