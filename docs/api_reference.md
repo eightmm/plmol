@@ -37,6 +37,7 @@ plmol/
 ├── complex.py                      # Complex, MolecularComplex classes
 ├── errors.py                       # PlmolError, InputError, DependencyError, FeatureError
 ├── specs.py                        # FeatureSpec, FEATURE_SPECS (PROTEIN/LIGAND/INTERACTION/NUCLEIC_ACID)
+├── arrays.py                       # numpy spellings of the torch ops, and to_torch
 ├── utils.py                        # SASA/burial helpers and kNN mask utilities
 ├── sasa.py                         # Shrake-Rupley SASA; freesasa or native backend
 ├── spatial.py                      # Neighbour search; sphere occlusion, knn, NeighbourIndex
@@ -130,7 +131,7 @@ plmol/
 
 - **`HierarchicalFeaturizer`** — Multi-level protein features (residue + atom + interaction layers). Returns `HierarchicalProteinData`.
 
-- **`ESMFeaturizer`** — ESM3/ESMC embeddings from sequence. Returns `(L, D)` tensor.
+- **`ESMFeaturizer`** — ESM3/ESMC embeddings from sequence. Returns an `(L, D)` array.
 
 ### Parsing
 
@@ -153,6 +154,20 @@ plmol/
 - **`classify_coordination_geometry(coordinating_atoms, metal_coords)`** — Classifies geometry (linear, trigonal_planar, tetrahedral, square_planar, trigonal_bipyramidal, octahedral).
 
 - **`encode_metal_features(metal_sites, n_residues)`** — Encodes detected metal coordination sites into metal type, coordination number, geometry, and distance-stat arrays.
+
+### Arrays
+
+plmol's featurizers return numpy arrays. `plmol/arrays.py` holds the operations
+whose obvious numpy spelling differs from what torch did, and the converters.
+
+- `to_torch(value, device=None)` — every array in a nested result as a torch
+  tensor. Raises `DependencyError` without torch.
+- `to_numpy(value)` — the other direction.
+- `normalize(vectors, axis, eps)` — unit vectors, dividing by `max(norm, eps)`.
+- `pairwise_distances(left, right)` — direct subtraction, not the
+  `|a|^2 + |b|^2 - 2ab` expansion.
+- `one_hot(indices, num_classes)`, `pad_last(array, before, after)`.
+- `FLOAT` and `INT` — the float32 and int64 widths every feature uses.
 
 ### Backends
 

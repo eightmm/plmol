@@ -102,8 +102,8 @@ interaction = cx.interaction(
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `edges` | `Tensor (2, E)` | Protein-ligand heavy atom pairs (pharmacophore interactions) |
-| `edge_features` | `Tensor (E, 79)` | Interaction feature vectors |
+| `edges` | `(2, E)` | Protein-ligand heavy atom pairs (pharmacophore interactions) |
+| `edge_features` | `(E, 79)` | Interaction feature vectors |
 | `interactions` | `List[Interaction]` | Detailed interaction objects |
 | `num_interactions` | `int` | Total interaction count |
 | `interaction_counts` | `dict` | Per-type interaction counts |
@@ -113,8 +113,8 @@ interaction = cx.interaction(
 | `knn_cutoff` | `Optional[int]` | kNN cutoff used |
 | `feature_dim` | `int` | Edge feature dimension (79) |
 | `metadata` | `dict` | Interaction type indices, pharmacophore indices, element types, residue types |
-| `protein_coords` | `Tensor (P, 3)` | Protein heavy atom coordinates, when `include_coords=True` |
-| `ligand_coords` | `Tensor (L, 3)` | Ligand heavy atom coordinates, when `include_coords=True` |
+| `protein_coords` | `(P, 3)` | Protein heavy atom coordinates, when `include_coords=True` |
+| `ligand_coords` | `(L, 3)` | Ligand heavy atom coordinates, when `include_coords=True` |
 | `metal_sites` | `List[MetalSite]` | Detected protein metal coordination sites, when `include_metal_sites=True` |
 | `metal_features` | `dict` | Encoded metal-site arrays from `encode_metal_features()` |
 
@@ -165,8 +165,8 @@ graph = featurizer.get_interaction_graph(include_contacts=True, contact_cutoff=4
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `contact_edges` | `Tensor (2, E_c)` | All protein-ligand heavy atom pairs within cutoff (union with kNN if set) |
-| `contact_distances` | `Tensor (E_c,)` | Pairwise distances |
+| `contact_edges` | `(2, E_c)` | All protein-ligand heavy atom pairs within cutoff (union with kNN if set) |
+| `contact_distances` | `(E_c,)` | Pairwise distances |
 | `num_contacts` | `int` | Number of contact edges |
 
 ---
@@ -195,7 +195,7 @@ hydrophobic = featurizer.detect_hydrophobic()
 # All interactions
 all_interactions = featurizer.detect_all_interactions()
 
-# Edge tensors
+# Edge arrays
 edges, edge_features = featurizer.get_interaction_edges()
 
 # Distance-based edges (all pairs within cutoff, with optional kNN)

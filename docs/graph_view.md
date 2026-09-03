@@ -14,7 +14,7 @@ beside wildly different node and edge conventions:
 
 | View | Edges | Edge features | Node features |
 |------|-------|---------------|---------------|
-| protein `graph` (residue) | `edge_index` | tuple of 2 tensors + vector tuple | tuple of 8 tensors |
+| protein `graph` (residue) | `edge_index` | tuple of 2 arrays + vector tuple | tuple of 8 arrays |
 | protein `atom_graph` | `edge_index` | none — 4 loose per-edge arrays | `(N,)` token ids |
 | ligand `graph` | none — dense `(N, N, 37)` `adjacency` | in the adjacency | `(N, 98)` |
 | ligand `bond_graph` | `edge_index` | `(E, 100)` | `(B, 29)` |
@@ -50,8 +50,8 @@ g = as_graph(graph)
 | `num_nodes`, `num_edges` | `int` | — | Counts |
 | `source` | `str` | — | Which view this came from |
 
-Everything comes back as torch tensors. `Ligand.featurize` converts its outputs
-to numpy while the other classes do not, so normalizing settles that too.
+Everything comes back as numpy arrays, whatever shape the view arrived in.
+`to_torch(graph)` converts the whole thing for a model that wants tensors.
 
 ### Conversions applied
 
@@ -65,7 +65,7 @@ to numpy while the other classes do not, so normalizing settles that too.
   `LigandFeaturizer.adjacency_to_bond_edges` stays faithful at 37 channels; it
   is a literal conversion, while `as_graph` is a curated model-ready view.
 - **Protein residue tuples** are concatenated along the feature axis. Vector
-  features stay in their own `(N, V, 3)` tensor rather than being flattened.
+  features stay in their own `(N, V, 3)` array rather than being flattened.
 - **Nucleic acid `graph`** loose per-nucleotide arrays are concatenated in a
   fixed order: `one_hot`, `is_purine`, `is_pyrimidine`, `is_dna`, `torsions`,
   `sugar_pucker`, `mol_weight`, `n_hbond_donors`, `n_hbond_acceptors` →
@@ -151,7 +151,7 @@ ligands = [Ligand.from_smiles(s) for s in smiles_list]
 for mode in ["graph", "bond_graph", "fragment_graph"]:
     batch = collate([lig.featurize(mode=mode)[mode] for lig in ligands])
     dims = feature_dims("ligand", mode)
-    # Same tensor names and layout in every iteration; only the widths change.
+    # Same array names and layout in every iteration; only the widths change.
     model = MyGNN(dims["node_features"], dims["edge_features"])
     out = model(batch["node_features"], batch["edge_index"],
                 batch["edge_features"], batch["batch"])

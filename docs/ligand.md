@@ -622,7 +622,7 @@ from plmol import MoleculeFeaturizer
 featurizer = MoleculeFeaturizer("CCO")
 features = featurizer.get_features()           # descriptors + fingerprints
 node, edge, adj = featurizer.get_graph()       # graph representation
-descriptors = featurizer.get_descriptors()     # 62-dim descriptor tensor
+descriptors = featurizer.get_descriptors()     # 62-dim descriptor array
 ecfp4 = featurizer.get_morgan_fingerprint()    # ECFP4 (2048-dim)
 
 # Functional style (pass molecule per call)

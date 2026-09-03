@@ -160,11 +160,11 @@ graph = result["graph"]
 
 | Key | Shape | Type | Description |
 |-----|-------|------|-------------|
-| `node_features` | tuple of 8 | `Tensor` | Residue scalar features (total 83-dim) |
-| `node_vector_features` | tuple of 3 | `Tensor` | Residue vector features (total 31 vectors x 3) |
+| `node_features` | tuple of 8 | array | Residue scalar features (total 83-dim) |
+| `node_vector_features` | tuple of 3 | array | Residue vector features (total 31 vectors x 3) |
 | `edge_index` | `(2, E)` | `int64` | Sparse edge pairs (source, target) |
-| `edge_features` | tuple of 2 | `Tensor` | Edge scalar features (total 39-dim) |
-| `edge_vector_features` | tuple of 1 | `Tensor` | Edge vector features (8 vectors x 3) |
+| `edge_features` | tuple of 2 | array | Edge scalar features (total 39-dim) |
+| `edge_vector_features` | tuple of 1 | array | Edge vector features (8 vectors x 3) |
 | `coords` | `(L, 2, 3)` | `float32` | CA + sidechain centroid coordinates |
 | `distance_cutoff` | `float` | -- | Cutoff used (default: 8.0 A) |
 | `knn_cutoff` | `Optional[int]` | -- | kNN cutoff used (None if not set) |
@@ -172,9 +172,9 @@ graph = result["graph"]
 
 Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA, SC-SC, CA-SC, SC-CA) < `distance_cutoff`. When `knn_cutoff` is set, kNN edges (based on minimum of 4 distance matrices) are unioned with distance edges.
 
-### Node Scalar Features `(L, 83)` -- tuple of 8 tensors
+### Node Scalar Features `(L, 83)` -- tuple of 8 arrays
 
-| Index | Tensor | Dim | Features |
+| Index | Array | Dim | Features |
 |-------|--------|-----|----------|
 | `[0:21]` | residue_one_hot | 21 | One-hot: 20 amino acids + UNK |
 | `[21:23]` | terminal_flags | 2 | is_N_terminal, is_C_terminal |
@@ -185,24 +185,24 @@ Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA,
 | `[70:78]` | rf_distance | 8 | Forward/reverse neighbor distances: fwd(CA-CA, SC-SC, CA-SC, SC-CA) + rev(same) |
 | `[78:83]` | physicochemical | 5 | Residue properties: hydrophobicity (Kyte-Doolittle), volume (Zamyatnin), charge, flexibility, polarity |
 
-### Node Vector Features `(L, 31, 3)` -- tuple of 3 tensors
+### Node Vector Features `(L, 31, 3)` -- tuple of 3 arrays
 
-| Index | Tensor | Vectors | Features |
+| Index | Array | Vectors | Features |
 |-------|--------|---------|----------|
 | `[0:20]` | self_vector | 20 | Intra-residue pairwise direction vectors among N, CA, C, O, SC |
 | `[20:28]` | rf_vector | 8 | Forward/reverse neighbor direction vectors (CA-CA, SC-SC, CA-SC, SC-CA x 2) |
 | `[28:31]` | local_frames | 3 | Local N-CA-C coordinate frame (3 orthonormal basis vectors) |
 
-### Edge Scalar Features `(E, 39)` -- tuple of 2 tensors
+### Edge Scalar Features `(E, 39)` -- tuple of 2 arrays
 
-| Index | Tensor | Dim | Features |
+| Index | Array | Dim | Features |
 |-------|--------|-----|----------|
 | `[0:4]` | distance | 4 | CA-CA, SC-SC, CA-SC, SC-CA distances (Angstrom) |
 | `[4:39]` | relative_position | 35 | One-hot sequence separation: d=0, 1, ..., 32, >32, cross-chain, UNK |
 
-### Edge Vector Features `(E, 8, 3)` -- tuple of 1 tensor
+### Edge Vector Features `(E, 8, 3)` -- tuple of 1 array
 
-| Index | Tensor | Vectors | Features |
+| Index | Array | Vectors | Features |
 |-------|--------|---------|----------|
 | `[0:8]` | interaction_vectors | 8 | CA_i->CA_j, CA_j->CA_i, CA_i->SC_j, CA_j->SC_i, SC_i->CA_j, SC_j->CA_i, SC_i->SC_j, SC_j->SC_i |
 
@@ -335,16 +335,16 @@ and loose per-edge arrays into `node_tokens`, `node_features` and
 | `node_features` | `(A,)` | `int64` | Atom token ID (0-186, for `nn.Embedding`) -- same as `atom_tokens` |
 | `atom_to_residue` | `(A,)` | `int64` | Maps each atom to 0-indexed residue index (= `residue_count`) |
 | `residue_atom_indices` | `List[List[int]]` | -- | Atom indices per residue (reverse of `atom_to_residue`) |
-| Node token features | 3 tensors | `int64` | Integer tokens for embedding layers |
-| Node scalar features | 11 tensors | `float32` | Continuous per-atom features (total 11-dim) |
+| Node token features | 3 arrays | `int64` | Integer tokens for embedding layers |
+| Node scalar features | 11 arrays | `float32` | Continuous per-atom features (total 11-dim) |
 | `coords` | `(A, 3)` | `float32` | Atom 3D coordinates |
 | `edge_index` | `(2, E)` | `int64` | Sparse edge pairs (source, target) |
-| Edge features | 4 tensors | `float32` | Per-edge features (total 6-dim) |
+| Edge features | 4 arrays | `float32` | Per-edge features (total 6-dim) |
 | `distance_cutoff` | `float` | -- | Cutoff used (default: 4.0 A) |
 | `knn_cutoff` | `Optional[int]` | -- | kNN cutoff used (None if not set) |
 | `level` | `str` | -- | `"atom"` |
 
-Edge construction: all atom pairs within `distance_cutoff`. When `knn_cutoff` is set, kNN edges are unioned with distance edges via `torch.topk`.
+Edge construction: all atom pairs within `distance_cutoff`. When `knn_cutoff` is set, kNN edges are unioned with distance edges.
 
 ### Node Token Features `(A,)` -- int64, for `nn.Embedding`
 
@@ -558,7 +558,7 @@ from plmol import HierarchicalFeaturizer
 
 hf = HierarchicalFeaturizer()
 data = hf.featurize("protein.pdb")
-# data.atom_tokens:        (N_atoms,) int tensor
+# data.atom_tokens:        (N_atoms,) int array
 # data.atom_coords:        (N_atoms, 3)
 # data.residue_features:   (L, 76)
 # data.atom_to_residue:    (N_atoms,) mapping

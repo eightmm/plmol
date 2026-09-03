@@ -1,11 +1,14 @@
 # plmol
 
-Unified bio-molecule feature extraction for ML. Convert PDB, mmCIF, SMILES, SDF, and sequence strings into tensors ready for GNNs, transformers, and 3D models. Supports proteins, ligands, nucleic acids (DNA/RNA), metal coordination, and arbitrary molecular complexes.
+Unified bio-molecule feature extraction for ML. Convert PDB, mmCIF, SMILES, SDF, and sequence strings into numpy arrays ready for GNNs, transformers, and 3D models. Supports proteins, ligands, nucleic acids (DNA/RNA), metal coordination, and arbitrary molecular complexes.
 
 ## Installation
 
 ```bash
 pip install plmol
+
+# To hand a whole featurizer output to a PyTorch model with to_torch()
+pip install 'plmol[torch]'
 
 # With mmCIF support (for mmCIF structure parsing via gemmi)
 pip install 'plmol[mmcif]'
@@ -20,13 +23,24 @@ pip install 'plmol[sasa]'
 pip install -e ".[dev]"
 ```
 
-**Requirements**: Python >= 3.9, PyTorch, RDKit, NumPy.
+**Requirements**: Python >= 3.9, NumPy, RDKit.
 
-Everything else is optional, and every mode runs without any of it. scipy and
-freesasa are the defaults for the queries and the areas they cover when they
-happen to be installed; see [Spatial Backends](docs/protein.md#spatial-backends)
-and [SASA Backends](docs/protein.md#sasa-backends) for what changes when they
-are not.
+Features come back as numpy arrays. `to_torch` converts a whole output in one
+call for a model that wants tensors:
+
+```python
+from plmol import Protein, to_torch
+
+graph = to_torch(Protein.from_pdb("protein.pdb").featurize(mode="graph"))
+```
+
+Everything else is optional, and every mode runs without any of it. torch is
+needed only for `to_torch` and for the protein language models, which are torch
+models. scipy and freesasa are the defaults for the queries and the areas they
+cover when they happen to be installed; see
+[Spatial Backends](docs/protein.md#spatial-backends) and
+[SASA Backends](docs/protein.md#sasa-backends) for what changes when they are
+not.
 
 ## Quick Start
 
@@ -148,7 +162,7 @@ yours to choose.
 
 ```python
 from pathlib import Path
-import torch
+import numpy as np
 from plmol import Ligand, Protein, collate
 
 # Ligands: featurize and batch for a model
@@ -158,7 +172,8 @@ batch = collate(graphs)
 # Proteins: featurize and cache to disk
 for pdb in Path("pdbs").glob("*.pdb"):
     with Protein.from_pdb(pdb) as protein:
-        torch.save(protein.featurize(mode=["graph", "sequence"]), f"features/{pdb.stem}.pt")
+        np.save(f"features/{pdb.stem}.npy",
+                protein.featurize(mode=["graph", "sequence"]), allow_pickle=True)
 ```
 
 Use `with` so temporary files are released as you go, and reach for
