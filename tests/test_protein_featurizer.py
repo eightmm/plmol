@@ -117,3 +117,19 @@ class TestProteinFeaturizerReal:
         pf = ProteinFeaturizer(example_pdb, standardize=True)
         seq = pf.get_sequence_features()
         assert seq["num_residues"] > 0
+
+
+def test_hierarchical_residue_width_matches_the_residue_graph(example_pdb):
+    """The two assemble the same eight blocks, so they must agree on the width.
+
+    They did not before 0.4.0: the comments here said 81 while the graph said
+    83, because nobody re-added them after a block changed size.
+    """
+    from plmol import Protein
+    from plmol.protein.hierarchical_featurizer import HierarchicalFeaturizer
+
+    data = HierarchicalFeaturizer(esmc_model=None, esm3_model=None).featurize(example_pdb)
+    graph = Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]
+    assert data.residue_features.shape[1] == sum(
+        block.shape[-1] for block in graph["node_features"]
+    )
