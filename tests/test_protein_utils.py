@@ -138,6 +138,64 @@ class TestElementWithoutTheColumn:
         assert parse_pdb_line(written).element == element
 
 
+class TestProteinAtomFilter:
+    """One filter, shared by the PDB and mmCIF parsers.
+
+    StructureParser promises protein_atoms holds no water, hydrogen or metal.
+    The mmCIF parser used to write its own shorter rule and hand back its
+    metals, its ligands and its terminal oxygens.
+    """
+
+    @staticmethod
+    def _atom(**kwargs):
+        from plmol.parsers.pdb_parser import ParsedAtom
+
+        fields = dict(record_type="ATOM", atom_name="CA", res_name="ALA", res_num=1,
+                      chain_id="A", coords=(0.0, 0.0, 0.0), element="C")
+        fields.update(kwargs)
+        return ParsedAtom(**fields)
+
+    @pytest.mark.parametrize("label,fields", [
+        ("hydrogen", dict(atom_name="HB2", element="H")),
+        ("deuterium", dict(atom_name="DB2", element="D")),
+        ("water", dict(res_name="HOH", atom_name="O", element="O")),
+        ("metal", dict(record_type="HETATM", res_name="ZN", atom_name="ZN", element="ZN")),
+        ("ligand", dict(record_type="HETATM", res_name="LIG", atom_name="C1")),
+        ("terminal oxygen", dict(atom_name="OXT", element="O")),
+        ("nucleotide when not asked for", dict(res_name="DA", atom_name="P", element="P")),
+    ], ids=lambda v: v if isinstance(v, str) else "")
+    def test_what_is_left_out(self, label, fields):
+        from plmol.parsers.pdb_parser import is_protein_atom
+
+        assert is_protein_atom(self._atom(**fields)) is False
+
+    def test_a_backbone_atom_stays(self):
+        from plmol.parsers.pdb_parser import is_protein_atom
+
+        assert is_protein_atom(self._atom()) is True
+
+    def test_a_nucleotide_stays_when_asked_for(self):
+        from plmol.parsers.pdb_parser import is_protein_atom
+
+        atom = self._atom(res_name="DA", atom_name="P", element="P")
+        assert is_protein_atom(atom, include_nucleic_acids=True) is True
+
+    def test_the_two_parsers_agree_on_a_real_structure(self, example_pdb, tmp_path):
+        """Same structure, both formats, same atoms."""
+        gemmi = pytest.importorskip("gemmi")
+        from plmol.parsers import MMCIFParser, PDBParser
+
+        cif = tmp_path / "structure.cif"
+        structure = gemmi.read_structure(example_pdb)
+        structure.setup_entities()
+        structure.make_mmcif_document().write_file(str(cif))
+
+        key = lambda a: (a.chain_id, a.res_num, a.atom_name)  # noqa: E731
+        from_pdb = PDBParser(example_pdb, skip_cache=True).protein_atoms
+        from_cif = MMCIFParser(str(cif), include_nucleic_acids=False).protein_atoms
+        assert {key(a) for a in from_cif} == {key(a) for a in from_pdb}
+
+
 class TestParsePdbLine:
     def test_basic_parse(self):
         # Standard PDB ATOM line with proper column formatting

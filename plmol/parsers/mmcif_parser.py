@@ -69,44 +69,20 @@ class MMCIFParser(StructureParser):
 
     @property
     def protein_atoms(self) -> List["ParsedAtom"]:
-        """Filtered atoms as ParsedAtom objects (no water/hydrogen)."""
+        """Filtered atoms (protein/nucleic acid, no water/hydrogen/metal).
+
+        The filter is ``pdb_parser.is_protein_atom``, the one the PDB parser
+        applies. It used to be a shorter one written here that dropped only
+        water and hydrogen, so the same structure read as mmCIF came back with
+        its metals, its ligands and its terminal oxygens included and read as
+        PDB did not.
+        """
         if self._parsed_atoms_cache is not None:
             return self._parsed_atoms_cache
-        from ..protein.utils import ParsedAtom
-        from ..constants import NUCLEIC_ACID_RESIDUES
+        from .pdb_parser import is_protein_atom
 
-        model = self._structure[0]
-        atoms: list = []
-        water = {"HOH", "WAT"}
-
-        for chain in model:
-            for res in chain:
-                rname = res.name.strip()
-                if rname in water:
-                    continue
-                if not self.include_nucleic_acids and rname in NUCLEIC_ACID_RESIDUES:
-                    continue
-                is_hetatm = res.het_flag == "H"
-                record_type = "HETATM" if is_hetatm else "ATOM"
-                for atom in res:
-                    elem = atom.element.name if atom.element != gemmi.Element("X") else ""
-                    if elem in ("H", "D"):
-                        continue
-                    try:
-                        coords = (atom.pos.x, atom.pos.y, atom.pos.z)
-                    except Exception:
-                        continue
-                    atoms.append(ParsedAtom(
-                        record_type=record_type,
-                        atom_name=atom.name.strip(),
-                        res_name=rname,
-                        res_num=res.seqid.num,
-                        chain_id=chain.name,
-                        coords=coords,
-                        element=elem,
-                        insertion_code=res.seqid.icode.strip() if res.seqid.icode else "",
-                        b_factor=atom.b_iso,
-                    ))
+        atoms = [atom for atom in self.all_atoms
+                 if is_protein_atom(atom, self.include_nucleic_acids)]
         self._parsed_atoms_cache = atoms
         return atoms
 

@@ -243,6 +243,48 @@ def normalize_residue_name(res_name: str, atom_name: str = '') -> str:
     return 'UNK'
 
 
+def is_protein_atom(atom: ParsedAtom, include_nucleic_acids: bool = False) -> bool:
+    """Whether an atom belongs in a parser's ``protein_atoms``.
+
+    Excludes hydrogens, water, metal ions, ligands and terminal oxygens, which
+    is what :class:`~plmol.parsers.base.StructureParser` promises. It reads
+    the :class:`ParsedAtom` and nothing else, so the PDB and mmCIF parsers
+    filter alike -- they used not to, and an mmCIF handed back its zinc and
+    its ligand as protein.
+    """
+    # Hydrogen and its heavy isotope. Neutron structures write D, which the
+    # mmCIF path dropped and the PDB path kept.
+    if atom.element in ('H', 'D'):
+        return False
+
+    if atom.res_name == 'HOH':
+        return False
+
+    # Metal ions (centralized constant)
+    if atom.res_name in METAL_RESIDUES:
+        return False
+
+    # Terminal oxygen and specific modified residues
+    if atom.atom_name == 'OXT':
+        return False
+
+    if atom.res_name in ['LLP', 'PTR']:
+        return False
+
+    if not include_nucleic_acids and atom.res_name in NUCLEIC_ACID_RESIDUES:
+        return False
+
+    # For HETATM, only known amino acids or nucleotides -- no metals, no ligands.
+    if atom.record_type == 'HETATM':
+        norm_res = normalize_residue_name(atom.res_name, atom.atom_name)
+        is_amino_acid = norm_res in AMINO_ACID_LETTERS
+        is_nucleotide = include_nucleic_acids and atom.res_name in NUCLEIC_ACID_RESIDUES
+        if not (is_amino_acid or is_nucleotide):
+            return False
+
+    return True
+
+
 # ============================================================================
 # PDBParser Class - Main API
 # ============================================================================
@@ -351,45 +393,14 @@ class PDBParser(StructureParser):
         if not self._protein_atoms:
             logger.warning(f"No protein atoms found in {self.pdb_path}")
 
-    def _is_protein_atom(self, atom: ParsedAtom, line: str) -> bool:
+    def _is_protein_atom(self, atom: ParsedAtom, line: str = '') -> bool:
+        """Whether *atom* belongs in :attr:`protein_atoms`.
+
+        ``line`` is accepted for callers written against 0.4.x and ignored:
+        the only thing it decided was whether the atom was a hydrogen, and
+        that is now :attr:`ParsedAtom.element`.
         """
-        Check if atom should be included as protein atom.
-
-        Preprocessing is done here - downstream featurizers receive clean data.
-        Excludes: hydrogens, water, metal ions, ligands, terminal oxygens.
-        """
-        # Skip hydrogens
-        if is_hydrogen(line):
-            return False
-
-        # Skip water molecules
-        if atom.res_name == 'HOH':
-            return False
-
-        # Skip metal ions (centralized constant)
-        if atom.res_name in METAL_RESIDUES:
-            return False
-
-        # Skip terminal oxygen and specific modified residues
-        if atom.atom_name == 'OXT':
-            return False
-
-        if atom.res_name in ['LLP', 'PTR']:
-            return False
-
-        # Skip nucleic acid residues unless opted in
-        if not self.include_nucleic_acids and atom.res_name in NUCLEIC_ACID_RESIDUES:
-            return False
-
-        # For HETATM, only include known amino acids or nucleotides (no metals, no ligands)
-        if atom.record_type == 'HETATM':
-            norm_res = normalize_residue_name(atom.res_name, atom.atom_name)
-            is_amino_acid = norm_res in AMINO_ACID_LETTERS
-            is_nucleotide = self.include_nucleic_acids and atom.res_name in NUCLEIC_ACID_RESIDUES
-            if not (is_amino_acid or is_nucleotide):
-                return False
-
-        return True
+        return is_protein_atom(atom, self.include_nucleic_acids)
 
     # ============================================================================
     # Public API - Data Access
