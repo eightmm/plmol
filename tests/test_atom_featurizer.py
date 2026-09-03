@@ -1,6 +1,6 @@
 """Tests for plmol/protein/atom_featurizer.py."""
 
-import torch
+import numpy as np
 import pytest
 
 from plmol.protein.atom_featurizer import AtomFeaturizer
@@ -12,8 +12,8 @@ class TestAtomFeaturizerMini:
         PDBParser.clear_cache()
         af = AtomFeaturizer()
         token, coord = af.get_protein_atom_features(mini_pdb)
-        assert isinstance(token, torch.Tensor)
-        assert isinstance(coord, torch.Tensor)
+        assert isinstance(token, np.ndarray)
+        assert isinstance(coord, np.ndarray)
         assert token.ndim == 1
         assert coord.ndim == 2
         assert coord.shape[1] == 3
@@ -39,7 +39,7 @@ class TestAtomFeaturizerMini:
         PDBParser.clear_cache()
         af = AtomFeaturizer()
         sasa, rel_sasa_dict = af.get_atom_sasa(mini_pdb)
-        assert isinstance(sasa, torch.Tensor)
+        assert isinstance(sasa, np.ndarray)
         assert sasa.ndim == 1
         assert isinstance(rel_sasa_dict, dict)
 

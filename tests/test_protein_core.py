@@ -1,6 +1,7 @@
 """Tests for plmol/protein/core.py — Protein class."""
 
 import pytest
+import numpy as np
 import torch
 
 from plmol.protein.core import Protein
@@ -158,16 +159,16 @@ class TestAtomGraphMode:
             mode="graph", graph_kwargs={"level": "atom"}
         )["graph"]
         assert set(as_mode) == set(as_kwargs)
-        assert torch.equal(as_mode["node_features"], as_kwargs["node_features"])
+        assert np.array_equal(as_mode["node_features"], as_kwargs["node_features"])
 
     def test_requesting_both_gives_two_levels(self, example_pdb):
         from plmol import Protein
 
         result = Protein.from_pdb(example_pdb).featurize(mode=["graph", "atom_graph"])
         assert set(result) == {"graph", "atom_graph"}
-        # Residue graphs carry (scalar, vector) tuples; atom graphs carry tensors.
+        # Residue graphs carry (scalar, vector) tuples; atom graphs carry arrays.
         assert isinstance(result["graph"]["node_features"], tuple)
-        assert torch.is_tensor(result["atom_graph"]["node_features"])
+        assert isinstance(result["atom_graph"]["node_features"], np.ndarray)
 
     def test_is_not_part_of_all(self, example_pdb):
         from plmol import Protein

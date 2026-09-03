@@ -3,7 +3,6 @@ Atom-level protein featurizer for extracting atomic features and SASA.
 """
 
 import logging
-import torch
 import numpy as np
 from typing import Dict, Tuple, Optional, List
 try:
@@ -14,6 +13,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+from ..arrays import FLOAT, INT
 from .utils import (
     PDBParser,
     is_atom_record, is_hetatm_record, is_hydrogen, parse_pdb_atom_line,
@@ -55,7 +55,7 @@ class AtomFeaturizer:
     def get_protein_atom_features_from_parser(
         self,
         pdb_parser: 'PDBParser',
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Extract atom-level features from pre-parsed PDB data.
 
@@ -64,8 +64,8 @@ class AtomFeaturizer:
 
         Returns:
             Tuple of (token, coord):
-                - token: torch.Tensor of shape [n_atoms] with atom type tokens
-                - coord: torch.Tensor of shape [n_atoms, 3] with 3D coordinates
+                - token: np.ndarray of shape [n_atoms] with atom type tokens
+                - coord: np.ndarray of shape [n_atoms, 3] with 3D coordinates
         """
         token, coord = [], []
 
@@ -93,12 +93,12 @@ class AtomFeaturizer:
             token.append(tok)
             coord.append(atom.coords)
 
-        token = torch.tensor(token, dtype=torch.long)
-        coord = torch.tensor(coord, dtype=torch.float32)
+        token = np.array(token, dtype=INT)
+        coord = np.array(coord, dtype=FLOAT)
 
         return token, coord
 
-    def get_protein_atom_features(self, pdb_file: str) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_protein_atom_features(self, pdb_file: str) -> Tuple[np.ndarray, np.ndarray]:
         """
         Extract atom-level features from PDB file.
 
@@ -107,8 +107,8 @@ class AtomFeaturizer:
 
         Returns:
             Tuple of (token, coord):
-                - token: torch.Tensor of shape [n_atoms] with atom type tokens
-                - coord: torch.Tensor of shape [n_atoms, 3] with 3D coordinates
+                - token: np.ndarray of shape [n_atoms] with atom type tokens
+                - coord: np.ndarray of shape [n_atoms, 3] with 3D coordinates
         """
         token, coord = [], []
 
@@ -154,12 +154,12 @@ class AtomFeaturizer:
             token.append(tok)
             coord.append(xyz)
 
-        token = torch.tensor(token, dtype=torch.long)
-        coord = torch.tensor(coord, dtype=torch.float32)
+        token = np.array(token, dtype=INT)
+        coord = np.array(coord, dtype=FLOAT)
 
         return token, coord
 
-    def get_atom_sasa(self, pdb_file: str) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    def get_atom_sasa(self, pdb_file: str) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
         """
         Calculate atom-level SASA with the configured backend.
 
@@ -168,7 +168,7 @@ class AtomFeaturizer:
 
         Returns:
             Tuple of (atom_sasa, atom_info):
-                - atom_sasa: torch.Tensor of shape [n_atoms] with SASA values
+                - atom_sasa: np.ndarray of shape [n_atoms] with SASA values
                 - atom_info: Dictionary containing:
                     - 'residue_name': Residue names for each atom
                     - 'residue_number': Residue numbers
@@ -200,14 +200,14 @@ class AtomFeaturizer:
             radii.append(structure.radius(i))
 
         # Convert to tensors
-        atom_sasa = torch.tensor(atom_sasa, dtype=torch.float32)
+        atom_sasa = np.array(atom_sasa, dtype=FLOAT)
 
         atom_info = {
             'residue_name': residue_names,
-            'residue_number': torch.tensor(residue_numbers, dtype=torch.long),
+            'residue_number': np.array(residue_numbers, dtype=INT),
             'atom_name': atom_names,
             'chain_label': chain_labels,
-            'radius': torch.tensor(radii, dtype=torch.float32)
+            'radius': np.array(radii, dtype=FLOAT)
         }
 
         return atom_sasa, atom_info
@@ -284,16 +284,16 @@ class AtomFeaturizer:
 
     def _compute_derived_scalars(
         self, parser: 'PDBParser', per_atom: Dict[str, list],
-        atom_sasa: torch.Tensor, min_len: int,
+        atom_sasa: np.ndarray, min_len: int,
         pdb_file: str,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Dict[str, np.ndarray]:
         """Compute relative SASA, burial index, polar classification, and secondary structure."""
         # Relative SASA
         sasa_truncated = atom_sasa[:min_len]
-        relative_sasa = torch.zeros(min_len, dtype=torch.float32)
+        relative_sasa = np.zeros(min_len, dtype=FLOAT)
         for i in range(min_len):
             max_sasa = RESIDUE_MAX_SASA.get(per_atom['res_names'][i], 200.0)
-            relative_sasa[i] = min(sasa_truncated[i].item() / max_sasa, 1.0) if max_sasa > 0 else 0.0
+            relative_sasa[i] = min(float(sasa_truncated[i]) / max_sasa, 1.0) if max_sasa > 0 else 0.0
 
         # Burial index: 1.0 = fully buried, 0.0 = fully exposed
         burial_index = 1.0 - relative_sasa
@@ -302,7 +302,7 @@ class AtomFeaturizer:
         # used when available; the element rule below reproduces it exactly on
         # protein atoms (verified 100% on a 3260-atom structure) and is what
         # runs when freesasa is absent.
-        is_polar_sasa = torch.zeros(min_len, dtype=torch.float32)
+        is_polar_sasa = np.zeros(min_len, dtype=FLOAT)
         classifier = None
         if freesasa is not None:
             try:
@@ -330,7 +330,7 @@ class AtomFeaturizer:
             'secondary_structure': ss,
         }
 
-    def get_all_atom_features(self, pdb_file: str) -> Dict[str, torch.Tensor]:
+    def get_all_atom_features(self, pdb_file: str) -> Dict[str, np.ndarray]:
         """Get all atom-level features including tokens, coordinates, SASA,
         and enriched per-atom properties."""
         parser = PDBParser(pdb_file)
@@ -357,13 +357,13 @@ class AtomFeaturizer:
             'relative_sasa': derived['relative_sasa'],
             'burial_index': derived['burial_index'],
             'is_polar_sasa': derived['is_polar_sasa'],
-            'residue_token': torch.tensor(per_atom['residue_tokens'][:min_len], dtype=torch.long),
-            'atom_element': torch.tensor(per_atom['atom_elements'][:min_len], dtype=torch.long),
+            'residue_token': np.array(per_atom['residue_tokens'][:min_len], dtype=INT),
+            'atom_element': np.array(per_atom['atom_elements'][:min_len], dtype=INT),
             'radius': atom_info['radius'][:min_len] if len(atom_info['radius']) >= min_len else atom_info['radius'],
-            'is_backbone': torch.tensor(per_atom['is_backbone'][:min_len], dtype=torch.float32),
-            'formal_charge': torch.tensor(per_atom['formal_charges'][:min_len], dtype=torch.float32),
-            'is_hbond_donor': torch.tensor(per_atom['is_hbond_donor'][:min_len], dtype=torch.float32),
-            'is_hbond_acceptor': torch.tensor(per_atom['is_hbond_acceptor'][:min_len], dtype=torch.float32),
+            'is_backbone': np.array(per_atom['is_backbone'][:min_len], dtype=FLOAT),
+            'formal_charge': np.array(per_atom['formal_charges'][:min_len], dtype=FLOAT),
+            'is_hbond_donor': np.array(per_atom['is_hbond_donor'][:min_len], dtype=FLOAT),
+            'is_hbond_acceptor': np.array(per_atom['is_hbond_acceptor'][:min_len], dtype=FLOAT),
             'secondary_structure': derived['secondary_structure'],
             'metadata': {
                 'n_atoms': min_len,
@@ -379,7 +379,7 @@ class AtomFeaturizer:
         parser: 'PDBParser',
         atom_names: List[str],
         n_atoms: int,
-    ) -> torch.Tensor:
+    ) -> np.ndarray:
         """
         Assign secondary structure from backbone phi/psi angles.
 
@@ -463,9 +463,9 @@ class AtomFeaturizer:
                 break
             ss_rows.append(residue_ss.get((atom.chain_id, atom.res_num), (0.0, 0.0, 1.0)))
 
-        ss = torch.zeros(n_atoms, 3, dtype=torch.float32)
+        ss = np.zeros((n_atoms, 3), dtype=FLOAT)
         if ss_rows:
-            ss[:len(ss_rows)] = torch.tensor(ss_rows, dtype=torch.float32)
+            ss[:len(ss_rows)] = np.array(ss_rows, dtype=FLOAT)
         return ss
 
     @staticmethod
@@ -480,7 +480,7 @@ class AtomFeaturizer:
 
 
 # Convenience function for direct use
-def get_protein_atom_features(pdb_file: str) -> Tuple[torch.Tensor, torch.Tensor]:
+def get_protein_atom_features(pdb_file: str) -> Tuple[np.ndarray, np.ndarray]:
     """
     Extract atom-level features from PDB file.
 
@@ -494,7 +494,7 @@ def get_protein_atom_features(pdb_file: str) -> Tuple[torch.Tensor, torch.Tensor
     return featurizer.get_protein_atom_features(pdb_file)
 
 
-def get_atom_features_with_sasa(pdb_file: str) -> Dict[str, torch.Tensor]:
+def get_atom_features_with_sasa(pdb_file: str) -> Dict[str, np.ndarray]:
     """
     Get all atom-level features including SASA.
 

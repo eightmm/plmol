@@ -1,5 +1,6 @@
 """Tests for plmol/protein/protein_featurizer.py — main orchestrator."""
 
+import numpy as np
 import torch
 import pytest
 
@@ -98,8 +99,8 @@ class TestProteinFeaturizerMini:
         PDBParser.clear_cache()
         pf = ProteinFeaturizer(mini_pdb, standardize=False)
         tokens, coords = pf.get_atom_tokens_and_coords()
-        assert isinstance(tokens, torch.Tensor)
-        assert isinstance(coords, torch.Tensor)
+        assert isinstance(tokens, np.ndarray)
+        assert isinstance(coords, np.ndarray)
         assert coords.shape[1] == 3
 
 
