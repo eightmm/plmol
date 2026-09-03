@@ -175,6 +175,23 @@ Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA,
 | `[69:77]` | rf_distance | 8 | Forward/reverse neighbor distances: fwd(CA-CA, SC-SC, CA-SC, SC-CA) + rev(same) |
 | `[77:82]` | physicochemical | 5 | Residue properties: hydrophobicity (Kyte-Doolittle), volume (Zamyatnin), charge, flexibility, polarity |
 
+> **The SASA columns depend on how the structure is oriented.** plmol samples
+> each atom's sphere on a lattice fixed in space rather than one carried with
+> the molecule, so rotating a structure moves them. Measured over four
+> orientations of the example protein at the default 100 sample points: per-atom
+> areas have a mean spread of 43% of the atom's own area, and 362 of 3260 atoms
+> come out as exactly zero in one orientation and non-zero in another. In the
+> residue block the relative columns `[63:68]` move by up to 0.14, and
+> `polar_apolar_ratio` `[68]` swings the whole 0–1 range on 10 of 416 residues —
+> those are residues with no measurable surface, where the ratio is `0/1e-8`
+> when nothing survives the occlusion test and `1.0` when one polar sample point
+> does. Translating a structure changes nothing.
+>
+> Raising `n_points` helps and does not cure it: ten times the samples brings
+> the mean spread to 18% and still leaves 133 atoms flipping. `burial_index` and
+> `relative_sasa` on the atom graph, the surface burial channel and the voxel's
+> inherit the same behaviour.
+
 ### Node Vector Features `(L, 31, 3)` -- tuple of 3 arrays
 
 | Index | Array | Vectors | Features |

@@ -208,3 +208,87 @@ class TestEveryModeProducesSasa:
     def test_voxel(self, example_pdb):
         voxel = Protein.from_pdb(example_pdb).featurize(mode="voxel")["voxel"]
         assert np.asarray(voxel["voxel"]).shape[0] == 16
+
+
+class TestHowTheAnswerDependsOnOrientation:
+    """Point-sampled SASA reads a lattice fixed in space, not one carried with
+    the molecule, so the answer moves when the structure is rotated. These pin
+    what is guaranteed and characterise what is not, because neither was
+    written down anywhere before 0.4.x."""
+
+    @staticmethod
+    def _atoms(pdb_path):
+        from plmol.parsers import PDBParser
+        from plmol.sasa import element_radius
+
+        atoms = PDBParser(pdb_path).protein_atoms
+        coords = np.array([a.coords for a in atoms], dtype=np.float32)
+        radii = np.array([element_radius(a.element) for a in atoms], dtype=np.float32)
+        return coords, radii
+
+    @staticmethod
+    def _rotation(seed):
+        q, _ = np.linalg.qr(np.random.default_rng(seed).normal(size=(3, 3)))
+        if np.linalg.det(q) < 0:
+            q[:, 0] *= -1
+        return q.astype(np.float32)
+
+    def test_translation_changes_nothing(self, example_pdb):
+        """This one is exact and worth relying on."""
+        coords, radii = self._atoms(example_pdb)
+        here = shrake_rupley(coords, radii)
+        there = shrake_rupley(coords + np.float32([37.0, -12.0, 5.0]), radii)
+        assert np.array_equal(here, there)
+
+    def test_rotation_changes_the_answer(self, example_pdb):
+        """Not a guarantee -- a warning. If this ever starts passing as
+        invariant, the lattice has been made to follow the molecule and the
+        docstring in plmol/sasa.py needs its numbers redone."""
+        coords, radii = self._atoms(example_pdb)
+        areas = np.stack([shrake_rupley(coords @ self._rotation(s).T, radii)
+                          for s in range(3)])
+        spread = (areas.max(0) - areas.min(0)) / np.maximum(areas.mean(0), 1e-6)
+        assert spread.mean() > 0.1, "the documented sensitivity is gone; update the docs"
+        flipped = ((areas.min(0) == 0) & (areas.max(0) > 0)).sum()
+        assert flipped > 0, "atoms used to move between zero and non-zero"
+
+    def test_more_points_help_and_do_not_cure(self, example_pdb):
+        coords, radii = self._atoms(example_pdb)
+
+        def spread(n):
+            areas = np.stack([shrake_rupley(coords @ self._rotation(s).T, radii, n_points=n)
+                              for s in range(3)])
+            return float(((areas.max(0) - areas.min(0)) / np.maximum(areas.mean(0), 1e-6)).mean())
+
+        coarse, fine = spread(100), spread(1000)
+        assert fine < coarse, "ten times the samples should be quieter"
+        assert fine > 0.05, "and still not silent"
+
+    def test_the_polar_ratio_swings_end_to_end_on_a_buried_residue(self, example_pdb):
+        """polar / (polar + apolar + 1e-8) on a residue with no measurable
+        surface is 0.0 when nothing survives the occlusion test and 1.0 when
+        one polar sample point does. Which of those you get is decided by the
+        structure's orientation."""
+        from plmol import Protein, as_graph
+
+        import tempfile, os
+
+        def rotated(seed):
+            q = self._rotation(seed)
+            out = os.path.join(tempfile.mkdtemp(), "rot.pdb")
+            with open(out, "w") as handle:
+                for line in open(example_pdb):
+                    if line[:6].strip() in ("ATOM", "HETATM"):
+                        xyz = np.array([float(line[30:38]), float(line[38:46]), float(line[46:54])])
+                        x, y, z = q @ xyz
+                        line = line[:30] + f"{x:8.3f}{y:8.3f}{z:8.3f}" + line[54:]
+                    handle.write(line)
+            return out
+
+        ratios = np.stack([
+            np.asarray(as_graph(Protein.from_pdb(p).featurize(mode="graph")["graph"])
+                       ["node_features"])[:, 68]
+            for p in (example_pdb, rotated(0), rotated(1))
+        ])
+        swing = ratios.max(0) - ratios.min(0)
+        assert swing.max() > 0.9, "a residue swinging the full range is the point"

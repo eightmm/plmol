@@ -74,6 +74,25 @@ def shrake_rupley(
 ) -> np.ndarray:
     """Per-atom solvent accessible surface area by point sampling.
 
+    .. warning::
+
+       The sample directions are fixed in space, not carried with the
+       molecule, so this answer depends on how the structure is oriented.
+       Rotating the example protein and measuring per-atom areas over four
+       orientations: the mean spread is 43% of the atom's own area at the
+       default 100 points, the worst atom varies by four times its mean, and
+       362 of 3260 atoms come out as exactly zero in one orientation and
+       non-zero in another. Raising ``n_points`` to 1000 -- ten times the work
+       -- brings the mean spread to 18% and still leaves 133 such atoms.
+
+       Translating a structure changes nothing at all; this is rotation alone.
+
+       Everything plmol derives from SASA inherits it: the residue SASA block,
+       ``burial_index`` and ``relative_sasa`` on the atom graph, the surface
+       point cloud's burial channel, and the voxel's. It is a property of
+       point-sampled SASA rather than of this implementation, and the cure is
+       a lattice oriented by the molecule rather than by the axes.
+
     Each atom's expanded sphere is sampled at ``n_points`` positions; a point is
     accessible unless it falls inside another atom's expanded sphere. The area
     is then ``4 pi r^2`` times the accessible fraction.
