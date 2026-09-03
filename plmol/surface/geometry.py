@@ -47,7 +47,12 @@ def _pca_curvature_from_neighbours(
     centroid = neighbours.mean(axis=1, keepdims=True)  # (block, 1, 3)
     centered = neighbours - centroid                   # (block, K, 3)
 
-    # Covariance matrices: (block, 3, 3)
+    # Covariance matrices: (block, 3, 3). einsum, not a batched matmul, even
+    # though on the largest scale alone matmul is six times quicker (0.26 ms
+    # against 1.60 on a 1024-point block at k=80). Across the five scales k is
+    # 8 to 80, and BLAS loses its advantage on the small ones while paying to
+    # copy the transposed view; in the pool the surface mode went from 115 ms
+    # to 148, with OPENBLAS_NUM_THREADS=1 as well as without.
     covs = np.einsum('nki,nkj->nij', centered, centered) / k
 
     # Batch eigenvalues: (block, 3) ascending
@@ -128,6 +133,9 @@ def compute_pointcloud_geometry(
         # Blocks, not scales, are the unit of parallelism for the PCA: the
         # largest scale alone took as long as the other four together, so
         # splitting by scale left most workers idle.
+        # A fresh pool per call, not a module-level one: creating it and
+        # mapping 16 blocks costs 0.36 ms against the 53 ms this function
+        # takes, and a long-lived pool would outlive the caller.
         max_workers = min(len(blocks), (os.cpu_count() or 4))
         try:
             if max_workers > 1:
