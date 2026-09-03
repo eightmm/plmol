@@ -344,6 +344,7 @@ class Protein(BaseMolecule):
         surface_kwargs: Optional[Dict[str, Any]] = None,
         voxel_kwargs: Optional[Dict[str, Any]] = None,
         backbone_kwargs: Optional[Dict[str, Any]] = None,
+        cavity_kwargs: Optional[Dict[str, Any]] = None,
         embedding_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
@@ -442,7 +443,108 @@ class Protein(BaseMolecule):
             k = backbone_kwargs.get("k_neighbors", DEFAULT_BACKBONE_KNN_NEIGHBORS)
             results["backbone"] = featurizer.get_backbone(k_neighbors=k)
 
+        if "cavity" in modes:
+            results["cavity"] = self._standardize_cavities(
+                self._get_featurizer().get_cavities(**(cavity_kwargs or {}))
+            )
+
         return results
+
+    @staticmethod
+    def _standardize_cavities(cavities: list) -> Dict[str, Any]:
+        """Cavities as arrays, in the shape the other modes return.
+
+        One row per cavity, largest first, so a model can take the top ``k``
+        by slicing. The grid points stay a list because cavities differ in
+        size, and padding them to the largest would be mostly padding.
+        """
+        count = len(cavities)
+        return {
+            "num_cavities": count,
+            "center": np.array([c.center for c in cavities], dtype=np.float32).reshape(count, 3),
+            "volume": np.array([c.volume for c in cavities], dtype=np.float32),
+            "buriedness": np.array([c.buriedness for c in cavities], dtype=np.float32),
+            "extent": np.array([c.extent for c in cavities], dtype=np.float32).reshape(count, 3),
+            "num_lining_residues": np.array(
+                [len(c.lining_residues) for c in cavities], dtype=np.int64
+            ),
+            "points": [c.points for c in cavities],
+            "lining_atom_indices": [c.lining_atom_indices for c in cavities],
+            "lining_residues": [c.lining_residues for c in cavities],
+        }
+
+    def featurize_cavity(
+        self,
+        index: int = 0,
+        mode: Union[str, Iterable[str]] = "graph",
+        cavity_kwargs: Optional[Dict[str, Any]] = None,
+        graph_kwargs: Optional[Dict[str, Any]] = None,
+        surface_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Featurize the residues lining one detected cavity.
+
+        The sibling of :meth:`featurize_pocket` for a structure with nothing
+        bound: the cavity picks the residues instead of a ligand. Cavities are
+        ordered by volume, so ``index=0`` is the largest.
+
+        Args:
+            index: Which cavity, by rank. 0 is the largest.
+            mode: Same contract as :meth:`featurize`.
+            cavity_kwargs: Options for detection, see :func:`plmol.detect_cavities`.
+            graph_kwargs: Passed to the sub-structure's featurizer.
+            surface_kwargs: Passed to the sub-structure's featurizer.
+
+        Returns:
+            The same shape :meth:`featurize` returns, for the lining residues,
+            with a ``"cavity"`` entry describing the cavity itself.
+
+        Raises:
+            InputError: If there is no PDB path, no cavity at that rank, or the
+                cavity's residues are not in the file.
+        """
+        if self._pdb_path is None:
+            raise InputError("Protein has no PDB path. Initialize from PDB first.")
+
+        cavities = self._get_featurizer().get_cavities(**(cavity_kwargs or {}))
+        if not cavities:
+            raise InputError(
+                "No cavities were detected. Lower cavity_kwargs['psp_threshold'] "
+                "to include shallower sites."
+            )
+        if not 0 <= index < len(cavities):
+            raise InputError(
+                f"Cavity {index} was asked for but only {len(cavities)} were found."
+            )
+        cavity = cavities[index]
+
+        from ..interaction.pocket_extractor import PocketExtractor
+
+        pocket = PocketExtractor.from_protein(self._pdb_path).extract_for_residues(
+            cavity.lining_residues
+        )
+        if pocket.num_atoms == 0:
+            raise InputError(
+                "The cavity's lining residues are not present in the PDB file."
+            )
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".pdb", delete=False) as handle:
+            handle.write(Chem.MolToPDBBlock(pocket.pocket_mol))
+            path = handle.name
+        try:
+            sub = Protein.from_pdb(
+                path,
+                standardize=self._standardize,
+                keep_hydrogens=self._keep_hydrogens,
+            )
+            result = sub.featurize(
+                mode=mode, graph_kwargs=graph_kwargs, surface_kwargs=surface_kwargs
+            )
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+        result["cavity"] = self._standardize_cavities([cavity])
+        return result
 
     def featurize_pocket(
         self,

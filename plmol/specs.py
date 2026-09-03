@@ -35,10 +35,10 @@ PROTEIN_SPEC = FeatureSpec(
     name="protein",
     allowed_modes=(
         "graph", "atom_graph", "surface", "voxel", "sequence", "backbone",
-        "embedding", "all",
+        "cavity", "embedding", "all",
     ),
     default_modes=("graph", "sequence"),
-    output_keys=("graph", "surface", "voxel", "sequence", "backbone"),
+    output_keys=("graph", "surface", "voxel", "sequence", "backbone", "cavity"),
 )
 
 INTERACTION_SPEC = FeatureSpec(

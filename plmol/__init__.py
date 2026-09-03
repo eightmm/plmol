@@ -27,6 +27,7 @@ from .ligand.descriptors import MoleculeFeaturizer
 from .ligand.graph import MoleculeGraphFeaturizer
 from .base import BaseMolecule, TempFileOwner
 from .arrays import to_numpy, to_torch
+from .cavity import Cavity, detect_cavities, element_vdw_radii
 from .spatial import (
     SPATIAL_BACKENDS,
     NeighbourIndex,
@@ -92,6 +93,7 @@ __all__ = [
     "SASA_BACKENDS", "set_sasa_backend", "get_sasa_backend",
     "resolve_sasa_backend", "shrake_rupley",
     "to_torch", "to_numpy",
+    "Cavity", "detect_cavities", "element_vdw_radii",
     "SPATIAL_BACKENDS", "set_spatial_backend", "get_spatial_backend",
     "resolve_spatial_backend", "knn", "NeighbourIndex", "pairs_within",
     "NucleicAcid", "NucleicFeaturizer",

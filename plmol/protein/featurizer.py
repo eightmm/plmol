@@ -544,6 +544,34 @@ class ProteinFeaturizer:
             self._atom_featurizer_cache[pdb_to_use] = AtomFeaturizer()
         return self._atom_featurizer_cache[pdb_to_use]
 
+    def get_cavities(self, **kwargs):
+        """Cavities in this structure, largest first. See plmol.cavity.
+
+        The atoms are the parsed protein ones, so the cavities are lined by
+        residues this featurizer can also describe.
+        """
+        cache_key = ("cavities", tuple(sorted(kwargs.items())))
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        from ..cavity import detect_cavities, element_vdw_radii
+
+        pdb_to_use = self.tmp_pdb if self.tmp_pdb else self.input_file
+        atoms = PDBParser(pdb_to_use).protein_atoms
+        if not atoms:
+            self._cache[cache_key] = []
+            return []
+
+        coords = np.array([atom.coords for atom in atoms], dtype=FLOAT)
+        result = detect_cavities(
+            coords,
+            element_vdw_radii([atom.element for atom in atoms]),
+            residues=[(a.chain_id, a.res_num, a.res_name) for a in atoms],
+            **kwargs,
+        )
+        self._cache[cache_key] = result
+        return result
+
     def get_atom_graph(self, distance_cutoff: float = 4.0,
                        knn_cutoff: Optional[int] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """

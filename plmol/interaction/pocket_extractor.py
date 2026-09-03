@@ -5,7 +5,7 @@ Extracts binding pocket from protein based on ligand proximity.
 Uses fast PDB line-based parsing with vectorized distance calculation.
 """
 
-from typing import Dict, List, Tuple, Optional, Union
+from typing import Sequence, Dict, List, Tuple, Optional, Union
 from dataclasses import dataclass
 import numpy as np
 from rdkit import Chem
@@ -401,6 +401,32 @@ class PocketExtractor:
 
         # Apply cutoff
         return min_dist_per_res < distance_cutoff
+
+    def extract_for_residues(
+        self,
+        residues: Sequence[Tuple[str, int]],
+    ) -> PocketInfo:
+        """The pocket made of the named residues, whatever picked them out.
+
+        ``extract_for_ligand`` picks residues by distance to a ligand; a cavity
+        picks them by lining an enclosed space. Both end up here, so both
+        produce the same PocketInfo.
+
+        Args:
+            residues: ``(chain, residue number)`` pairs. Residue names are not
+                compared, so a standardized structure can select residues in
+                the original file.
+
+        Returns:
+            PocketInfo for those residues; empty when none of them match.
+        """
+        wanted = {(str(chain), int(number)) for chain, number, *_ in residues}
+        mask = np.array(
+            [(str(chain), int(number)) in wanted
+             for chain, number, _ in self._residue_keys],
+            dtype=bool,
+        )
+        return self._extract_pocket_from_mask(mask, distance_cutoff=0.0)
 
     def _extract_pocket_from_mask(
         self,
