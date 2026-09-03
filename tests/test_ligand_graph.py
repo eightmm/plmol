@@ -49,7 +49,7 @@ class TestAtomFeatures:
         feats, coords = graph_featurizer.get_atom_features(aspirin_mol)
         n = aspirin_mol.GetNumAtoms()
         assert feats.shape[0] == n
-        assert feats.shape[1] == 98  # 98-dim node features
+        assert feats.shape[1] == 94  # 94-dim node features
 
     def test_coords_shape(self, graph_featurizer, aspirin_mol):
         feats, coords = graph_featurizer.get_atom_features(aspirin_mol)
@@ -94,7 +94,7 @@ class TestPhysicalProperties:
     def test_shape(self, graph_featurizer, ethanol_mol):
         props = graph_featurizer.get_physical_properties(ethanol_mol)
         assert props.shape[0] == ethanol_mol.GetNumAtoms()
-        assert props.shape[1] == 6
+        assert props.shape[1] == 4
 
 
 class TestTopologicalFeatures:

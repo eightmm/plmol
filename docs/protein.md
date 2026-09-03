@@ -25,7 +25,7 @@ protein = Protein.from_structure("protein.cif", chain_id="A")
 
 ## SASA
 
-SASA feeds the residue 12-dim block, the atom graph's `burial_index`, `sasa`,
+SASA feeds the residue 7-dim block, the atom graph's `burial_index`, `sasa`,
 `relative_sasa` and `is_polar_sasa`, the surface burial channel and voxel
 channel 15.
 
@@ -150,7 +150,7 @@ graph = result["graph"]
 
 | Key | Shape | Type | Description |
 |-----|-------|------|-------------|
-| `node_features` | tuple of 8 | array | Residue scalar features (total 83-dim) |
+| `node_features` | tuple of 8 | array | Residue scalar features (total 78-dim) |
 | `node_vector_features` | tuple of 3 | array | Residue vector features (total 31 vectors x 3) |
 | `edge_index` | `(2, E)` | `int64` | Sparse edge pairs (source, target) |
 | `edge_features` | tuple of 2 | array | Edge scalar features (total 39-dim) |
@@ -162,7 +162,7 @@ graph = result["graph"]
 
 Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA, SC-SC, CA-SC, SC-CA) < `distance_cutoff`. When `knn_cutoff` is set, kNN edges (based on minimum of 4 distance matrices) are unioned with distance edges.
 
-### Node Scalar Features `(L, 83)` -- tuple of 8 arrays
+### Node Scalar Features `(L, 78)` -- tuple of 8 arrays
 
 | Index | Array | Dim | Features |
 |-------|--------|-----|----------|
@@ -171,9 +171,9 @@ Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA,
 | `[23:33]` | self_distance | 10 | Intra-residue pairwise distances among N, CA, C, O, SC (upper triangle) |
 | `[33:53]` | degree_feature | 20 | cos/sin of 10 angles: phi, psi, omega, chi1-chi5, backbone_curvature, backbone_torsion |
 | `[53:58]` | has_chi_angles | 5 | Binary flags: has chi1, chi2, chi3, chi4, chi5 |
-| `[58:70]` | sasa | 12 | SASA: total, polar, apolar, mainchain, sidechain (abs/RESIDUE_MAX_SASA + relative), burial_index (1.0 - relativeTotal), polar_apolar_ratio |
-| `[70:78]` | rf_distance | 8 | Forward/reverse neighbor distances: fwd(CA-CA, SC-SC, CA-SC, SC-CA) + rev(same) |
-| `[78:83]` | physicochemical | 5 | Residue properties: hydrophobicity (Kyte-Doolittle), volume (Zamyatnin), charge, flexibility, polarity |
+| `[58:65]` | sasa | 7 | SASA over `RESIDUE_MAX_SASA`: total, polar, apolar, mainchain, sidechain, burial_index (1.0 - total), polar_apolar_ratio |
+| `[65:73]` | rf_distance | 8 | Forward/reverse neighbor distances: fwd(CA-CA, SC-SC, CA-SC, SC-CA) + rev(same) |
+| `[73:78]` | physicochemical | 5 | Residue properties: hydrophobicity (Kyte-Doolittle), volume (Zamyatnin), charge, flexibility, polarity |
 
 ### Node Vector Features `(L, 31, 3)` -- tuple of 3 arrays
 

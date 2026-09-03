@@ -48,7 +48,7 @@ def test_edge_count_follows_line_graph_identity():
         bg = bond_graph(smiles)
         assert bg["num_bond_edges"] == expected_edge_count(bg["atom_to_bonds"])
         assert bg["edge_index"].shape == (2, bg["num_bond_edges"])
-        assert bg["edge_features"].shape == (bg["num_bond_edges"], 100)
+        assert bg["edge_features"].shape == (bg["num_bond_edges"], 96)
         assert bg["edge_shared_atom"].shape == (bg["num_bond_edges"],)
 
 
@@ -66,7 +66,7 @@ def test_single_bond_molecule_has_no_edges():
     assert bg["num_bonds"] == 1
     assert bg["num_bond_edges"] == 0
     assert bg["edge_index"].shape == (2, 0)
-    assert bg["edge_features"].shape == (0, 100)
+    assert bg["edge_features"].shape == (0, 96)
 
 
 @pytest.mark.parametrize("smiles", ["C", "[Na+]", "O"])
@@ -76,7 +76,7 @@ def test_bondless_molecule_yields_empty_graph(smiles):
     assert bg["num_bond_edges"] == 0
     assert bg["node_features"].shape == (0, len(BOND_VIEW_CHANNELS))
     assert bg["edge_index"].shape == (2, 0)
-    assert bg["edge_features"].shape == (0, 100)
+    assert bg["edge_features"].shape == (0, 96)
     assert bg["coords"].shape == (0, 3)
     assert bg["adjacency"].shape == (0, 0)
 
@@ -104,7 +104,7 @@ def test_edge_features_start_with_shared_atom_features(example_sdf):
     graph = lig.featurize(mode="graph")["graph"]
     bg = lig.featurize(mode="bond_graph")["bond_graph"]
     shared = bg["edge_shared_atom"]
-    assert np.array_equal(bg["edge_features"][:, :98], graph["node_features"][shared])
+    assert np.array_equal(bg["edge_features"][:, :94], graph["node_features"][shared])
 
 
 def test_bond_coords_are_midpoints(example_sdf):
@@ -149,8 +149,8 @@ def test_atom_to_bonds_is_the_inverse_of_bond_index():
 
 def test_angles_are_in_range_with_3d(example_sdf):
     bg = Ligand.from_sdf(example_sdf).featurize(mode="bond_graph")["bond_graph"]
-    cos_theta = bg["edge_features"][:, 98]
-    theta = bg["edge_features"][:, 99]
+    cos_theta = bg["edge_features"][:, 94]
+    theta = bg["edge_features"][:, 95]
     assert np.all(cos_theta >= -1.0) and np.all(cos_theta <= 1.0)
     assert np.all(theta >= 0.0) and np.all(theta <= 1.0)
     assert np.allclose(np.arccos(np.clip(cos_theta, -1, 1)) / np.pi, theta, atol=1e-5)
@@ -161,7 +161,7 @@ def test_angles_are_in_range_with_3d(example_sdf):
 def test_angles_are_computed_from_a_generated_conformer():
     """SMILES input gets a conformer by default, so angles are real."""
     bg = bond_graph("CCC")
-    cos_theta = bg["edge_features"][:, 98]
+    cos_theta = bg["edge_features"][:, 94]
     assert np.abs(cos_theta).max() > 0.0
 
 
@@ -170,7 +170,7 @@ def test_angles_are_zero_without_conformer():
         mode="bond_graph", graph_kwargs={"generate_conformer": False}
     )["bond_graph"]
     assert not bg["coords"].any()
-    assert np.allclose(bg["edge_features"][:, 98:], 0.0)
+    assert np.allclose(bg["edge_features"][:, 94:], 0.0)
 
 
 # -- API surface -------------------------------------------------------------

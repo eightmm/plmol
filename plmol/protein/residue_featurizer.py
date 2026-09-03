@@ -291,14 +291,21 @@ class ResidueFeaturizer:
         Calculate Solvent Accessible Surface Area (SASA) for each residue.
 
         Returns:
-            SASA features tensor of shape [num_residues, 12] with:
-                - total/max_sasa, polar/max_sasa, apolar/max_sasa, mainChain/max_sasa, sideChain/max_sasa
-                - relativeTotal, relativePolar, relativeApolar, relativeMainChain, relativeSideChain
-                - burial_index (1.0 - relativeTotal)
-                - polar_apolar_ratio (polar / (polar + apolar + 1e-8))
+            SASA features array of shape [num_residues, 7]:
+                - total, polar, apolar, mainChain, sideChain, each over
+                  RESIDUE_MAX_SASA for the residue
+                - burial_index (1.0 - total/max_sasa)
+                - polar_apolar_ratio (polar / (polar + apolar))
+
+            Until 0.4.0 there were 12, the extra five being relativeTotal,
+            relativePolar, relativeApolar, relativeMainChain and
+            relativeSideChain. freesasa normalised each of those by its own
+            per-class reference, so they said something the first five did not;
+            plmol normalises everything by the residue's total, which made them
+            bit-identical duplicates of columns 0 to 4.
         """
         num_residues = len(self.get_residues())
-        sasa_dim = 12  # Number of SASA features per residue
+        sasa_dim = 7  # Number of SASA features per residue
 
 
         # Build reverse mapping: res_type_int -> 3-letter code for RESIDUE_MAX_SASA lookup
@@ -332,11 +339,6 @@ class ResidueFeaturizer:
                         values.apolar / max_sasa,
                         values.mainChain / max_sasa,
                         values.sideChain / max_sasa,
-                        values.relativeTotal,
-                        values.relativePolar,
-                        values.relativeApolar,
-                        values.relativeMainChain,
-                        values.relativeSideChain,
                         burial_index,
                         polar_apolar_ratio,
                     ])

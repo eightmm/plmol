@@ -230,7 +230,7 @@ def test_recorded_protein_dims_match_reality(protein_views, mode):
 def test_feature_dims_returns_a_copy():
     dims = feature_dims("ligand", "graph")
     dims["node_features"] = 0
-    assert feature_dims("ligand", "graph")["node_features"] == 98
+    assert feature_dims("ligand", "graph")["node_features"] == 94
 
 
 def test_feature_dims_rejects_unknown_keys():

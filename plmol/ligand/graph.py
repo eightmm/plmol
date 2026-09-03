@@ -33,7 +33,7 @@ class MoleculeGraphFeaturizer(AtomFeatureMixin, EdgeFeatureMixin):
     This class provides methods to convert molecules into graph representations
     suitable for Graph Neural Networks (GNNs).
 
-    Node Features (98 dimensions):
+    Node Features (94 dimensions):
         - Atom identity (symbol one-hot)
         - Period/group one-hot and electronegativity
         - Formal charge (scalar + compact one-hot)
@@ -161,7 +161,7 @@ class MoleculeGraphFeaturizer(AtomFeatureMixin, EdgeFeatureMixin):
 
         Returns:
             Tuple of (node_dict, edge_dict, adjacency_matrix):
-            - node_dict: {'node_feats': [N, 98], 'coords': [N, 3]}
+            - node_dict: {'node_feats': [N, 94], 'coords': [N, 3]}
             - edge_dict: {
                 'bond_edges': [2, Eb], 'bond_edge_feats': [Eb, ~27],
                 'dist_edges': [2, Ed], 'dist_edge_feats': [Ed, 1]

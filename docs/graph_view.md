@@ -16,8 +16,8 @@ beside wildly different node and edge conventions:
 |------|-------|---------------|---------------|
 | protein `graph` (residue) | `edge_index` | tuple of 2 arrays + vector tuple | tuple of 8 arrays |
 | protein `atom_graph` | `edge_index` | none — 4 loose per-edge arrays | `(N,)` token ids |
-| ligand `graph` | none — dense `(N, N, 37)` `adjacency` | in the adjacency | `(N, 98)` |
-| ligand `bond_graph` | `edge_index` | `(E, 100)` | `(B, 29)` |
+| ligand `graph` | none — dense `(N, N, 37)` `adjacency` | in the adjacency | `(N, 94)` |
+| ligand `bond_graph` | `edge_index` | `(E, 96)` | `(B, 29)` |
 | ligand `fragment_graph` | `edge_index` | `(E, 31)` | `(F, 62)` |
 | nucleic `graph` | `edge_index` | `(E, 3)` `edge_attr` | 9 loose per-nucleotide arrays |
 | nucleic `atom_graph` | `edge_index` | `(E,)` `edge_distances` | token ids only |
@@ -118,18 +118,18 @@ Answers the `in_channels` question in code instead of in documentation.
 
 ```python
 dims = feature_dims("ligand", "graph")
-# {"node_features": 98, "edge_features": 29}
+# {"node_features": 94, "edge_features": 29}
 
 model = MyGNN(in_channels=dims["node_features"], edge_dim=dims["edge_features"])
 ```
 
 | Molecule | Mode | Dimensions |
 |----------|------|-----------|
-| `ligand` | `graph` | node 98, edge 29 |
-| `ligand` | `bond_graph` | node 29, edge 100 |
+| `ligand` | `graph` | node 94, edge 29 |
+| `ligand` | `bond_graph` | node 29, edge 96 |
 | `ligand` | `fragment_graph` | node 62, edge 31 |
 | `ligand` | `descriptor` | descriptors 62 |
-| `protein` | `graph` | node 83, node_vector 31, edge 39, edge_vector 8 |
+| `protein` | `graph` | node 78, node_vector 31, edge 39, edge_vector 8 |
 | `protein` | `atom_graph` | node 10, node_tokens 3, edge 6 |
 | `nucleic_acid` | `graph` | node 23, node_tokens 1, edge 3 |
 | `nucleic_acid` | `atom_graph` | node 0 (token-only: use `node_tokens`), node_tokens 1, edge 1 |

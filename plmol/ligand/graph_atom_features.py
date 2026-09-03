@@ -162,7 +162,14 @@ class AtomFeatureMixin:
 
     def get_stereochemistry_features(self, mol) -> np.ndarray:
         """
-        Extract stereochemistry features for all atoms (8 dimensions per atom).
+        Extract stereochemistry features for all atoms (6 dimensions per atom).
+
+        Until 0.4.0 there were 8. The dropped two repeated channels the vector
+        already carried, bit for bit on every atom of 29 molecules covering B,
+        Se, P, S, halogens, charges and stereocentres: is_aromatic was the
+        aromatic flag at [34], and is_SP was the SP column of the hybridization
+        one-hot at [28]. is_SP2 stays, because the branch below only reaches it
+        for a non-aromatic atom and that is not what [29] says.
 
         Features:
             - Chiral tag (CW, CCW, unspecified)
@@ -171,7 +178,7 @@ class AtomFeatureMixin:
             - Aromatic / SP2 / SP
         """
         num_atoms = mol.GetNumAtoms()
-        features = np.zeros((num_atoms, 8), dtype=FLOAT)
+        features = np.zeros((num_atoms, 6), dtype=FLOAT)
 
         for atom in mol.GetAtoms():
             idx = atom.GetIdx()
@@ -196,13 +203,12 @@ class AtomFeatureMixin:
                     features[idx, 4] = 1.0
                     break
 
-            # Hybridization-based features
+            # SP2 only when the atom is not aromatic, which is what makes this
+            # column say something the hybridization one-hot does not.
             if atom.GetIsAromatic():
-                features[idx, 5] = 1.0
+                pass
             elif atom.GetHybridization() == Chem.rdchem.HybridizationType.SP2:
-                features[idx, 6] = 1.0
-            elif atom.GetHybridization() == Chem.rdchem.HybridizationType.SP:
-                features[idx, 7] = 1.0
+                features[idx, 5] = 1.0
 
         return features
 
@@ -320,49 +326,44 @@ class AtomFeatureMixin:
 
     def get_physical_properties(self, mol) -> np.ndarray:
         """
-        Compute physical property features (6 dimensions per atom).
+        Compute physical property features (4 dimensions per atom).
+
+        Until 0.4.0 there were 6, starting with atomic mass and van der Waals
+        radius. Both were bit-identical to the atom-property channels at [49]
+        and [50].
 
         Features:
-            - Atomic mass
-            - Van der Waals radius
             - Covalent radius
             - Ionization energy
             - Polarizability
             - Lone pairs
         """
         num_atoms = mol.GetNumAtoms()
-        features = np.zeros((num_atoms, 6), dtype=FLOAT)
+        features = np.zeros((num_atoms, 4), dtype=FLOAT)
         norm = NORM_CONSTANTS
 
         for atom in mol.GetAtoms():
             idx = atom.GetIdx()
             anum = atom.GetAtomicNum()
 
-            # Atomic mass
-            features[idx, 0] = min(atom.GetMass() / norm['atomic_mass'], 1.0)
-
-            # Van der Waals radius
-            vdw = VDW_RADIUS.get(anum, DEFAULT_VDW_RADIUS)
-            features[idx, 1] = (vdw - norm['vdw_radius_min']) / norm['vdw_radius_range']
-
             # Covalent radius
             cov = COVALENT_RADIUS.get(anum, DEFAULT_COVALENT_RADIUS)
-            features[idx, 2] = cov / norm['covalent_radius']
+            features[idx, 0] = cov / norm['covalent_radius']
 
             # Ionization energy
             ie = IONIZATION_ENERGY.get(anum, DEFAULT_IONIZATION_ENERGY)
-            features[idx, 3] = (ie - norm['ionization_energy_min']) / norm['ionization_energy_range']
+            features[idx, 1] = (ie - norm['ionization_energy_min']) / norm['ionization_energy_range']
 
             # Polarizability (log scale)
             pol = POLARIZABILITY.get(anum, DEFAULT_POLARIZABILITY)
-            features[idx, 4] = min(np.log1p(pol) / norm['polarizability_log_scale'], 1.0)
+            features[idx, 2] = min(np.log1p(pol) / norm['polarizability_log_scale'], 1.0)
 
             # Lone pairs
             valence_e = VALENCE_ELECTRONS.get(anum, DEFAULT_VALENCE_ELECTRONS)
             bonds = sum(int(b.GetBondTypeAsDouble()) for b in atom.GetBonds())
             num_h = atom.GetTotalNumHs()
             lone_pairs = max(0, (valence_e - bonds - num_h) / 2.0)
-            features[idx, 5] = min(lone_pairs / norm['lone_pairs'], 1.0)
+            features[idx, 3] = min(lone_pairs / norm['lone_pairs'], 1.0)
 
         return features
 
@@ -682,7 +683,7 @@ class AtomFeatureMixin:
 
         Returns:
             Tuple of (node_features, coordinates)
-            - node_features: [num_atoms, 98]
+            - node_features: [num_atoms, 94]
             - coordinates: [num_atoms, 3]
         """
         norm = NORM_CONSTANTS

@@ -119,7 +119,7 @@ class TestFeaturesAreReal:
 
     def test_residue_sasa_is_not_zeros(self, example_pdb):
         graph = Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]
-        block = [t for t in graph["node_features"] if t.shape[-1] == 12][0]
+        block = [t for t in graph["node_features"] if t.shape[-1] == 7][0]
         assert np.abs(block).sum() > 0
         assert block.std() > 0.01
 
@@ -130,12 +130,36 @@ class TestFeaturesAreReal:
         assert burial.std() > 0.01
 
 
+class TestTheBlockCarriesWhatItClaims:
+    """It was 12 columns holding four dimensions until 0.4.0: five of them were
+    bit-identical to five others, because plmol normalises every class by the
+    residue's total where freesasa used a separate reference for each."""
+
+    def test_no_column_repeats_another(self, example_pdb):
+        block = [t for t in
+                 Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]["node_features"]
+                 if t.shape[-1] == 7][0]
+        for left in range(block.shape[1]):
+            for right in range(left + 1, block.shape[1]):
+                assert not np.array_equal(block[:, left], block[:, right]), (left, right)
+
+    def test_the_named_columns_are_where_they_say(self, example_pdb):
+        block = [t for t in
+                 Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]["node_features"]
+                 if t.shape[-1] == 7][0]
+        total, polar, apolar, main, side, burial, ratio = block.T
+        assert np.allclose(total, polar + apolar, atol=1e-6)
+        assert np.allclose(total, main + side, atol=1e-6)
+        assert np.allclose(burial, 1.0 - total, atol=1e-6)
+        assert np.allclose(ratio, polar / (polar + apolar + 1e-8), atol=1e-5)
+
+
 class TestResidueBurialIndexIsInformative:
     """Guards the scale fix: relativeTotal is a fraction, not a percentage."""
 
     def test_burial_column_spans_a_real_range(self, example_pdb):
         graph = Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]
-        burial = [t for t in graph["node_features"] if t.shape[-1] == 12][0][:, 10]
+        burial = [t for t in graph["node_features"] if t.shape[-1] == 7][0][:, 5]
         assert burial.std() > 0.1, "a near-constant column means the /100 bug is back"
         assert burial.max() > 0.9 and burial.min() < 0.5
 
@@ -150,7 +174,7 @@ class TestEveryModeProducesSasa:
 
     def test_residue_graph(self, example_pdb):
         graph = Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]
-        block = [t for t in graph["node_features"] if t.shape[-1] == 12][0]
+        block = [t for t in graph["node_features"] if t.shape[-1] == 7][0]
         assert block.shape[0] > 0 and np.abs(block).sum() > 0
 
     def test_atom_graph_keeps_every_atom(self, example_pdb):

@@ -128,7 +128,7 @@ plmol/
 
 - **`MoleculeFeaturizer`** — Ligand descriptors (62-dim) + fingerprints (ECFP, MACCS, RDKit, ERG).
 
-- **`MoleculeGraphFeaturizer`** — Ligand graph with dense adjacency `(N, N, 37)` + atom features `(N, 98)` + atom-to-fragment mappings.
+- **`MoleculeGraphFeaturizer`** — Ligand graph with dense adjacency `(N, N, 37)` + atom features `(N, 94)` + atom-to-fragment mappings.
 
 - **`HierarchicalFeaturizer`** — Multi-level protein features (residue + atom + interaction layers). Returns `HierarchicalProteinData`.
 

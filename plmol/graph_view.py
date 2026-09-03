@@ -372,8 +372,8 @@ def _check_widths(graphs: List[Dict[str, Any]]) -> None:
 #: hardcoding; a test asserts these against real featurization output.
 FEATURE_DIMS: Dict[str, Dict[str, Dict[str, int]]] = {
     "ligand": {
-        "graph": {"node_features": 98, "edge_features": 29},
-        "bond_graph": {"node_features": 29, "edge_features": 100},
+        "graph": {"node_features": 94, "edge_features": 29},
+        "bond_graph": {"node_features": 29, "edge_features": 96},
         "fragment_graph": {"node_features": 62, "edge_features": 31},
         "descriptor": {"descriptors": 62},
     },
@@ -383,7 +383,7 @@ FEATURE_DIMS: Dict[str, Dict[str, Dict[str, int]]] = {
     },
     "protein": {
         "graph": {
-            "node_features": 83,
+            "node_features": 78,
             "node_vector_features": 31,
             "edge_features": 39,
             "edge_vector_features": 8,
@@ -402,7 +402,7 @@ def feature_dims(molecule: str, mode: str) -> Dict[str, int]:
 
     Returns:
         Mapping of canonical key to its width, e.g.
-        ``{"node_features": 98, "edge_features": 37}``. Vector entries give the
+        ``{"node_features": 94, "edge_features": 37}``. Vector entries give the
         number of vectors, each of which is 3-dimensional.
 
     Raises:

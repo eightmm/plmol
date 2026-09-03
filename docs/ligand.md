@@ -84,7 +84,7 @@ graph = result["graph"]
 
 | Key | Shape | Type | Description |
 |-----|-------|------|-------------|
-| `node_features` | `(N, 98)` | `float32` | Per-atom feature vector |
+| `node_features` | `(N, 94)` | `float32` | Per-atom feature vector |
 | `adjacency` | `(N, N, 37)` | `float32` | Dense adjacency (bond + pair channels) |
 | `bond_mask` | `(N, N)` | `bool` | True where chemical bond exists |
 | `distance_matrix` | `(N, N)` | `float32` | Euclidean distance (0 if no 3D) |
@@ -114,7 +114,7 @@ The graph featurizer is split across three files:
 
 The public API is unchanged: `MoleculeGraphFeaturizer.featurize(mol)` returns `(node_dict, edge_dict, adjacency_matrix)`.
 
-### Node Features `(N, 98)`
+### Node Features `(N, 94)`
 
 | Index | Group | Dim | Features |
 |-------|-------|-----|----------|
@@ -125,41 +125,41 @@ The public API is unchanged: `MoleculeGraphFeaturizer.featurize(mol)` returns `(
 | `[37:42]` | Total Hs | 5 | One-hot: 0, 1, 2, 3, 4 |
 | `[42:49]` | Degree | 7 | One-hot: 0, 1, 2, 3, 4, 5, 6 |
 | `[49:52]` | Atom properties | 3 | mass, vdw_radius, electronegativity (normalized) |
-| `[52:60]` | Stereochemistry | 8 | chiral_CW, chiral_CCW, chiral_unspec, potential_chiral, has_stereo_bond, is_aromatic, is_SP2, is_SP |
-| `[60:62]` | Partial charges | 2 | Gasteiger charge (shifted), abs_charge |
-| `[62:68]` | Physical properties | 6 | mass, vdw_radius, covalent_radius, ionization_energy, polarizability, lone_pairs |
-| `[68:73]` | Topological | 5 | eccentricity, closeness_centrality, betweenness_centrality, dist_to_heteroatom, dist_to_ring |
-| `[73:78]` | SMARTS patterns | 5 | h_acceptor, h_donor, hydrophobic, positive, negative |
-| `[78:94]` | Extended neighborhood | 16 | 1-hop and 2-hop neighborhood statistics (8 features each) |
-| `[94:96]` | Crippen contributions | 2 | Per-atom logP, molar refractivity (Wildman-Crippen) |
-| `[96:97]` | TPSA contribution | 1 | Per-atom topological polar surface area |
-| `[97:98]` | Labute ASA | 1 | Per-atom approximate surface area (Labute) |
+| `[52:58]` | Stereochemistry | 6 | chiral_CW, chiral_CCW, chiral_unspec, potential_chiral, has_stereo_bond, is_SP2 |
+| `[58:60]` | Partial charges | 2 | Gasteiger charge (shifted), abs_charge |
+| `[60:64]` | Physical properties | 4 | covalent_radius, ionization_energy, polarizability, lone_pairs |
+| `[64:69]` | Topological | 5 | eccentricity, closeness_centrality, betweenness_centrality, dist_to_heteroatom, dist_to_ring |
+| `[69:74]` | SMARTS patterns | 5 | h_acceptor, h_donor, hydrophobic, positive, negative |
+| `[74:90]` | Extended neighborhood | 16 | 1-hop and 2-hop neighborhood statistics (8 features each) |
+| `[90:92]` | Crippen contributions | 2 | Per-atom logP, molar refractivity (Wildman-Crippen) |
+| `[92:93]` | TPSA contribution | 1 | Per-atom topological polar surface area |
+| `[93:94]` | Labute ASA | 1 | Per-atom approximate surface area (Labute) |
 
-**Known duplicates.** Four channels repeat a value that is already in the
-vector. Measured identical on every atom of 29 molecules covering B, Se, P, S,
-halogens, charges and stereocentres (maximum difference 0):
+**Four duplicate channels were removed in 0.4.0**, taking the vector from 98
+to 94. Each repeated a value already present, bit for bit on every atom of 29
+molecules covering B, Se, P, S, halogens, charges and stereocentres:
 
-| Duplicate | Identical to |
-|-----------|--------------|
-| `[57]` `is_aromatic` (Stereochemistry) | `[34]` `is_aromatic` (Flags) |
-| `[59]` `is_SP` (Stereochemistry) | `[28]` `SP` (Hybridization) |
-| `[62]` `mass` (Physical) | `[49]` `mass` (Atom properties) |
-| `[63]` `vdw_radius` (Physical) | `[50]` `vdw_radius` (Atom properties) |
+| Removed | Was identical to |
+|---------|------------------|
+| `is_aromatic` (Stereochemistry) | `[34]` `is_aromatic` (Flags) |
+| `is_SP` (Stereochemistry) | `[28]` `SP` (Hybridization) |
+| `mass` (Physical) | `[49]` `mass` (Atom properties) |
+| `vdw_radius` (Physical) | `[50]` `vdw_radius` (Atom properties) |
 
-`[58] is_SP2` is **not** a duplicate of `[29] SP2`; the two disagree on some
-atoms.
+`is_SP2` stayed. Its branch is only reached for a non-aromatic atom, so it says
+something `[29] SP2` does not. The 94 surviving channels hold exactly the
+values they held at 98.
 
-**Element lookups.** `[49:52]` and `[62:67]` -- mass, vdw radius,
+The bond graph's edge features carry the shared atom's vector, so they went
+from 100 to 96 with it.
+
+**Element lookups.** `[49:52]` and `[60:63]` -- mass, vdw radius,
 electronegativity, covalent radius, ionisation energy, polarisability -- are
 determined entirely by the element, which the 22-dim atom-type one-hot at
 `[0:22]` already encodes. A linear layer on that one-hot reproduces them
 exactly. They are kept because they are free to compute and convenient for
-models that do not embed the one-hot. `[67] lone_pairs` does vary within an
+models that do not embed the one-hot. `[63] lone_pairs` does vary within an
 element.
-
-Removing the four duplicates would change `node_features` from 98 to 94 and
-re-index every row above, so it is deferred to a major release rather than done
-silently.
 
 
 ### Adjacency Channels `(N, N, 37)`
@@ -205,7 +205,7 @@ dense adjacency rather than recomputed, so the two views always agree.
 |-----|-------|------|-------------|
 | `node_features` | `(B, 29)` | `float32` | Per-bond features: the informative channels of `adjacency[begin, end]` (see [Bond view channels](#bond-view-channels)) |
 | `edge_index` | `(2, E)` | `int64` | Bond pairs sharing an atom, both directions |
-| `edge_features` | `(E, 100)` | `float32` | Shared atom's 98-dim features + `[cos(theta), theta/pi]` |
+| `edge_features` | `(E, 96)` | `float32` | Shared atom's 94-dim features + `[cos(theta), theta/pi]` |
 | `edge_shared_atom` | `(E,)` | `int64` | Atom index bridging each edge |
 | `bond_index` | `(B, 2)` | `int64` | Atom pair each bond node came from |
 | `atom_to_bonds` | `List[List[int]]` | — | Atom → incident bond indices (reverse of `bond_index`) |
@@ -249,7 +249,7 @@ BOND_VIEW_DROPPED_CHANNELS  # (27, 28, 29, 30, 31, 32, 33, 35)
 
 ### Angle Features
 
-`edge_features[:, 98:]` holds the angle the two bonds subtend at the shared atom:
+`edge_features[:, 94:]` holds the angle the two bonds subtend at the shared atom:
 `cos(theta)` in `[-1, 1]` and `theta / pi` in `[0, 1]`. Both are zero when the
 molecule has no 3D conformer — SMILES input generates one by default, so pass
 `graph_kwargs={"generate_conformer": False}` to opt out.
@@ -520,7 +520,7 @@ fragment_features (F, 62)         <- per-fragment descriptors   | fragment_graph
 fragment_adjacency (F, F)         <- fragment connectivity      |
     ^ aggregate via fragment_atom_indices
     v lookup via atom_to_fragment
-node_features (N, 98)             <- per-atom features          | graph mode
+node_features (N, 94)             <- per-atom features          | graph mode
 adjacency (N, N, 37)              <- atom connectivity          |
     ^ lookup via bond_index
     v lookup via atom_to_bonds
