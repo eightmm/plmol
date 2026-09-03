@@ -268,3 +268,26 @@ class TestHierarchicalWithoutEsm:
         assert data.esmc_embeddings.shape == (data.num_residues, 8)
         assert data.esm3_embeddings is None
         assert data.has_esm is True
+
+    def test_embeddings_are_numpy_like_every_other_feature(self, fake_models, example_pdb):
+        """The models are torch models; what comes out of them is not."""
+        from plmol import HierarchicalFeaturizer
+
+        data = HierarchicalFeaturizer(esmc_model="fake-8", esm3_model=None).featurize(example_pdb)
+        for name in ("esmc_embeddings", "esmc_bos", "esmc_eos"):
+            value = getattr(data, name)
+            assert isinstance(value, np.ndarray), name
+            assert value.dtype == np.float32, name
+
+    def test_to_moves_the_whole_container_including_embeddings(self, fake_models, example_pdb):
+        torch = pytest.importorskip("torch")
+        from plmol import HierarchicalFeaturizer
+
+        data = HierarchicalFeaturizer(esmc_model="fake-8", esm3_model=None).featurize(example_pdb)
+        moved = data.to()
+        assert isinstance(moved.residue_features, torch.Tensor)
+        assert isinstance(moved.esmc_embeddings, torch.Tensor)
+        assert moved.esmc_embeddings.dtype == torch.float32
+        # Fields that were never set stay unset rather than becoming empty tensors.
+        assert moved.esm3_embeddings is None
+        assert np.array_equal(moved.residue_features.numpy(), data.residue_features)
