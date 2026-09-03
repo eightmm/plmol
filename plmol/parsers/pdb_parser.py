@@ -273,9 +273,6 @@ def is_protein_atom(atom: ParsedAtom, include_nucleic_acids: bool = False) -> bo
     if atom.atom_name == 'OXT':
         return False
 
-    if atom.res_name in ['LLP', 'PTR']:
-        return False
-
     if not include_nucleic_acids and atom.res_name in NUCLEIC_ACID_RESIDUES:
         return False
 

@@ -140,6 +140,81 @@ class TestElementWithoutTheColumn:
         assert parse_pdb_line(written).element == element
 
 
+class TestModifiedResiduesStayInTheChain:
+    """A residue plmol cannot fully describe is still a residue.
+
+    LLP and PTR were deleted from protein_atoms by name, in five places, while
+    RESIDUE_NAME_MAPPING said PTR is a tyrosine and PTM_RESIDUES listed it as a
+    modification to handle. Deleting them left a hole in the backbone: a
+    four-residue chain came back as a two-residue sequence.
+    """
+
+    @staticmethod
+    def _chain(tmp_path):
+        def line(serial, name, res, resnum, xyz, element):
+            row = list(" " * 80)
+            row[0:6] = "ATOM  "
+            row[6:11] = f"{serial:5d}"
+            row[12:16] = name.ljust(4)[:4] if len(name) == 4 else (" " + name).ljust(4)[:4]
+            row[17:20] = res.rjust(3)[:3]
+            row[21] = "A"
+            row[22:26] = f"{resnum:4d}"
+            row[30:38] = f"{xyz[0]:8.3f}"
+            row[38:46] = f"{xyz[1]:8.3f}"
+            row[46:54] = f"{xyz[2]:8.3f}"
+            row[54:60] = "  1.00"
+            row[60:66] = "  0.00"
+            row[76:78] = element.rjust(2)
+            return "".join(row).rstrip() + "\n"
+
+        atoms = [
+            ("N", "ALA", 1, (0.0, 0.0, 0.0), "N"), ("CA", "ALA", 1, (1.458, 0, 0), "C"),
+            ("C", "ALA", 1, (2.009, 1.42, 0), "C"), ("O", "ALA", 1, (1.251, 2.39, 0), "O"),
+            ("N", "PTR", 2, (3.332, 1.541, 0), "N"), ("CA", "PTR", 2, (3.988, 2.841, 0), "C"),
+            ("C", "PTR", 2, (5.5, 2.7, 0), "C"), ("O", "PTR", 2, (6.1, 1.63, 0), "O"),
+            ("CB", "PTR", 2, (3.6, 3.7, 1.2), "C"), ("P", "PTR", 2, (3.1, 6.9, 3.0), "P"),
+            ("N", "LLP", 3, (6.1, 3.8, 0), "N"), ("CA", "LLP", 3, (7.55, 3.9, 0), "C"),
+            ("C", "LLP", 3, (8.1, 5.3, 0), "C"), ("O", "LLP", 3, (7.4, 6.3, 0), "O"),
+            ("CB", "LLP", 3, (8.0, 3.1, 1.2), "C"), ("C4A", "LLP", 3, (10.0, 1.0, 3.0), "C"),
+            ("N", "GLY", 4, (9.4, 5.4, 0), "N"), ("CA", "GLY", 4, (10.1, 6.7, 0), "C"),
+            ("C", "GLY", 4, (11.6, 6.5, 0), "C"), ("O", "GLY", 4, (12.2, 5.4, 0), "O"),
+        ]
+        path = tmp_path / "modified.pdb"
+        path.write_text("".join(line(i, *a) for i, a in enumerate(atoms, 1)) + "END\n")
+        return str(path), len(atoms)
+
+    def test_the_sequence_has_every_residue(self, tmp_path):
+        from plmol.parsers import PDBParser
+
+        path, _ = self._chain(tmp_path)
+        parser = PDBParser(path, skip_cache=True)
+        assert len(parser.get_sequence()) == 4, "a modified residue is still a residue"
+        assert parser.get_sequence()[1] == "Y", "PTR is a tyrosine"
+
+    def test_the_residue_graph_has_every_residue(self, tmp_path):
+        from plmol import Protein
+
+        path, _ = self._chain(tmp_path)
+        graph = Protein.from_pdb(path).featurize(mode="graph")["graph"]
+        assert np.asarray(graph["coords"]).shape[0] == 4
+
+    def test_sasa_lines_up_with_the_atoms(self, tmp_path):
+        """The atom featurizer filtered these residues out again after the
+        parser had kept them, so the SASA array was longer than the atom array
+        and got truncated -- silently misaligning every value."""
+        from plmol import Protein
+
+        path, _ = self._chain(tmp_path)
+        atom_graph = Protein.from_pdb(path).featurize(mode="atom_graph")["atom_graph"]
+        atoms = np.asarray(atom_graph["coords"]).shape[0]
+        # 20 in the file, 19 here: standardising maps PTR onto TYR and TYR has
+        # no phosphorus, which is the PTM-to-parent behaviour the mapping asks
+        # for. What matters is that nothing downstream drops more.
+        assert atoms == 19
+        for key in ("sasa", "relative_sasa", "burial_index", "is_polar_sasa"):
+            assert np.asarray(atom_graph[key]).shape[0] == atoms, key
+
+
 class TestProteinAtomFilter:
     """One filter, shared by the PDB and mmCIF parsers.
 

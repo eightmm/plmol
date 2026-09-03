@@ -60,9 +60,6 @@ class AtomFeaturizer:
         token, coord = [], []
 
         for atom in pdb_parser.protein_atoms:
-            # Skip terminal oxygen and modified residues
-            if atom.atom_name == 'OXT' or atom.res_name in ['LLP', 'PTR']:
-                continue
 
             # Normalize residue name
             res_type_norm = normalize_residue_name(atom.res_name, atom.atom_name)
@@ -182,8 +179,6 @@ class AtomFeaturizer:
         chain_ids = []
 
         for atom in parser.protein_atoms:
-            if atom.atom_name == 'OXT' or atom.res_name in ['LLP', 'PTR']:
-                continue
 
             res_name_clean = normalize_residue_name(atom.res_name, atom.atom_name)
             if res_name_clean == 'UNK':
@@ -341,8 +336,6 @@ class AtomFeaturizer:
         seen = set()
 
         for atom in parser.protein_atoms:
-            if atom.atom_name == 'OXT' or atom.res_name in ['LLP', 'PTR']:
-                continue
             key = (atom.chain_id, atom.res_num)
             if key not in seen:
                 seen.add(key)
@@ -401,8 +394,6 @@ class AtomFeaturizer:
         # Map residue SS back to atoms
         ss_rows = []
         for atom in parser.protein_atoms:
-            if atom.atom_name == 'OXT' or atom.res_name in ['LLP', 'PTR']:
-                continue
             if len(ss_rows) >= n_atoms:
                 break
             ss_rows.append(residue_ss.get((atom.chain_id, atom.res_num), (0.0, 0.0, 1.0)))
