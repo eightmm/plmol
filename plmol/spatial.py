@@ -192,15 +192,22 @@ def _as_points(array: np.ndarray, name: str) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def _grid_pairs(coords: np.ndarray, cell_size: float, keep):
+def _grid_pairs(coords: np.ndarray, cell_size: float, keep, want_delta: bool = True):
     """Ordered index pairs a *keep* rule accepts, from one pass over the grid.
 
-    *keep* is called with ``(i, j, delta, squared_distance)`` for each candidate
-    and returns a boolean mask. Candidates come from one ring of cells, so
+    *keep* is called with ``(i, j, squared_distance)`` for each candidate and
+    returns a boolean mask. Candidates come from one ring of cells, so
     *cell_size* has to be at least the largest distance the rule can accept.
+
+    The separation vectors are built for the pairs that survive, not for every
+    candidate: one ring of cells offers about five times more candidates than
+    it keeps, and a rejected pair's vector is 12 wasted bytes of traffic. The
+    distances are accumulated axis by axis for the same reason -- it keeps the
+    working set in three contiguous columns rather than one strided ``(M, 3)``.
     """
     n = len(coords)
     grid = _Grid(coords, max(float(cell_size), 1e-6))
+    columns = (coords[:, 0], coords[:, 1], coords[:, 2])
     parts = []
     for start in range(0, n, _QUERY_BLOCK):
         stop = min(start + _QUERY_BLOCK, n)
@@ -208,15 +215,29 @@ def _grid_pairs(coords: np.ndarray, cell_size: float, keep):
         if row.size == 0:
             continue
         row += start
-        delta = coords[index] - coords[row]
-        squared = np.einsum("ij,ij->i", delta, delta)
-        mask = keep(row, index, delta, squared)
+        axes = [column[index] - column[row] for column in columns]
+        squared = axes[0] * axes[0]
+        squared += axes[1] * axes[1]
+        squared += axes[2] * axes[2]
+        mask = keep(row, index, squared)
         mask &= row != index
-        parts.append((row[mask], index[mask], delta[mask], squared[mask]))
+        chosen = np.flatnonzero(mask)
+        delta = np.empty((len(chosen), 3), dtype=np.float32) if want_delta else None
+        if want_delta:
+            for axis in range(3):
+                delta[:, axis] = axes[axis][chosen]
+        parts.append((row[chosen], index[chosen], delta, squared[chosen]))
+
     if not parts:
         empty = np.zeros(0, dtype=np.int64)
         return empty, empty.copy(), np.zeros((0, 3), np.float32), np.zeros(0, np.float32)
-    return tuple(np.concatenate(column) for column in zip(*parts))
+    return (
+        np.concatenate([part[0] for part in parts]),
+        np.concatenate([part[1] for part in parts]),
+        np.concatenate([part[2] for part in parts]) if want_delta
+        else np.zeros((0, 3), np.float32),
+        np.concatenate([part[3] for part in parts]),
+    )
 
 
 def overlapping_sphere_pairs(
@@ -243,9 +264,10 @@ def overlapping_sphere_pairs(
         empty = np.zeros(0, dtype=np.int64)
         return empty, empty.copy(), np.zeros((0, 3), np.float32), np.zeros(0, np.float32)
 
-    def touching(row, index, delta, squared):
+    def touching(row, index, squared):
         limit = radii[row] + radii[index]
-        return squared < limit * limit
+        limit *= limit
+        return squared < limit
 
     # Two spheres can only touch within the largest possible sum of radii, so
     # that is the cell size: one ring of cells then covers every candidate.
@@ -279,10 +301,10 @@ def pairs_within(
 
     limit = float(cutoff) ** 2
 
-    def near(row, index, delta, squared):
+    def near(row, index, squared):
         return squared < limit
 
-    row, index, _, squared = _grid_pairs(coords, cutoff, near)
+    row, index, _, squared = _grid_pairs(coords, cutoff, near, want_delta=False)
     # The grid emits a row's neighbours in cell order; a dense mask would emit
     # them by column. Downstream edge features index by position, so sort.
     order = np.lexsort((index, row))
