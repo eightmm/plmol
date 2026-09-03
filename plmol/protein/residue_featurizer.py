@@ -40,7 +40,7 @@ from .utils import (
     normalize_residue_name,
 )
 
-from ..utils import dense_to_edges, knn_mask_torch, sasa_structure_result
+from ..utils import dense_to_edges_torch, knn_mask_torch, sasa_structure_result
 
 # Import amino acid constants from centralized module
 from ..constants import (
@@ -638,7 +638,7 @@ class ResidueFeaturizer:
         )
 
         # Dense adjacency to edge list
-        src, dst, distance = dense_to_edges(distance_adj)
+        src, dst, distance = dense_to_edges_torch(distance_adj)
 
         relative_position = relative_position[src, dst]
         vectors = interaction_vectors[src, dst, :]

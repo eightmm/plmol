@@ -203,3 +203,52 @@ class TestDihedralAngles:
             scalar = _dihedral(*p)
             batched = float(AtomFeaturizer._dihedral_angles(*[p[i][None, :] for i in range(4)])[0])
             assert np.isclose(scalar, batched, atol=1e-12)
+
+
+class TestNumpyNeighbourHelpers:
+    """The numpy spellings must agree with the torch ones they replace."""
+
+    def test_knn_mask_matches_the_torch_version(self):
+        from plmol.utils import knn_mask
+
+        rng = np.random.default_rng(0)
+        distances = (rng.random((40, 40)) * 10).astype(np.float32)
+        distances = (distances + distances.T) / 2
+        for k in (1, 5, 20, 39, 100):
+            assert np.array_equal(
+                knn_mask(distances, k),
+                knn_mask_torch(torch.from_numpy(distances), k).numpy(),
+            ), f"k={k}"
+
+    def test_knn_mask_never_selects_the_diagonal(self):
+        from plmol.utils import knn_mask
+
+        rng = np.random.default_rng(1)
+        distances = (rng.random((12, 12))).astype(np.float32)
+        np.fill_diagonal(distances, 0.0)
+        assert not np.diag(knn_mask(distances, 3)).any()
+
+    def test_knn_mask_leaves_its_input_alone(self):
+        from plmol.utils import knn_mask
+
+        distances = np.ones((5, 5), dtype=np.float32)
+        knn_mask(distances, 2)
+        assert np.array_equal(distances, np.ones((5, 5), dtype=np.float32))
+
+    def test_dense_to_edges_matches_the_torch_version(self):
+        from plmol.utils import dense_to_edges, dense_to_edges_torch
+
+        rng = np.random.default_rng(2)
+        adjacency = (rng.random((20, 20, 3)) * (rng.random((20, 20, 1)) > 0.7)).astype(np.float32)
+        src, dst, values = dense_to_edges(adjacency)
+        t_src, t_dst, t_values = dense_to_edges_torch(torch.from_numpy(adjacency))
+        assert np.array_equal(src, t_src.numpy())
+        assert np.array_equal(dst, t_dst.numpy())
+        assert np.array_equal(values, t_values.numpy())
+
+    def test_dense_to_edges_handles_a_two_dimensional_adjacency(self):
+        from plmol.utils import dense_to_edges
+
+        adjacency = np.array([[0.0, 1.5], [0.0, 0.0]], dtype=np.float32)
+        src, dst, values = dense_to_edges(adjacency)
+        assert src.tolist() == [0] and dst.tolist() == [1] and values.tolist() == [1.5]

@@ -279,12 +279,8 @@ def dihedral_angles(
     return np.where(valid, np.arctan2(y, x), 0.0)
 
 
-def dense_to_edges(adjacency: "torch.Tensor"):
+def dense_to_edges(adjacency):
     """Split a dense ``(N, N, C)`` adjacency into edge indices and edge values.
-
-    torch is imported inside, not at module scope: the SASA and burial helpers
-    next to it are pure numpy and are what the surface and voxel paths import,
-    so a module-level import would drag torch into the geometry stack.
 
     An edge exists where the ``C``-vector for that pair is not all zero, which
     is the same rule ``Tensor.to_sparse(sparse_dim=2)`` applies -- but that call
@@ -292,11 +288,38 @@ def dense_to_edges(adjacency: "torch.Tensor"):
     416-residue graph) while producing identical indices and values.
 
     Args:
-        adjacency: Dense ``(N, N, C)`` or ``(N, N)`` tensor.
+        adjacency: Dense ``(N, N, C)`` or ``(N, N)`` array.
 
     Returns:
         ``(src, dst, values)`` in row-major order.
     """
+    mask = (adjacency != 0).any(axis=-1) if adjacency.ndim > 2 else adjacency != 0
+    src, dst = np.nonzero(mask)
+    return src, dst, adjacency[src, dst]
+
+
+def knn_mask(dist_matrix: np.ndarray, k: int) -> np.ndarray:
+    """Square distance matrix -> kNN boolean mask, excluding the diagonal.
+
+    Exact ties at the k-th place are broken arbitrarily, as they were before.
+    """
+    working = np.array(dist_matrix, copy=True)
+    np.fill_diagonal(working, np.inf)
+    k = min(k, working.shape[0] - 1)
+    mask = np.zeros(dist_matrix.shape, dtype=bool)
+    if k > 0:
+        nearest = np.argpartition(working, k - 1, axis=1)[:, :k]
+        np.put_along_axis(mask, nearest, True, axis=1)
+    return mask
+
+
+# --- migration bridges ------------------------------------------------------
+# The two above compute in numpy. These keep the callers that still hold
+# tensors working, and go away as each of them converts.
+
+
+def dense_to_edges_torch(adjacency: "torch.Tensor"):
+    """``dense_to_edges`` for a caller that still holds tensors."""
     import torch
 
     mask = (adjacency != 0).any(dim=-1) if adjacency.dim() > 2 else adjacency != 0
@@ -305,7 +328,7 @@ def dense_to_edges(adjacency: "torch.Tensor"):
 
 
 def knn_mask_torch(dist_matrix: "torch.Tensor", k: int) -> "torch.Tensor":
-    """Square distance matrix -> kNN boolean mask."""
+    """``knn_mask`` for a caller that still holds tensors."""
     import torch
 
     dm = dist_matrix.clone()

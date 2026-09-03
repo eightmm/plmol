@@ -124,7 +124,11 @@ def to_torch(value: Any, device: Optional[str] = None) -> Any:
 
     def convert(item: Any) -> Any:
         if isinstance(item, np.ndarray):
-            tensor = torch.from_numpy(np.ascontiguousarray(item))
+            # from_numpy shares memory, and warns on a read-only array while
+            # handing back a tensor that must not be written. Copy those.
+            if not item.flags.writeable or not item.flags.c_contiguous:
+                item = np.array(item, copy=True, order="C")
+            tensor = torch.from_numpy(item)
             return tensor.to(device) if device is not None else tensor
         if isinstance(item, dict):
             return {key: convert(sub) for key, sub in item.items()}
