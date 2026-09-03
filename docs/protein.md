@@ -55,11 +55,26 @@ that 78% of sample points had more than 24 atoms in reach -- a point is buried
 by its nearest neighbours or not at all. What is gone is the caveat, and the
 saturation warning that came with it.
 
-**freesasa stays the default.** It is not slower and it is what plmol's
-published feature values were computed with. The native path exists so the
-library degrades honestly rather than silently: before it, a missing freesasa
-turned the residue SASA block into zeros and every `burial_index` into 0.5,
-and those were handed back as features.
+**freesasa stays the default**, because it is what plmol's published feature
+values were computed with and switching silently would move every one of them.
+It is, however, no longer the faster of the two. The native path has been
+optimised since; freesasa's `calc` is C that plmol cannot reach into.
+
+| Mode | `freesasa` | `native` | |
+|------|-----------|----------|---|
+| `graph` | 148 ms | 91 ms | 1.6x |
+| `atom_graph` | 117 ms | 54 ms | 2.2x |
+| `surface` | 369 ms | 301 ms | 1.2x |
+| `voxel` | 154 ms | 90 ms | 1.7x |
+
+Measured on a 3260-atom protein, minimum of seven interleaved runs. Choosing
+`native` is a change in values as well as in speed -- see the agreement table
+below before making it the default for a project.
+
+The native path also exists so the library degrades honestly rather than
+silently: before it, a missing freesasa turned the residue SASA block into
+zeros and every `burial_index` into 0.5, and those were handed back as
+features.
 
 Agreement between the two, measured on a 3260-atom protein:
 
