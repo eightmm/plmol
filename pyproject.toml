@@ -38,18 +38,24 @@ classifiers = [
   "Operating System :: OS Independent"
 ]
 dependencies = [
-  "torch>=1.9.0",
   "numpy>=1.19.0",
   "rdkit>=2020.09.1"
 ]
 
 [project.optional-dependencies]
 # scipy and freesasa are here because the tests compare the native backends
-# against them; the library itself treats both as optional.
+# against them; the library itself treats both as optional. torch is here for
+# the to_torch round-trip tests.
 dev = [
   "pytest>=8.0",
   "scipy>=1.8.0",
-  "freesasa>=2.1.0"
+  "freesasa>=2.1.0",
+  "torch>=1.9.0"
+]
+# plmol returns numpy. torch is needed only to convert those arrays with
+# to_torch, and by the protein language models, which are torch models.
+torch = [
+  "torch>=1.9.0",
 ]
 mmcif = [
     "gemmi>=0.7.5",
@@ -70,10 +76,12 @@ sasa = [
 # naming the extra to install.
 esm = [
     "esm>=3.0.0",
+    "torch>=1.9.0",
 ]
 plm = [
     "transformers>=4.40",
     "sentencepiece>=0.2.0",
+    "torch>=1.9.0",
 ]
 
 [project.urls]

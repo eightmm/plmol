@@ -10,7 +10,7 @@ backend, and the missing-package path is asserted directly.
 import sys
 
 import pytest
-import torch
+import numpy as np
 
 from plmol import (
     DependencyError,
@@ -35,7 +35,7 @@ class FakeModel(plm.ProteinLanguageModel):
 
     def _forward(self, sequence):
         rows = len(sequence) + self.spec.prefix_tokens + self.spec.suffix_tokens
-        return torch.arange(rows, dtype=torch.float32).repeat_interleave(
+        return np.repeat(np.arange(rows, dtype=np.float32),
             self.spec.dim
         ).reshape(rows, self.spec.dim)
 
@@ -123,19 +123,18 @@ class TestEmbeddingContract:
         result = embed_sequence("MKT", "fake-eos", device="cpu")
         assert result["embeddings"].shape == (3, 4)
         assert result["embeddings"][0, 0] == 0.0
-        assert torch.all(result["bos"] == 0)
+        assert np.all(result["bos"] == 0)
         assert result["eos"][0] == 3.0
 
     def test_model_without_special_tokens(self, fake_models):
         result = embed_sequence("MKT", "fake-bare", device="cpu")
         assert result["embeddings"].shape == (3, 4)
-        assert torch.all(result["bos"] == 0)
-        assert torch.all(result["eos"] == 0)
+        assert np.all(result["bos"] == 0)
+        assert np.all(result["eos"] == 0)
 
-    def test_embeddings_are_float32_on_cpu(self, fake_models):
+    def test_embeddings_are_float32(self, fake_models):
         result = embed_sequence("MKT", "fake-8", device="cpu")
-        assert result["embeddings"].dtype == torch.float32
-        assert result["embeddings"].device.type == "cpu"
+        assert result["embeddings"].dtype == np.float32
 
     def test_empty_sequence_is_rejected(self, fake_models):
         with pytest.raises(InputError, match="empty sequence"):
@@ -145,7 +144,7 @@ class TestEmbeddingContract:
         """A tokenizer layout that disagrees with the spec must not misalign."""
         model = plm.load_plm("fake-8", device="cpu")
         with pytest.raises(InputError, match="rows for a sequence"):
-            plm._split_special_tokens(torch.zeros(99, 8), "MKT", model.spec)
+            plm._split_special_tokens(np.zeros((99, 8), dtype=np.float32), "MKT", model.spec)
 
 
 class TestModelCache:

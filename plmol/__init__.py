@@ -26,6 +26,7 @@ from .ligand.core import Ligand
 from .ligand.descriptors import MoleculeFeaturizer
 from .ligand.graph import MoleculeGraphFeaturizer
 from .base import BaseMolecule, TempFileOwner
+from .arrays import to_numpy, to_torch
 from .spatial import (
     SPATIAL_BACKENDS,
     NeighbourIndex,
@@ -72,7 +73,7 @@ from .errors import PlmolError, InputError, DependencyError, FeatureError
 from .specs import FEATURE_SPECS, FeatureSpec
 from . import constants
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 __all__ = [
     "Protein", "ProteinFeaturizer", "PDBStandardizer", "ResidueFeaturizer", "AtomFeaturizer",
@@ -89,6 +90,7 @@ __all__ = [
     "as_graph", "collate", "feature_dims", "FEATURE_DIMS",
     "SASA_BACKENDS", "set_sasa_backend", "get_sasa_backend",
     "resolve_sasa_backend", "shrake_rupley",
+    "to_torch", "to_numpy",
     "SPATIAL_BACKENDS", "set_spatial_backend", "get_spatial_backend",
     "resolve_spatial_backend", "knn", "NeighbourIndex",
     "NucleicAcid", "NucleicFeaturizer",

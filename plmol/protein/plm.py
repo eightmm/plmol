@@ -20,17 +20,37 @@ reload the weights on every iteration.
 
 from __future__ import annotations
 
+import functools
 import logging
+
+import numpy as np
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-import torch
 
+from ..arrays import FLOAT
 from ..errors import DependencyError, InputError
 
 logger = logging.getLogger(__name__)
+
+
+def _no_grad(method):
+    """``torch.no_grad`` applied when the method runs, not when it is defined.
+
+    The models here are torch models, but plmol imports without torch, so the
+    decorator cannot touch it at class-definition time.
+    """
+
+    @functools.wraps(method)
+    def wrapper(*args, **kwargs):
+        import torch
+
+        with torch.no_grad():
+            return method(*args, **kwargs)
+
+    return wrapper
 
 # Loaded models are gigabytes each, so keep very few.
 _MODEL_CACHE: "OrderedDict[tuple, ProteinLanguageModel]" = OrderedDict()
@@ -105,6 +125,12 @@ def plm_dim(name: str) -> int:
 def resolve_device(device: str = "auto") -> str:
     """``"auto"`` picks cuda when it is actually available, else cpu."""
     if device == "auto":
+        # "auto" is resolved even when no model is asked for, so a missing
+        # torch means cpu rather than an error.
+        try:
+            import torch
+        except ImportError:
+            return "cpu"
         return "cuda" if torch.cuda.is_available() else "cpu"
     return device
 
@@ -126,7 +152,7 @@ class ProteinLanguageModel(ABC):
         return self.spec.dim
 
     @abstractmethod
-    def _forward(self, sequence: str) -> torch.Tensor:
+    def _forward(self, sequence: str) -> "torch.Tensor":
         """Return the raw ``(L + prefix + suffix, D)`` hidden states on CPU."""
 
     def embed(self, sequence: str) -> Dict[str, object]:
@@ -148,15 +174,19 @@ class ProteinLanguageModel(ABC):
             raise InputError("Cannot embed an empty sequence.")
 
         hidden = self._forward(sequence)
-        if hidden.dim() == 3:
-            hidden = hidden.squeeze(0)
-        hidden = hidden.detach().to(torch.float32).cpu()
+        # The models are torch models; everything past this line is numpy, so
+        # the embeddings have the same type as every other feature.
+        if hasattr(hidden, "detach"):
+            hidden = hidden.detach().cpu().numpy()
+        hidden = np.asarray(hidden, dtype=FLOAT)
+        if hidden.ndim == 3:
+            hidden = hidden[0]
 
         return _split_special_tokens(hidden, sequence, self.spec)
 
 
 def _split_special_tokens(
-    hidden: torch.Tensor, sequence: str, spec: PLMSpec
+    hidden, sequence: str, spec: PLMSpec
 ) -> Dict[str, object]:
     """Peel the tokenizer's special tokens off the per-residue rows."""
     width = hidden.shape[-1]
@@ -174,7 +204,7 @@ def _split_special_tokens(
             f"{spec.prefix_tokens} prefix and {spec.suffix_tokens} suffix tokens."
         )
 
-    zeros = torch.zeros(width, dtype=torch.float32)
+    zeros = np.zeros(width, dtype=FLOAT)
     bos = hidden[prefix - 1] if prefix else zeros
     eos = hidden[hidden.shape[0] - suffix] if suffix else zeros
     embeddings = hidden[prefix : hidden.shape[0] - suffix] if suffix else hidden[prefix:]
@@ -211,8 +241,8 @@ class EsmSdkModel(ProteinLanguageModel):
                 f"{spec.name} needs the esm package. {spec.install_hint}"
             ) from exc
 
-    @torch.no_grad()
-    def _forward(self, sequence: str) -> torch.Tensor:
+    @_no_grad
+    def _forward(self, sequence: str) -> "torch.Tensor":
         from esm.sdk.api import ESMProtein, LogitsConfig
 
         protein = ESMProtein(sequence=sequence)
@@ -230,6 +260,8 @@ class EsmSdkModel(ProteinLanguageModel):
                 tensor, LogitsConfig(sequence=True, return_embeddings=True)
             )
             hidden = output.embeddings
+
+        import torch
 
         return hidden if isinstance(hidden, torch.Tensor) else torch.as_tensor(hidden)
 
@@ -260,8 +292,8 @@ class HuggingFaceModel(ProteinLanguageModel):
                 f"{spec.name} needs transformers. {spec.install_hint}"
             ) from exc
 
-    @torch.no_grad()
-    def _forward(self, sequence: str) -> torch.Tensor:
+    @_no_grad
+    def _forward(self, sequence: str) -> "torch.Tensor":
         if self.spec.tokenize_as_chars:
             encoded = self.tokenizer(
                 [list(sequence)],

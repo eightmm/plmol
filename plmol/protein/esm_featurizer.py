@@ -18,14 +18,37 @@ Usage:
     result = featurizer.extract_from_pdb("protein.pdb")
 """
 
-import torch
+import functools
 import logging
+
+import numpy as np
 from typing import Dict, Literal, Optional, Union
 from pathlib import Path
 
+from ..arrays import FLOAT
 from ..errors import DependencyError, InputError
 
 logger = logging.getLogger(__name__)
+
+
+def _no_grad(method):
+    """``torch.no_grad`` applied when the method runs, not when it is defined."""
+
+    @functools.wraps(method)
+    def wrapper(*args, **kwargs):
+        import torch
+
+        with torch.no_grad():
+            return method(*args, **kwargs)
+
+    return wrapper
+
+
+def _as_array(value) -> np.ndarray:
+    """Whatever the model handed back, as a float32 numpy array."""
+    if hasattr(value, "detach"):
+        value = value.detach().cpu().numpy()
+    return np.asarray(value, dtype=FLOAT)
 
 
 class ESMFeaturizer:
@@ -112,8 +135,8 @@ class ESMFeaturizer:
                 f"Error: {e}"
             )
 
-    @torch.no_grad()
-    def extract(self, sequence: str) -> Dict[str, torch.Tensor]:
+    @_no_grad
+    def extract(self, sequence: str) -> Dict[str, np.ndarray]:
         """
         Extract per-residue embeddings from a protein sequence.
 
@@ -150,8 +173,7 @@ class ESMFeaturizer:
             full_embeddings = output.per_residue_embedding
 
         # Convert to tensor
-        if not isinstance(full_embeddings, torch.Tensor):
-            full_embeddings = torch.tensor(full_embeddings)
+        full_embeddings = _as_array(full_embeddings)
 
         # Remove batch dimension if present
         if full_embeddings.dim() == 3:
@@ -168,8 +190,8 @@ class ESMFeaturizer:
             embeddings = full_embeddings[1:-1]       # [L, D]
         else:
             # No BOS/EOS tokens (shouldn't happen, but handle it)
-            bos_token = torch.zeros(full_embeddings.shape[-1])
-            eos_token = torch.zeros(full_embeddings.shape[-1])
+            bos_token = np.zeros(full_embeddings.shape[-1], dtype=FLOAT)
+            eos_token = np.zeros(full_embeddings.shape[-1], dtype=FLOAT)
             embeddings = full_embeddings
 
         return {
@@ -183,7 +205,7 @@ class ESMFeaturizer:
         self,
         pdb_path: Union[str, Path],
         chain_id: Optional[str] = None,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Dict[str, np.ndarray]:
         """
         Extract embeddings from PDB file.
 
@@ -200,7 +222,7 @@ class ESMFeaturizer:
     def extract_by_chain(
         self,
         pdb_path: Union[str, Path],
-    ) -> Dict[str, Dict[str, torch.Tensor]]:
+    ) -> Dict[str, Dict[str, np.ndarray]]:
         """
         Extract embeddings for each chain separately.
 
@@ -288,7 +310,7 @@ class DualESMFeaturizer:
     def esm3_dim(self) -> int:
         return self.esm3.embedding_dim
 
-    def extract(self, sequence: str) -> Dict[str, torch.Tensor]:
+    def extract(self, sequence: str) -> Dict[str, np.ndarray]:
         """
         Extract embeddings from both models for a single sequence.
 
@@ -316,7 +338,7 @@ class DualESMFeaturizer:
     def extract_by_chain(
         self,
         sequences_by_chain: Dict[str, str],
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Dict[str, np.ndarray]:
         """
         Extract embeddings per chain and concatenate.
 
@@ -381,8 +403,8 @@ class DualESMFeaturizer:
                 esm3_eos = esm3_result['eos_token']
 
         # Concatenate all chain embeddings
-        esmc_embeddings = torch.cat(esmc_embeddings_list, dim=0)
-        esm3_embeddings = torch.cat(esm3_embeddings_list, dim=0)
+        esmc_embeddings = np.concatenate(esmc_embeddings_list, axis=0)
+        esm3_embeddings = np.concatenate(esm3_embeddings_list, axis=0)
 
         return {
             'esmc_embeddings': esmc_embeddings,
@@ -397,7 +419,7 @@ class DualESMFeaturizer:
     def extract_from_pdb(
         self,
         pdb_path: Union[str, Path],
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Dict[str, np.ndarray]:
         """
         Extract embeddings from PDB file using both models.
 
@@ -413,7 +435,7 @@ class DualESMFeaturizer:
     def extract_from_parser(
         self,
         pdb_parser: 'PDBParser',
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Dict[str, np.ndarray]:
         """
         Extract embeddings using pre-parsed PDB data.
 
