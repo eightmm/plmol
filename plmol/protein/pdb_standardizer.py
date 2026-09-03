@@ -8,6 +8,7 @@ It handles residue reordering, atom standardization, and removal of unwanted mol
 import os
 from typing import Dict, List, Tuple, Optional
 
+from ..parsers.pdb_parser import element_symbol, is_hydrogen
 from ..constants import (
     STANDARD_ATOMS,
     STANDARD_ATOMS_PTM,
@@ -173,10 +174,11 @@ class PDBStandardizer:
         res_name = line[17:20].strip()
         chain_id = line[21]
         res_num_str = line[22:27].strip()  # Include insertion code
-        element = line[76:78].strip() if len(line) > 76 else atom_name[0]
 
-        # Skip hydrogens if requested
-        if self.remove_hydrogens and (atom_name.startswith('H') or element.upper() == 'H'):
+        # The parser's rule, not a second one. Reading the atom name alone
+        # dropped every mercury, whose name starts with an H, and kept every
+        # hydrogen named the pre-2007 way, whose name starts with a digit.
+        if self.remove_hydrogens and is_hydrogen(line):
             return
 
         # Skip water molecules
@@ -356,7 +358,7 @@ class PDBStandardizer:
         z = float(original_line[46:54])
         occupancy = original_line[54:60].strip() if len(original_line) > 54 else "1.00"
         temp_factor = original_line[60:66].strip() if len(original_line) > 60 else "0.00"
-        element = original_line[76:78].strip() if len(original_line) > 76 else atom_name[0]
+        element = element_symbol(original_line)
 
         return f"ATOM  {atom_counter:5d}  {atom_name:<4s}{res_name:3s} {chain_id}{res_counter:>4d}    " \
                f"{x:8.3f}{y:8.3f}{z:8.3f}{occupancy:>6s}{temp_factor:>6s}          {element:>2s}\n"
@@ -372,7 +374,7 @@ class PDBStandardizer:
         z = float(original_line[46:54])
         occupancy = original_line[54:60].strip() if len(original_line) > 54 else "1.00"
         temp_factor = original_line[60:66].strip() if len(original_line) > 60 else "0.00"
-        element = original_line[76:78].strip() if len(original_line) > 76 else atom_name[0]
+        element = element_symbol(original_line)
 
         return f"HETATM{atom_counter:5d}  {atom_name:<4s}{res_name:3s} {chain_id}{hetatm_counter:>4d}    " \
                f"{x:8.3f}{y:8.3f}{z:8.3f}{occupancy:>6s}{temp_factor:>6s}          {element:>2s}\n"

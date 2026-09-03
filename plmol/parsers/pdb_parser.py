@@ -76,20 +76,18 @@ def is_hetatm_record(line: str) -> bool:
 
 
 def is_hydrogen(line: str) -> bool:
-    """Check if atom is hydrogen based on PDB line."""
+    """Whether a PDB ATOM/HETATM line describes a hydrogen.
+
+    Asks :func:`element_symbol`, so an atom counts as hydrogen exactly when
+    the :class:`ParsedAtom` it parses to has element ``H``. Reading the atom
+    name on its own used to disagree with the parser in both directions: a
+    hydrogen named the pre-2007 way, ``1HB``, was kept because the name starts
+    with a digit, and a mercury named ``HG`` was dropped because it starts
+    with an H.
+    """
     if len(line) < 14:
         return False
-    # Check element column (77-78) first
-    if len(line) > 77:
-        element = line[76:78].strip()
-        if element and element.upper() == 'H':
-            return True
-    # Fallback: check atom name (column 13-16)
-    if len(line) > 13:
-        atom_name = line[12:16].strip()
-        if atom_name and atom_name[0] == 'H':
-            return True
-    return False
+    return element_symbol(line) == 'H'
 
 
 def parse_pdb_line(line: str) -> ParsedAtom:
@@ -124,14 +122,7 @@ def parse_pdb_line(line: str) -> ParsedAtom:
         logger.warning("Malformed residue number in PDB line: %r", line[22:26].strip())
         res_num = 0
 
-    # Parse element symbol (columns 77-78)
-    element = ''
-    if len(line) > 77:
-        element = line[76:78].strip().upper()
-
-    # Fallback: infer from atom name if element not present
-    if not element and atom_name:
-        element = _infer_element(atom_name)
+    element = element_symbol(line)
 
     # Parse coordinates
     try:
@@ -165,18 +156,58 @@ def parse_pdb_line(line: str) -> ParsedAtom:
     )
 
 
-def _infer_element(atom_name: str) -> str:
-    """Infer element symbol from atom name."""
-    # Remove digits and special characters
-    element = ''.join(c for c in atom_name if c.isalpha())
+#: Two-letter element symbols that turn up in structure files. Only consulted
+#: for residues that are not standard, where the same two letters are an atom
+#: name rather than an element: CA is the alpha carbon of every amino acid.
+_TWO_LETTER_ELEMENTS = frozenset(
+    {'CA', 'MG', 'ZN', 'FE', 'MN', 'CU', 'CO', 'NI', 'NA', 'CL', 'BR', 'SE', 'HG'}
+)
+
+#: Residues built from one-letter elements alone -- C, N, O, S and P. MSE is
+#: deliberately absent: its SE really is selenium.
+_ONE_LETTER_ELEMENT_RESIDUES = frozenset(AMINO_ACID_LETTERS) | frozenset(NUCLEIC_ACID_RESIDUES)
+
+
+def element_symbol(line: str) -> str:
+    """The element a PDB ATOM/HETATM line describes.
+
+    Columns 77-78 when the line carries them, otherwise inferred from the atom
+    name field and the residue. Everything in plmol that needs an element from
+    a PDB line comes here, so the parser, the hydrogen test and the
+    standardizer cannot answer differently.
+    """
+    if len(line) > 77:
+        element = line[76:78].strip().upper()
+        if element:
+            return element
+    name_field = line[12:16] if len(line) > 12 else ''
+    if not name_field.strip():
+        return ''
+    return _infer_element(name_field, line[17:20] if len(line) > 19 else '')
+
+
+def _infer_element(name_field: str, res_name: str = '') -> str:
+    """Element for an atom whose line carries no element column.
+
+    *name_field* is columns 13-16 unstripped, because where the name starts is
+    what says how long the element is: PDB right-justifies a one-letter
+    element into column 14, so a name beginning in column 13 is either a
+    two-letter element or a hydrogen numbered the pre-2007 way. Files that
+    left-justify every name break that convention, which is why the residue
+    decides first -- a standard amino acid or nucleotide is built from C, N,
+    O, S and P alone, and its CA is a carbon rather than a calcium.
+    """
+    if name_field[:1].isdigit():
+        return 'H'
+    element = ''.join(c for c in name_field if c.isalpha())
     if not element:
         return 'C'  # Default to carbon
-
-    # Check for 2-letter elements first
-    two_letter_elements = ['CA', 'MG', 'ZN', 'FE', 'MN', 'CU', 'CO', 'NI', 'NA', 'CL', 'BR', 'SE']
-    if len(element) >= 2 and element[:2].upper() in two_letter_elements:
+    if res_name.strip() in _ONE_LETTER_ELEMENT_RESIDUES:
+        return element[0].upper()
+    if name_field[:1] == ' ':
+        return element[0].upper()
+    if len(element) >= 2 and element[:2].upper() in _TWO_LETTER_ELEMENTS:
         return element[:2].upper()
-
     return element[0].upper()
 
 

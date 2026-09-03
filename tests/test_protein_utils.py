@@ -61,6 +61,83 @@ class TestIsHydrogen:
         assert is_hydrogen("ATOM") is False
 
 
+def _pdb_line(name4, res="ALA", element=None, record="ATOM  "):
+    """One ATOM/HETATM line with every field in its own column.
+
+    *element* of None means the line stops at column 66, the way files written
+    before the element column was mandatory do.
+    """
+    line = list(" " * 80)
+    line[0:6] = record.ljust(6)
+    line[6:11] = "    5"
+    line[12:16] = name4.ljust(4)[:4]
+    line[17:20] = res.rjust(3)[:3]
+    line[21] = "A"
+    line[22:26] = "   1"
+    line[30:38] = f"{1.0:8.3f}"
+    line[38:46] = f"{2.0:8.3f}"
+    line[46:54] = f"{3.0:8.3f}"
+    line[54:60] = "  1.00"
+    line[60:66] = "  0.00"
+    if element is None:
+        return "".join(line)[:66] + "\n"
+    line[76:78] = element.rjust(2)[:2]
+    return "".join(line) + "\n"
+
+
+#: (label, line, element) for lines that carry no element column -- the only
+#: ones where plmol has to work the element out for itself.
+NO_ELEMENT_COLUMN = [
+    ("alpha carbon, right justified", _pdb_line(" CA"), "C"),
+    ("alpha carbon, left justified", _pdb_line("CA"), "C"),
+    ("sidechain sulfur", _pdb_line(" SG", "CYS"), "S"),
+    ("nucleotide phosphorus", _pdb_line(" P", "DA"), "P"),
+    ("hydrogen, modern name", _pdb_line(" HB2"), "H"),
+    ("hydrogen, pre-2007 name", _pdb_line("1HB"), "H"),
+    ("selenium in selenomethionine", _pdb_line("SE", "MSE"), "SE"),
+    ("mercury", _pdb_line("HG", "HG", record="HETATM"), "HG"),
+    ("zinc", _pdb_line("ZN", "ZN", record="HETATM"), "ZN"),
+    ("calcium ion", _pdb_line("CA", "CA", record="HETATM"), "CA"),
+]
+
+
+class TestElementWithoutTheColumn:
+    """Where the element comes from when columns 77-78 are missing.
+
+    Reading the stripped atom name alone got three of these wrong: CA came out
+    as calcium in every residue, SE in selenomethionine came out as sulfur,
+    and a hydrogen named the pre-2007 way, 1HB, was not recognised at all.
+    """
+
+    @pytest.mark.parametrize("label,line,element",
+                             NO_ELEMENT_COLUMN, ids=[c[0] for c in NO_ELEMENT_COLUMN])
+    def test_the_element_is_what_the_atom_is(self, label, line, element):
+        assert parse_pdb_line(line).element == element
+
+    @pytest.mark.parametrize("label,line,element",
+                             NO_ELEMENT_COLUMN, ids=[c[0] for c in NO_ELEMENT_COLUMN])
+    def test_hydrogen_means_element_h(self, label, line, element):
+        """is_hydrogen is not a second rule: it is this one, read for H."""
+        assert is_hydrogen(line) == (element == "H")
+
+    def test_the_element_column_wins_when_it_is_there(self):
+        """A carbon the file names HG is a carbon. The name check alone said
+        hydrogen and dropped it."""
+        line = _pdb_line(" HG", "CYS", element="C")
+        assert parse_pdb_line(line).element == "C"
+        assert is_hydrogen(line) is False
+
+    @pytest.mark.parametrize("label,line,element",
+                             NO_ELEMENT_COLUMN, ids=[c[0] for c in NO_ELEMENT_COLUMN])
+    def test_standardizing_writes_the_element_the_parser_reads(self, label, line, element):
+        """The standardizer fills in columns 77-78 for files that lack them,
+        and the parser reads that file back. The two must agree."""
+        from plmol.protein.pdb_standardizer import PDBStandardizer
+
+        written = PDBStandardizer()._format_atom_line(line, 1, 1, "A", line[17:20].strip())
+        assert parse_pdb_line(written).element == element
+
+
 class TestParsePdbLine:
     def test_basic_parse(self):
         # Standard PDB ATOM line with proper column formatting
