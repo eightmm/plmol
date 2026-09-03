@@ -13,7 +13,8 @@ Uses Heavy Atom Only approach:
 from typing import Dict, List, Tuple, Optional, Any, Set
 from dataclasses import dataclass, field
 import numpy as np
-import torch
+
+from ..arrays import FLOAT, INT
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
@@ -512,7 +513,7 @@ class PLInteractionFeaturizer:
     # Graph Building (delegated)
     # =========================================================================
 
-    def get_interaction_edges(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_interaction_edges(self) -> Tuple[np.ndarray, np.ndarray]:
         """
         Get interaction edges as tensors.
 
@@ -564,10 +565,10 @@ class PLInteractionFeaturizer:
     # Atom Feature Methods (kept here - not part of detection or encoding)
     # =========================================================================
 
-    def get_atom_pharmacophore_features(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_atom_pharmacophore_features(self) -> Tuple[np.ndarray, np.ndarray]:
         """Get pharmacophore features for heavy atoms."""
-        protein_feats = torch.zeros(self.num_protein_atoms, NUM_PHARMACOPHORE_TYPES)
-        ligand_feats = torch.zeros(self.num_ligand_atoms, NUM_PHARMACOPHORE_TYPES)
+        protein_feats = np.zeros((self.num_protein_atoms, NUM_PHARMACOPHORE_TYPES), dtype=FLOAT)
+        ligand_feats = np.zeros((self.num_ligand_atoms, NUM_PHARMACOPHORE_TYPES), dtype=FLOAT)
 
         for atom_idx, types in self._protein_atom_types.items():
             if atom_idx < self.num_protein_atoms:
@@ -583,7 +584,7 @@ class PLInteractionFeaturizer:
 
         return protein_feats, ligand_feats
 
-    def get_atom_chemical_features(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_atom_chemical_features(self) -> Tuple[np.ndarray, np.ndarray]:
         """
         Get chemical features for heavy atoms.
 
@@ -594,8 +595,8 @@ class PLInteractionFeaturizer:
         """
         atom_feat_dim = NUM_ELEMENT_TYPES + NUM_HYBRIDIZATION_TYPES + 5
 
-        protein_feats = torch.zeros(self.num_protein_atoms, atom_feat_dim)
-        ligand_feats = torch.zeros(self.num_ligand_atoms, atom_feat_dim)
+        protein_feats = np.zeros((self.num_protein_atoms, atom_feat_dim), dtype=FLOAT)
+        ligand_feats = np.zeros((self.num_ligand_atoms, atom_feat_dim), dtype=FLOAT)
 
         for idx, feats in self._protein_atom_features.items():
             if idx >= self.num_protein_atoms:
@@ -627,10 +628,10 @@ class PLInteractionFeaturizer:
 
         return protein_feats, ligand_feats
 
-    def get_residue_features(self) -> torch.Tensor:
+    def get_residue_features(self) -> np.ndarray:
         """Get residue-level features for protein heavy atoms."""
         feat_dim = NUM_RESIDUE_TYPES + 2
-        features = torch.zeros(self.num_protein_atoms, feat_dim)
+        features = np.zeros((self.num_protein_atoms, feat_dim), dtype=FLOAT)
 
         for idx, res_info in self._protein_residue_info.items():
             if idx >= self.num_protein_atoms:
@@ -644,30 +645,30 @@ class PLInteractionFeaturizer:
     def get_distance_based_edges(
         self, distance_cutoff: Optional[float] = None,
         knn_cutoff: Optional[int] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """Get all heavy atom pairs within distance cutoff."""
         pairs = self._detector._get_close_pairs(distance_cutoff, knn_cutoff=knn_cutoff)
 
         if not pairs:
             return (
-                torch.empty(2, 0, dtype=torch.long),
-                torch.empty(0, dtype=torch.float32)
+                np.empty((2, 0), dtype=INT),
+                np.empty(0, dtype=FLOAT)
             )
 
-        edges = torch.tensor([
+        edges = np.array([
             [p[0] for p in pairs],
             [p[1] for p in pairs]
-        ], dtype=torch.long)
+        ], dtype=INT)
 
-        distances = torch.tensor([p[2] for p in pairs], dtype=torch.float32)
+        distances = np.array([p[2] for p in pairs], dtype=FLOAT)
 
         return edges, distances
 
-    def get_heavy_atom_coords(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_heavy_atom_coords(self) -> Tuple[np.ndarray, np.ndarray]:
         """Get 3D coordinates of heavy atoms only."""
         return (
-            torch.tensor(self._protein_coords, dtype=torch.float32),
-            torch.tensor(self._ligand_coords, dtype=torch.float32)
+            np.array(self._protein_coords, dtype=FLOAT),
+            np.array(self._ligand_coords, dtype=FLOAT)
         )
 
     # =========================================================================

@@ -202,7 +202,7 @@ class MoleculeGraphFeaturizer(AtomFeatureMixin, EdgeFeatureMixin):
             if distance_cutoff is not None:
                 mask = mask | ((dist_matrix <= distance_cutoff) & (~np.eye(coords.shape[0], dtype=bool)))
 
-            if knn_cutoff is not None and coords.size(0) > 1:
+            if knn_cutoff is not None and coords.shape[0] > 1:
                 mask = mask | knn_mask(dist_matrix, knn_cutoff)
 
             src_d, dst_d = np.nonzero(mask)

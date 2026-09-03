@@ -313,33 +313,6 @@ def knn_mask(dist_matrix: np.ndarray, k: int) -> np.ndarray:
     return mask
 
 
-# --- migration bridges ------------------------------------------------------
-# The two above compute in numpy. These keep the callers that still hold
-# tensors working, and go away as each of them converts.
-
-
-def dense_to_edges_torch(adjacency: "torch.Tensor"):
-    """``dense_to_edges`` for a caller that still holds tensors."""
-    import torch
-
-    mask = (adjacency != 0).any(dim=-1) if adjacency.dim() > 2 else adjacency != 0
-    src, dst = torch.nonzero(mask, as_tuple=True)
-    return src, dst, adjacency[src, dst]
-
-
-def knn_mask_torch(dist_matrix: "torch.Tensor", k: int) -> "torch.Tensor":
-    """``knn_mask`` for a caller that still holds tensors."""
-    import torch
-
-    dm = dist_matrix.clone()
-    dm.fill_diagonal_(float('inf'))
-    k = min(k, dm.size(0) - 1)
-    _, topk_idx = torch.topk(dm, k, dim=1, largest=False)
-    mask = torch.zeros_like(dist_matrix, dtype=torch.bool)
-    mask.scatter_(1, topk_idx, True)
-    return mask
-
-
 def knn_mask_bipartite_numpy(dm: np.ndarray, k: int) -> np.ndarray:
     """Bipartite (M, N) distance matrix -> kNN boolean mask.
 

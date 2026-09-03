@@ -1,6 +1,6 @@
 """Tests for plmol/interaction/ — PLInteractionFeaturizer + PocketExtractor."""
 
-import torch
+import numpy as np
 import pytest
 
 from rdkit import Chem
@@ -53,8 +53,8 @@ class TestPLInteractionFeaturizer:
         protein_mol, ligand_mol = protein_ligand_mols
         plif = PLInteractionFeaturizer(protein_mol, ligand_mol)
         p_coords, l_coords = plif.get_heavy_atom_coords()
-        assert isinstance(p_coords, torch.Tensor)
-        assert isinstance(l_coords, torch.Tensor)
+        assert isinstance(p_coords, np.ndarray)
+        assert isinstance(l_coords, np.ndarray)
         assert p_coords.shape[1] == 3
         assert l_coords.shape[1] == 3
 

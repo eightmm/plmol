@@ -7,7 +7,8 @@ Builds edge features and interaction graphs from detected interactions.
 from typing import Dict, List, Tuple, Optional, Any
 import math
 import numpy as np
-import torch
+
+from ..arrays import FLOAT, INT
 
 from ..constants import (
     INTERACTION_TYPE_IDX,
@@ -86,11 +87,11 @@ class InteractionGraphBuilder:
             1                                  # relative distance in pocket (1)
         )  # Total: 79
 
-    def _build_edge_features(self, interactions: List[Interaction]) -> torch.Tensor:
+    def _build_edge_features(self, interactions: List[Interaction]) -> np.ndarray:
         """Build comprehensive feature tensor for interactions."""
         num_interactions = len(interactions)
         feature_dim = self._get_edge_feature_dim()
-        features = torch.zeros(num_interactions, feature_dim)
+        features = np.zeros((num_interactions, feature_dim), dtype=FLOAT)
 
         for i, inter in enumerate(interactions):
             offset = 0
@@ -217,7 +218,7 @@ class InteractionGraphBuilder:
     def _get_contact_edges(
         self, distance_cutoff: float,
         knn_cutoff: Optional[int] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """Get all heavy atom pairs within cutoff as generic contact edges.
 
         Args:
@@ -238,18 +239,18 @@ class InteractionGraphBuilder:
         p_idx, l_idx = np.where(mask)
         if len(p_idx) == 0:
             return (
-                torch.empty(2, 0, dtype=torch.long),
-                torch.empty(0, dtype=torch.float32),
+                np.empty((2, 0), dtype=INT),
+                np.empty(0, dtype=FLOAT),
             )
-        edges = torch.tensor(np.stack([p_idx, l_idx]), dtype=torch.long)
-        distances = torch.tensor(
-            self._distance_matrix[mask], dtype=torch.float32
+        edges = np.array(np.stack([p_idx, l_idx]), dtype=INT)
+        distances = np.array(
+            self._distance_matrix[mask], dtype=FLOAT
         )
         return edges, distances
 
     def get_interaction_edges(
         self, interactions: List[Interaction],
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Get interaction edges as tensors.
 
@@ -260,14 +261,14 @@ class InteractionGraphBuilder:
         """
         if not interactions:
             return (
-                torch.empty(2, 0, dtype=torch.long),
-                torch.empty(0, self._get_edge_feature_dim(), dtype=torch.float32)
+                np.empty((2, 0), dtype=INT),
+                np.empty((0, self._get_edge_feature_dim()), dtype=FLOAT)
             )
 
-        edges = torch.tensor([
+        edges = np.array([
             [inter.protein_atom_idx for inter in interactions],
             [inter.ligand_atom_idx for inter in interactions]
-        ], dtype=torch.long)
+        ], dtype=INT)
 
         edge_features = self._build_edge_features(interactions)
 
@@ -276,8 +277,8 @@ class InteractionGraphBuilder:
     def get_interaction_graph(
         self,
         interactions: List[Interaction],
-        edges: torch.Tensor,
-        edge_features: torch.Tensor,
+        edges: np.ndarray,
+        edge_features: np.ndarray,
         include_contacts: bool = False,
         contact_cutoff: Optional[float] = None,
         knn_cutoff: Optional[int] = None,

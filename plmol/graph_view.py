@@ -19,8 +19,8 @@ Nothing here changes what ``featurize`` returns; this is a view on top of it.
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
-import torch
 
+from .arrays import FLOAT, INT
 from .errors import InputError
 from .ligand.graph_edge_features import bond_view_channels
 
@@ -106,7 +106,7 @@ def as_graph(view: Dict[str, Any], source: Optional[str] = None) -> Dict[str, An
             - ``coords`` ``(N, 3)`` float32.
             - ``num_nodes``, ``num_edges``, ``source``.
 
-    Everything comes back as torch tensors regardless of whether the input held
+    Everything comes back as numpy arrays regardless of whether the input held
     numpy arrays, since ``Ligand.featurize`` converts to numpy while the other
     classes do not.
 
@@ -165,19 +165,19 @@ def _from_dense_adjacency(view: Dict[str, Any], source: str) -> Dict[str, Any]:
     Uses the same bond mask as ``LigandFeaturizer.adjacency_to_bond_edges``:
     the first four channels are the bond-type one-hot.
     """
-    adjacency = _tensor(view["adjacency"])
-    if adjacency.dim() != 3 or adjacency.shape[-1] < 4:
+    adjacency = _array(view["adjacency"])
+    if adjacency.ndim != 3 or adjacency.shape[-1] < 4:
         raise InputError("adjacency must be [N, N, C] with C >= 4.")
 
     mask = view.get("bond_mask")
     if mask is None:
         mask = adjacency[..., :4].sum(axis=-1) > 0
     else:
-        mask = _tensor(mask).bool()
-    mask = mask.clone()
-    mask.fill_diagonal_(False)
+        mask = _array(mask).astype(bool)
+    mask = mask.copy()
+    np.fill_diagonal(mask, False)
 
-    src, dst = torch.where(mask)
+    src, dst = np.nonzero(mask)
     node_features = _float(view["node_features"])
     # Only the channels that describe a bonded pair; the rest of the pair block
     # is degenerate once the dense adjacency is unrolled into bonds.
@@ -186,8 +186,8 @@ def _from_dense_adjacency(view: Dict[str, Any], source: str) -> Dict[str, Any]:
         node_features=node_features,
         node_tokens=None,
         node_vector_features=None,
-        edge_index=torch.stack([src, dst], dim=0),
-        edge_features=adjacency[src, dst][:, channels].float(),
+        edge_index=np.stack([src, dst], axis=0),
+        edge_features=adjacency[src, dst][:, channels].astype(FLOAT),
         edge_vector_features=None,
         coords=_coords(view, node_features.shape[0]),
         source=source,
@@ -196,9 +196,9 @@ def _from_dense_adjacency(view: Dict[str, Any], source: str) -> Dict[str, Any]:
 
 def _from_protein_atom_graph(view: Dict[str, Any], source: str) -> Dict[str, Any]:
     """Protein ``atom_graph``: token ids plus loose per-atom and per-edge arrays."""
-    edge_index = _tensor(view["edge_index"]).long()
+    edge_index = _array(view["edge_index"]).astype(INT)
     num_edges = int(edge_index.shape[1])
-    num_nodes = int(_tensor(view["coords"]).shape[0])
+    num_nodes = int(_array(view["coords"]).shape[0])
 
     return _pack(
         node_features=_concat_columns(view, _ATOM_GRAPH_NODE_KEYS, num_nodes),
@@ -219,7 +219,7 @@ def _from_tuple_graph(view: Dict[str, Any], source: str) -> Dict[str, Any]:
         node_features=node_features,
         node_tokens=None,
         node_vector_features=_concat_tuple(view.get("node_vector_features"), dim=1),
-        edge_index=_tensor(view["edge_index"]).long(),
+        edge_index=_array(view["edge_index"]).astype(INT),
         edge_features=_concat_tuple(view.get("edge_features"), dim=-1),
         edge_vector_features=_concat_tuple(view.get("edge_vector_features"), dim=1),
         coords=_coords(view, node_features.shape[0]),
@@ -229,8 +229,8 @@ def _from_tuple_graph(view: Dict[str, Any], source: str) -> Dict[str, Any]:
 
 def _from_na_residue_graph(view: Dict[str, Any], source: str) -> Dict[str, Any]:
     """Nucleic acid ``graph``: per-nucleotide arrays plus ``edge_attr``."""
-    edge_index = _tensor(view["edge_index"]).long()
-    num_nodes = int(_tensor(view["coords"]).shape[0])
+    edge_index = _array(view["edge_index"]).astype(INT)
+    num_nodes = int(_array(view["coords"]).shape[0])
     return _pack(
         node_features=_concat_columns(view, _NA_RESIDUE_NODE_KEYS, num_nodes),
         node_tokens=_concat_tokens(view, _NA_RESIDUE_TOKEN_KEYS, num_nodes),
@@ -245,11 +245,11 @@ def _from_na_residue_graph(view: Dict[str, Any], source: str) -> Dict[str, Any]:
 
 def _from_na_atom_graph(view: Dict[str, Any], source: str) -> Dict[str, Any]:
     """Nucleic acid ``atom_graph``: token-valued nodes, distance-valued edges."""
-    edge_index = _tensor(view["edge_index"]).long()
+    edge_index = _array(view["edge_index"]).astype(INT)
     num_edges = int(edge_index.shape[1])
-    num_nodes = int(_tensor(view["coords"]).shape[0])
+    num_nodes = int(_array(view["coords"]).shape[0])
     return _pack(
-        node_features=torch.zeros((num_nodes, 0), dtype=torch.float32),
+        node_features=np.zeros((num_nodes, 0), dtype=FLOAT),
         node_tokens=_concat_tokens(view, _NA_ATOM_TOKEN_KEYS, num_nodes),
         node_vector_features=None,
         edge_index=edge_index,
@@ -267,7 +267,7 @@ def _from_edge_index_graph(view: Dict[str, Any], source: str) -> Dict[str, Any]:
         node_features=node_features,
         node_tokens=None,
         node_vector_features=None,
-        edge_index=_tensor(view["edge_index"]).long(),
+        edge_index=_array(view["edge_index"]).astype(INT),
         edge_features=_float(view["edge_features"]),
         edge_vector_features=None,
         coords=_coords(view, node_features.shape[0]),
@@ -325,12 +325,12 @@ def collate(views: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         if graph["edge_vector_features"] is not None:
             edge_vectors.append(graph["edge_vector_features"])
 
-        batch.append(torch.full((n,), graph_idx, dtype=torch.long))
+        batch.append(np.full(n, graph_idx, dtype=INT))
         node_offset += n
         ptr.append(node_offset)
 
     def stack(parts, dim=0):
-        return torch.cat(parts, dim=dim) if parts else None
+        return np.concatenate(parts, axis=dim) if parts else None
 
     return {
         "node_features": stack(node_features),
@@ -345,7 +345,7 @@ def collate(views: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         ),
         "coords": stack(coords),
         "batch": stack(batch),
-        "ptr": torch.tensor(ptr, dtype=torch.long),
+        "ptr": np.array(ptr, dtype=INT),
         "num_nodes": node_offset,
         "num_edges": int(sum(g["num_edges"] for g in graphs)),
         "num_graphs": len(graphs),
@@ -355,7 +355,7 @@ def collate(views: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _check_widths(graphs: List[Dict[str, Any]]) -> None:
     for key in ("node_features", "edge_features"):
-        widths = {int(g[key].shape[-1]) for g in graphs if g[key].numel() or True}
+        widths = {int(g[key].shape[-1]) for g in graphs}
         if len(widths) > 1:
             raise InputError(
                 f"Cannot batch graphs with different {key} widths: {sorted(widths)}. "
@@ -426,22 +426,22 @@ def _ndim(value: Any) -> int:
     return len(getattr(value, "shape", ()))
 
 
-def _tensor(value: Any) -> torch.Tensor:
-    if isinstance(value, torch.Tensor):
+def _array(value: Any) -> np.ndarray:
+    if isinstance(value, np.ndarray):
         return value
     if isinstance(value, np.ndarray):
-        return torch.from_numpy(value)
-    return torch.as_tensor(value)
+        return value
+    return np.asarray(value)
 
 
-def _float(value: Any) -> torch.Tensor:
-    return _tensor(value).float()
+def _float(value: Any) -> np.ndarray:
+    return _array(value).astype(FLOAT)
 
 
-def _coords(view: Dict[str, Any], num_nodes: int) -> torch.Tensor:
+def _coords(view: Dict[str, Any], num_nodes: int) -> np.ndarray:
     coords = view.get("coords")
     if coords is None:
-        return torch.zeros((num_nodes, 3), dtype=torch.float32)
+        return np.zeros((num_nodes, 3), dtype=FLOAT)
     return _float(coords).reshape(num_nodes, -1)[:, :3]
 
 
@@ -451,18 +451,18 @@ def _pack(**kwargs: Any) -> Dict[str, Any]:
     return {key: kwargs[key] for key in _CANONICAL_KEYS}
 
 
-def _concat_tuple(value: Any, dim: int) -> Optional[torch.Tensor]:
+def _concat_tuple(value: Any, dim: int) -> Optional[np.ndarray]:
     """Concatenate a tuple of tensors; pass a lone tensor through."""
     if value is None:
         return None
     if isinstance(value, (tuple, list)):
         if not value:
             return None
-        return torch.cat([_float(v) for v in value], dim=dim)
+        return np.concatenate([_float(v) for v in value], axis=dim)
     return _float(value)
 
 
-def _concat_columns(view: Dict[str, Any], keys: Iterable[str], rows: int) -> torch.Tensor:
+def _concat_columns(view: Dict[str, Any], keys: Iterable[str], rows: int) -> np.ndarray:
     """Stack the named per-row arrays into one float matrix."""
     columns = []
     for key in keys:
@@ -470,14 +470,14 @@ def _concat_columns(view: Dict[str, Any], keys: Iterable[str], rows: int) -> tor
         if value is None:
             continue
         tensor = _float(value)
-        columns.append(tensor.reshape(rows, -1) if tensor.dim() > 1 else tensor.reshape(rows, 1))
+        columns.append(tensor.reshape(rows, -1) if tensor.ndim > 1 else tensor.reshape(rows, 1))
     if not columns:
-        return torch.zeros((rows, 0), dtype=torch.float32)
-    return torch.cat(columns, dim=-1)
+        return np.zeros((rows, 0), dtype=FLOAT)
+    return np.concatenate(columns, axis=-1)
 
 
-def _concat_tokens(view: Dict[str, Any], keys: Iterable[str], rows: int) -> Optional[torch.Tensor]:
+def _concat_tokens(view: Dict[str, Any], keys: Iterable[str], rows: int) -> Optional[np.ndarray]:
     columns = [
-        _tensor(view[key]).long().reshape(rows, 1) for key in keys if view.get(key) is not None
+        _array(view[key]).astype(INT).reshape(rows, 1) for key in keys if view.get(key) is not None
     ]
-    return torch.cat(columns, dim=-1) if columns else None
+    return np.concatenate(columns, axis=-1) if columns else None

@@ -1,47 +1,46 @@
 """Tests for plmol/utils.py — kNN mask utilities."""
 
 import numpy as np
-import torch
 
-from plmol.utils import knn_mask_torch, knn_mask_bipartite_numpy
+from plmol.utils import knn_mask, knn_mask_bipartite_numpy
 
 
-class TestKnnMaskTorch:
+class TestKnnMask:
     def test_basic_square(self):
         """k nearest neighbors selected correctly."""
-        dm = torch.tensor([
+        dm = np.array([
             [0.0, 1.0, 3.0, 5.0],
             [1.0, 0.0, 2.0, 4.0],
             [3.0, 2.0, 0.0, 1.0],
             [5.0, 4.0, 1.0, 0.0],
         ])
-        mask = knn_mask_torch(dm, k=2)
+        mask = knn_mask(dm, k=2)
         assert mask.shape == (4, 4)
-        assert mask.dtype == torch.bool
+        assert mask.dtype == np.bool_
         # Each row should have exactly 2 True values
-        assert (mask.sum(dim=1) == 2).all()
+        assert (mask.sum(axis=1) == 2).all()
 
     def test_k_exceeds_n(self):
         """k > n-1 is clamped."""
-        dm = torch.tensor([[0.0, 1.0], [1.0, 0.0]])
-        mask = knn_mask_torch(dm, k=10)
+        dm = np.array([[0.0, 1.0], [1.0, 0.0]])
+        mask = knn_mask(dm, k=10)
         # k clamped to 1 (n-1=1)
         assert mask.sum() == 2  # each row has 1 neighbor
 
     def test_single_node(self):
-        dm = torch.tensor([[0.0]])
-        mask = knn_mask_torch(dm, k=1)
+        dm = np.array([[0.0]])
+        mask = knn_mask(dm, k=1)
         assert mask.shape == (1, 1)
         assert mask.sum() == 0  # no neighbors for single node
 
     def test_symmetric_distance(self):
         """For symmetric distance matrix, mask may not be symmetric (kNN is directional)."""
         n = 5
-        coords = torch.randn(n, 3)
-        dm = torch.cdist(coords, coords)
-        mask = knn_mask_torch(dm, k=2)
+        coords = np.random.default_rng(3).standard_normal((n, 3)).astype(np.float32)
+        dm = np.linalg.norm(coords[:, None] - coords[None], axis=-1)
+        mask = knn_mask(dm, k=2)
         assert mask.shape == (n, n)
-        assert (mask.sum(dim=1) == 2).all()
+        assert (mask.sum(axis=1) == 2).all()
 
 
 class TestKnnMaskBipartiteNumpy:
@@ -206,19 +205,24 @@ class TestDihedralAngles:
 
 
 class TestNumpyNeighbourHelpers:
-    """The numpy spellings must agree with the torch ones they replace."""
+    """What the torch versions used to guarantee, now asserted directly."""
 
-    def test_knn_mask_matches_the_torch_version(self):
+    def test_knn_mask_selects_the_k_nearest(self):
         from plmol.utils import knn_mask
 
         rng = np.random.default_rng(0)
         distances = (rng.random((40, 40)) * 10).astype(np.float32)
         distances = (distances + distances.T) / 2
         for k in (1, 5, 20, 39, 100):
-            assert np.array_equal(
-                knn_mask(distances, k),
-                knn_mask_torch(torch.from_numpy(distances), k).numpy(),
-            ), f"k={k}"
+            mask = knn_mask(distances, k)
+            expected_k = min(k, 39)
+            assert (mask.sum(axis=1) == expected_k).all(), f"k={k}"
+            working = distances.copy()
+            np.fill_diagonal(working, np.inf)
+            for row in range(40):
+                chosen = working[row][mask[row]]
+                rejected = working[row][~mask[row]]
+                assert chosen.max() <= rejected.min(), f"k={k}, row={row}"
 
     def test_knn_mask_never_selects_the_diagonal(self):
         from plmol.utils import knn_mask
@@ -235,16 +239,15 @@ class TestNumpyNeighbourHelpers:
         knn_mask(distances, 2)
         assert np.array_equal(distances, np.ones((5, 5), dtype=np.float32))
 
-    def test_dense_to_edges_matches_the_torch_version(self):
-        from plmol.utils import dense_to_edges, dense_to_edges_torch
+    def test_dense_to_edges_finds_every_nonzero_pair(self):
+        from plmol.utils import dense_to_edges
 
         rng = np.random.default_rng(2)
         adjacency = (rng.random((20, 20, 3)) * (rng.random((20, 20, 1)) > 0.7)).astype(np.float32)
         src, dst, values = dense_to_edges(adjacency)
-        t_src, t_dst, t_values = dense_to_edges_torch(torch.from_numpy(adjacency))
-        assert np.array_equal(src, t_src.numpy())
-        assert np.array_equal(dst, t_dst.numpy())
-        assert np.array_equal(values, t_values.numpy())
+        expected = np.argwhere(adjacency.any(axis=-1))
+        assert np.array_equal(np.stack([src, dst], axis=1), expected)
+        assert np.array_equal(values, adjacency[src, dst])
 
     def test_dense_to_edges_handles_a_two_dimensional_adjacency(self):
         from plmol.utils import dense_to_edges

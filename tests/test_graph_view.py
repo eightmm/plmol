@@ -61,7 +61,7 @@ def test_every_view_yields_the_same_keys(ligand_views, protein_views):
 def test_ligand_views_normalize(ligand_views, mode):
     g = as_graph(ligand_views[mode])
     assert g["edge_index"].shape == (2, g["num_edges"])
-    assert g["edge_index"].dtype == torch.int64
+    assert g["edge_index"].dtype == np.int64
     assert g["node_features"].shape[0] == g["num_nodes"]
     assert g["edge_features"].shape[0] == g["num_edges"]
     assert g["coords"].shape == (g["num_nodes"], 3)
@@ -87,14 +87,14 @@ def test_dense_ligand_graph_becomes_sparse_edges(ligand_views):
     adjacency = torch.as_tensor(view["adjacency"]).float()
     src, dst = g["edge_index"]
     kept = list(BOND_VIEW_CHANNELS)
-    assert torch.equal(g["edge_features"], adjacency[src, dst][:, kept])
+    assert np.array_equal(g["edge_features"], adjacency[src, dst][:, kept])
 
 
 def test_residue_graph_keeps_vectors_separate(protein_views):
     """SE(3) models need vector features unflattened."""
     g = as_graph(protein_views["graph"])
     assert g["node_vector_features"] is not None
-    assert g["node_vector_features"].dim() == 3
+    assert g["node_vector_features"].ndim == 3
     assert g["node_vector_features"].shape[-1] == 3
     assert g["node_vector_features"].shape[0] == g["num_nodes"]
     assert g["edge_vector_features"].shape[0] == g["num_edges"]
@@ -103,17 +103,17 @@ def test_residue_graph_keeps_vectors_separate(protein_views):
 def test_atom_graph_exposes_tokens_and_continuous_features(protein_views):
     g = as_graph(protein_views["atom_graph"])
     assert g["node_tokens"] is not None
-    assert g["node_tokens"].dtype == torch.int64
+    assert g["node_tokens"].dtype == np.int64
     assert g["node_tokens"].shape == (g["num_nodes"], 3)
-    assert g["node_features"].dtype == torch.float32
+    assert g["node_features"].dtype == np.float32
 
 
 def test_numpy_input_comes_back_as_tensors(ligand_views):
     """Ligand.featurize returns numpy; the normalized view is always torch."""
     assert isinstance(ligand_views["graph"]["node_features"], np.ndarray)
     g = as_graph(ligand_views["graph"])
-    assert torch.is_tensor(g["node_features"])
-    assert torch.is_tensor(g["edge_features"])
+    assert isinstance(g["node_features"], np.ndarray)
+    assert isinstance(g["edge_features"], np.ndarray)
 
 
 def test_unrecognized_input_is_rejected():
@@ -126,8 +126,8 @@ def test_unrecognized_input_is_rejected():
 def test_normalizing_twice_is_stable(ligand_views):
     once = as_graph(ligand_views["bond_graph"])
     twice = as_graph(once)
-    assert torch.equal(once["edge_index"], twice["edge_index"])
-    assert torch.equal(once["node_features"], twice["node_features"])
+    assert np.array_equal(once["edge_index"], twice["edge_index"])
+    assert np.array_equal(once["node_features"], twice["node_features"])
 
 
 # -- Batching -----------------------------------------------------------------
@@ -167,13 +167,13 @@ def test_collate_accepts_raw_featurize_output():
     smiles = ["CCO", "c1ccccc1"]
     raw = [Ligand.from_smiles(s).featurize(mode="graph")["graph"] for s in smiles]
     normalized = [as_graph(v) for v in raw]
-    assert torch.equal(collate(raw)["edge_index"], collate(normalized)["edge_index"])
+    assert np.array_equal(collate(raw)["edge_index"], collate(normalized)["edge_index"])
 
 
 def test_collate_single_graph_is_a_passthrough(small_batch):
     batch = collate(small_batch[:1])
     assert batch["num_graphs"] == 1
-    assert torch.equal(batch["edge_index"], small_batch[0]["edge_index"])
+    assert np.array_equal(batch["edge_index"], small_batch[0]["edge_index"])
     assert bool((batch["batch"] == 0).all())
 
 
@@ -275,7 +275,7 @@ class TestBondViewChannels:
             src, dst = torch.where(mask)
             if src.numel():
                 rows.append(adjacency[src, dst])
-        return torch.cat(rows)
+        return np.concatenate(rows)
 
     def test_the_two_sets_partition_the_adjacency(self, ligand_views):
         width = torch.as_tensor(ligand_views["graph"]["adjacency"]).shape[-1]
@@ -293,7 +293,7 @@ class TestBondViewChannels:
                 # The only survivor is the euclidean distance, which is the
                 # bond length that channel 20 already carries.
                 other = rows[:, 20]
-                corr = torch.corrcoef(torch.stack([column, other]))[0, 1]
+                corr = np.corrcoef(np.stack([column, other]))[0, 1]
                 assert abs(float(corr)) > 0.9999, f"channel {channel} is informative"
                 collinear.append(channel)
         assert constant == [27, 28, 29, 30, 31, 32, 35]
@@ -303,7 +303,7 @@ class TestBondViewChannels:
         """A sanity check in the other direction: the kept set carries signal."""
         rows = self._bond_rows()
         kept = rows[:, list(BOND_VIEW_CHANNELS)]
-        assert int((kept.std(dim=0) > 0).sum()) > 20
+        assert int((kept.std(axis=0) > 0).sum()) > 20
 
     def test_the_dense_adjacency_is_unchanged(self, ligand_views):
         """Only the sparse views drop channels; the dense contract is 37 wide."""
@@ -317,7 +317,7 @@ class TestProteinAtomNodeHasNoComplement:
         g = as_graph(view)
         burial = torch.as_tensor(view["burial_index"]).float()
         for column in range(g["node_features"].shape[1]):
-            assert not torch.allclose(g["node_features"][:, column], 1.0 - burial), (
+            assert not np.allclose(g["node_features"][:, column], 1.0 - burial), (
                 f"column {column} is the complement of burial_index"
             )
 
@@ -326,7 +326,7 @@ class TestProteinAtomNodeHasNoComplement:
         assert "relative_sasa" in view
         burial = torch.as_tensor(view["burial_index"]).float()
         relative = torch.as_tensor(view["relative_sasa"]).float()
-        assert torch.allclose(burial, 1.0 - relative)
+        assert np.allclose(burial, 1.0 - relative)
 
 
 class TestNucleicAcidViews:
