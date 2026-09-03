@@ -38,6 +38,7 @@ plmol/
 ├── errors.py                       # PlmolError, InputError, DependencyError, FeatureError
 ├── specs.py                        # FeatureSpec, FEATURE_SPECS (PROTEIN/LIGAND/INTERACTION/NUCLEIC_ACID)
 ├── arrays.py                       # numpy spellings of the torch ops, and to_torch
+├── cavity.py                       # LIGSITE cavity detection, no ligand needed
 ├── utils.py                        # SASA/burial helpers and kNN mask utilities
 ├── sasa.py                         # Shrake-Rupley SASA; freesasa or native backend
 ├── spatial.py                      # Neighbour search; sphere occlusion, knn, NeighbourIndex
@@ -169,6 +170,22 @@ whose obvious numpy spelling differs from what torch did, and the converters.
 - `one_hot(indices, num_classes)`, `pad_last(array, before, after)`.
 - `FLOAT` and `INT` — the float32 and int64 widths every feature uses.
 
+### Cavities
+
+Enclosed spaces found from the structure alone. See
+[Cavities](protein.md#cavities).
+
+- `detect_cavities(coords, radii, ...)` — every cavity, largest first.
+- `Cavity` — centre, volume, buriedness, grid points, lining atoms and residues.
+- `element_vdw_radii(elements)` — the radii detection expects.
+- `Protein.featurize(mode="cavity")`, `Protein.featurize_cavity(index)`.
+
+### Nucleic acid pairing
+
+- `find_base_pairs(residues)` — Watson-Crick pairs by hydrogen bond geometry.
+- `BasePair` — the two indices, the kind, the bond lengths, the plane angle.
+  See [Watson-Crick Pairing](nucleic_acid.md#watson-crick-pairing).
+
 ### Backends
 
 Both cover an optional dependency: the library runs without either, on its own
@@ -236,3 +253,6 @@ All constants live in `plmol.constants` and are re-exported from `plmol.constant
 
 ### Runtime
 - Default cutoffs & thresholds (pocket distance, SASA burial, grid density, etc.).
+- Cavity detection: `CAVITY_GRID_RESOLUTION`, `CAVITY_PSP_THRESHOLD`,
+  `CAVITY_SCAN_LENGTH`, `CAVITY_MIN_POINTS`, `CAVITY_PROBE_RADIUS`,
+  `CAVITY_PADDING`, `CAVITY_LINING_MARGIN`.

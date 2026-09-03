@@ -392,3 +392,31 @@ result = complex.featurize(
     requests=["protein", "ligand", "nucleic_acid", "interaction"]
 )
 ```
+
+
+## Watson-Crick Pairing
+
+A graph built from distance alone cannot tell a base pair from any other close
+contact. `graph` mode reports the pairing alongside its edges, so `edge_attr`
+keeps its width of 3.
+
+| Key | Shape | Description |
+|-----|-------|-------------|
+| `pair_index` | `(2, P)` `int64` | Purine row, then its pyrimidine |
+| `pair_kind` | `(P,)` `int64` | 0 = A·T, 1 = A·U, 2 = G·C |
+| `pair_c1_distance` | `(P,)` `float32` | C1'-C1' separation; about 10.5 A for a real pair |
+| `pair_plane_angle` | `(P,)` `float32` | Degrees between the two base planes |
+| `is_paired` | `(N,)` `float32` | Per nucleotide |
+
+A pair is recognised by its hydrogen bonds, not by sequence: the purine's N1 to
+the pyrimidine's N3 is the anchor, at least one of the pair's other canonical
+bonds has to be within 3.5 A as well, and the bases must be within 60 degrees
+of coplanar. Stacked bases are coplanar too, which is why the bond length is
+checked first. Each base takes one partner, the one with the shortest anchor.
+
+```python
+from plmol import find_base_pairs
+
+pairs = find_base_pairs(residues)      # residue dicts, as the featurizer builds them
+pairs[0].kind, pairs[0].hbond_distances, pairs[0].c1_distance
+```

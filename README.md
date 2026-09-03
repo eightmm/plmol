@@ -1,6 +1,6 @@
 # plmol
 
-Unified bio-molecule feature extraction for ML. Convert PDB, mmCIF, SMILES, SDF, and sequence strings into numpy arrays ready for GNNs, transformers, and 3D models. Supports proteins, ligands, nucleic acids (DNA/RNA), metal coordination, and arbitrary molecular complexes.
+Unified bio-molecule feature extraction for ML. Convert PDB, mmCIF, SMILES, SDF, and sequence strings into numpy arrays ready for GNNs, transformers, and 3D models. Supports proteins, ligands, nucleic acids (DNA/RNA), cavity detection, metal coordination, and arbitrary molecular complexes.
 
 ## Installation
 

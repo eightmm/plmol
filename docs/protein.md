@@ -140,6 +140,7 @@ result = protein.featurize(
 | `"backbone"` | `"backbone"` | Backbone features for inverse folding (dihedrals, kNN, local frames) |
 | `"surface"` | `"surface"` | dMaSIF point cloud with per-vertex features |
 | `"voxel"` | `"voxel"` | 16-channel 3D voxel grid |
+| `"cavity"` | `"cavity"` | Enclosed spaces found without a ligand, largest first |
 | `"sequence"` | `"sequence"` | Amino acid sequence string or chain dict |
 | `"all"` | all above | All modes combined |
 
@@ -517,6 +518,67 @@ seq = result["sequence"]
 ---
 
 ## Pocket Featurization
+
+## Cavities
+
+Where the enclosed spaces are, with nothing bound. `extract_pocket` answers
+"which residues line this ligand"; this answers the question you have before
+there is a ligand.
+
+```python
+from plmol import Protein, detect_cavities
+
+cavities = Protein.from_pdb("apo.pdb").featurize(mode="cavity")["cavity"]
+cavities["volume"][0]        # the largest, in cubic Angstrom
+cavities["center"][0]        # a docking box centre
+```
+
+| Key | Shape | Description |
+|-----|-------|-------------|
+| `num_cavities` | `int` | How many were found |
+| `center` | `(C, 3)` `float32` | Centroid of each cavity's grid points |
+| `volume` | `(C,)` `float32` | Cubic Angstrom |
+| `buriedness` | `(C,)` `float32` | Mean enclosed-axis count, 0 to 7 |
+| `extent` | `(C, 3)` `float32` | Bounding box side lengths |
+| `num_lining_residues` | `(C,)` `int64` | Residues touching the cavity |
+| `points` | list of `(M, 3)` | The grid points themselves |
+| `lining_atom_indices`, `lining_residues` | lists | What lines each cavity |
+
+Rows are sorted by volume, so the top `k` is a slice.
+
+### How it works
+
+The method is LIGSITE's. The structure goes on a 1 Angstrom grid and every
+point inside an atom's van der Waals sphere plus the probe is marked. From each
+remaining point, seven axes are scanned -- the three grid axes and the four
+body diagonals. An axis is *enclosed* when there is structure in both
+directions along it within `scan_length`, meaning the point sits between two
+walls rather than out in bulk solvent. Points enclosed on `psp_threshold` axes
+are cavity; adjacent cavity points are one cavity.
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `resolution` | 1.0 A | Finer resolves smaller pockets, at the cube of the ratio |
+| `psp_threshold` | 5 of 7 | 7 finds only sealed voids, 3 also catches open grooves |
+| `scan_length` | 8.0 A | How far to look for the far wall; the middle of a wider cavity is invisible to a shorter scan |
+| `min_points` | 10 | Smaller clusters are dropped as noise |
+
+On a 3260-atom protein this takes about 120 ms and finds 13 cavities.
+
+What it is not: cavity detection ranks by volume, not by druggability. The
+largest cavity is where a ligand usually sits -- on the bundled 10gs structure
+it is the one the crystallographic ligand occupies, and its lining covers 92%
+of the residues `extract_pocket` finds from that ligand -- but a large cleft
+can merge neighbouring grooves. Raise `psp_threshold` to 6 for a tighter site.
+
+```python
+# featurize_cavity is featurize_pocket for a structure with nothing bound
+pocket = Protein.from_pdb("apo.pdb").featurize_cavity(0, mode="graph")
+pocket["graph"]      # the lining residues, as any other residue graph
+pocket["cavity"]     # the cavity itself, one row
+```
+
+## Pocket (ligand-guided)
 
 Extract and featurize the binding pocket around a ligand.
 
