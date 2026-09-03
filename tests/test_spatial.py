@@ -92,6 +92,43 @@ class TestOverlappingSpherePairs:
         with pytest.raises(InputError, match=r"\(N, 3\)"):
             overlapping_sphere_pairs(np.zeros((4, 2)), np.zeros(4))
 
+    def test_a_repeat_call_is_served_from_the_cache(self):
+        """SASA and the surface point cloud ask this twice in a row."""
+        from plmol.spatial import _PAIR_CACHE
+
+        rng = np.random.default_rng(40)
+        coords = rng.normal(scale=3.0, size=(200, 3)).astype(np.float32)
+        radii = rng.uniform(1.0, 2.0, size=200).astype(np.float32)
+        _PAIR_CACHE.clear()
+        first = overlapping_sphere_pairs(coords, radii)
+        assert len(_PAIR_CACHE) == 1
+        second = overlapping_sphere_pairs(coords, radii)
+        assert all(np.array_equal(a, b) for a, b in zip(first, second))
+
+    def test_the_cache_keys_on_content_not_on_identity(self):
+        """A recycled buffer with different numbers must not be served stale."""
+        from plmol.spatial import _PAIR_CACHE
+
+        rng = np.random.default_rng(41)
+        coords = rng.normal(scale=3.0, size=(150, 3)).astype(np.float32)
+        radii = np.full(150, 1.8, dtype=np.float32)
+        _PAIR_CACHE.clear()
+        first = overlapping_sphere_pairs(coords, radii)
+        coords[0] += 50.0                      # same object, different content
+        second = overlapping_sphere_pairs(coords, radii)
+        assert len(second[0]) != len(first[0])
+        assert set(zip(second[0].tolist(), second[1].tolist())) == brute_force_pairs(coords, radii)
+
+    def test_a_different_radius_is_a_different_answer(self):
+        from plmol.spatial import _PAIR_CACHE
+
+        rng = np.random.default_rng(42)
+        coords = rng.normal(scale=3.0, size=(150, 3)).astype(np.float32)
+        _PAIR_CACHE.clear()
+        small = overlapping_sphere_pairs(coords, np.full(150, 1.0, np.float32))
+        large = overlapping_sphere_pairs(coords, np.full(150, 2.5, np.float32))
+        assert len(large[0]) > len(small[0])
+
     def test_length_mismatch_is_rejected(self):
         with pytest.raises(InputError, match="radii"):
             overlapping_sphere_pairs(np.zeros((4, 3)), np.zeros(3))

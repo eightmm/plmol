@@ -27,7 +27,9 @@ installed and falls back to the grid when it is not.
 from __future__ import annotations
 
 import threading
+from collections import OrderedDict
 from functools import lru_cache
+from hashlib import blake2b
 from typing import Optional, Sequence, Tuple
 
 import numpy as np
@@ -55,6 +57,14 @@ _PAIR_BLOCK = 2048
 _CELL_SIZE_SAMPLE = 128
 
 _BACKEND = "auto"
+
+#: The last few sphere-pair results, keyed on what they were computed from.
+#: SASA and the surface point cloud ask the same question of the same atoms
+#: one after the other, and the pair search is a third of either. Bounded by
+#: total bytes rather than by count, because a large structure's pair list is
+#: tens of megabytes and this cache is not something a caller asked for.
+_PAIR_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()
+_PAIR_CACHE_MAX_BYTES = 64 << 20
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +281,12 @@ def overlapping_sphere_pairs(
         empty = np.zeros(0, dtype=np.int64)
         return empty, empty.copy(), np.zeros((0, 3), np.float32), np.zeros(0, np.float32)
 
+    key = (n, _digest(coords), _digest(radii))
+    cached = _PAIR_CACHE.get(key)
+    if cached is not None:
+        _PAIR_CACHE.move_to_end(key)
+        return cached
+
     def touching(row, index, squared):
         limit = radii[row] + radii[index]
         limit *= limit
@@ -278,7 +294,18 @@ def overlapping_sphere_pairs(
 
     # Two spheres can only touch within the largest possible sum of radii, so
     # that is the cell size: one ring of cells then covers every candidate.
-    return _grid_pairs(coords, 2.0 * radii.max(), touching)
+    result = _grid_pairs(coords, 2.0 * radii.max(), touching)
+    stored = sum(part.nbytes for part in result)
+    if stored <= _PAIR_CACHE_MAX_BYTES:
+        _PAIR_CACHE[key] = result
+        while sum(sum(p.nbytes for p in v) for v in _PAIR_CACHE.values()) > _PAIR_CACHE_MAX_BYTES:
+            _PAIR_CACHE.popitem(last=False)
+    return result
+
+
+def _digest(array: np.ndarray) -> bytes:
+    """Content key for an array, so a cache cannot be fooled by a recycled id."""
+    return blake2b(np.ascontiguousarray(array), digest_size=16).digest()
 
 
 def pairs_within(
