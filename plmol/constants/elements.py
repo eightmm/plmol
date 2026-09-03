@@ -210,4 +210,5 @@ ELEMENT_SYMBOL_TO_ATOMIC_NUMBER = {
     "SE": 34,
     "BR": 35,
     "I": 53,
+    "HG": 80,
 }
