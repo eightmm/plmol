@@ -1,28 +1,26 @@
-"""Solvent accessible surface area, with or without freesasa.
+"""Solvent accessible surface area.
 
-plmol has always normalised SASA-derived features by its own
-``RESIDUE_MAX_SASA`` table while getting the areas themselves from freesasa. If
-freesasa was not installed, the SASA blocks quietly became zeros and every
-``burial_index`` became 0.5 -- garbage presented as features. This module
-removes that failure mode: a Shrake-Rupley implementation in numpy stands in
-when freesasa is missing, and can be selected deliberately.
+Shrake-Rupley: sample each atom's expanded sphere and keep the points no
+neighbouring atom covers. The occlusion test is
+:func:`plmol.spatial.sphere_point_exposure`, which considers every overlapping
+neighbour rather than a fixed number of nearest ones, so nothing here has a
+sampling cap that could make an area come out too large.
 
-freesasa stays the default where it is available. It is not slower than the
-native path and it is what every published plmol feature was computed with, so
-switching silently would move values: measured against freesasa's own
-Shrake-Rupley with matching radii the native areas agree to r=0.994, but
-against freesasa's default Lee-Richards with its ProtOr radii they differ by
-r=0.982 and 2% in total area, because both the algorithm and the atomic radii
-differ.
-
-    from plmol import set_sasa_backend
-    set_sasa_backend("native")   # or "freesasa", or "auto" (the default)
+Up to 0.3.x this deferred to freesasa when it was installed. It no longer does:
+this path is 1.3 to 2.0 times faster on every mode that uses SASA, and one
+implementation that plmol owns beats two that disagree. Values from 0.3.x and
+earlier were freesasa's, which uses Lee-Richards with ProtOr radii where this
+uses Shrake-Rupley with plmol's own element table -- per atom the two correlate
+at 0.982 and the totals differ by about 2%.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
+from hashlib import blake2b
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -38,78 +36,18 @@ from .spatial import sphere_point_exposure
 
 logger = logging.getLogger(__name__)
 
-#: Selectable backends. ``"auto"`` prefers freesasa and falls back to native.
-SASA_BACKENDS = ("auto", "freesasa", "native")
-
-#: Elements freesasa's default classifier calls polar. Verified against
-#: ``freesasa.Classifier`` on a 3260-atom protein: 100% agreement.
+#: Elements that count as polar. Verified against freesasa's classifier while
+#: that was still a dependency: 100% agreement on a 3260-atom protein.
 POLAR_ELEMENTS = frozenset({"N", "O", "S"})
 
-#: Backbone atoms, which freesasa reports as "main chain".
+#: Backbone atoms, reported separately as "main chain".
 MAIN_CHAIN_ATOM_NAMES = frozenset({"N", "CA", "C", "O"})
 
-#: Solvent probe radius in Angstrom, the usual water value freesasa also uses.
+#: Solvent probe radius in Angstrom, the usual value for water.
 DEFAULT_PROBE_RADIUS = 1.4
 
-#: Sample points per atom sphere. freesasa's Shrake-Rupley default is 100.
+#: Sample points per atom sphere, the usual Shrake-Rupley default.
 DEFAULT_SASA_POINTS = 100
-
-_BACKEND = "auto"
-
-
-def set_sasa_backend(name: str) -> None:
-    """Choose which implementation computes SASA.
-
-    Args:
-        name: ``"auto"`` (freesasa when importable, else native),
-            ``"freesasa"`` or ``"native"``.
-
-    Raises:
-        InputError: If the name is not one of :data:`SASA_BACKENDS`.
-    """
-    global _BACKEND
-    if name not in SASA_BACKENDS:
-        raise InputError(f"Unknown SASA backend {name!r}. Choose one of {SASA_BACKENDS}.")
-    _BACKEND = name
-
-
-def get_sasa_backend() -> str:
-    """The configured backend, which may still be ``"auto"``."""
-    return _BACKEND
-
-
-def resolve_sasa_backend() -> str:
-    """The backend that would actually run: ``"freesasa"`` or ``"native"``.
-
-    Raises:
-        DependencyError: If ``"freesasa"`` was requested but is not installed.
-    """
-    from .errors import DependencyError
-
-    if _BACKEND == "native":
-        return "native"
-    if _BACKEND == "freesasa":
-        if _import_freesasa() is None:
-            raise DependencyError(
-                "SASA backend 'freesasa' was requested but the package is not "
-                "installed. Install it, or use set_sasa_backend('native')."
-            )
-        return "freesasa"
-    return "freesasa" if _import_freesasa() is not None else "native"
-
-
-def _import_freesasa():
-    try:
-        import freesasa
-
-        return freesasa
-    except ImportError:
-        return None
-
-
-# ---------------------------------------------------------------------------
-# The algorithm
-# ---------------------------------------------------------------------------
 
 
 def _fibonacci_sphere(n_points: int) -> np.ndarray:
@@ -117,6 +55,14 @@ def _fibonacci_sphere(n_points: int) -> np.ndarray:
     from .surface.point_cloud import _fibonacci_sphere as cached
 
     return cached(n_points)
+
+
+#: The last few Shrake-Rupley results, keyed on what they were computed from.
+#: A single Protein asked for graph, atom_graph, voxel and surface runs this
+#: four times on the same atoms.
+_AREA_CACHE: "OrderedDict[tuple, np.ndarray]" = OrderedDict()
+_AREA_CACHE_MAX = 4
+_AREA_CACHE_LOCK = threading.Lock()
 
 
 def shrake_rupley(
@@ -144,7 +90,7 @@ def shrake_rupley(
     Returns:
         Per-atom SASA ``(N,)`` in square Angstrom.
     """
-    coords = np.asarray(coords, dtype=np.float32)
+    coords = np.ascontiguousarray(coords, dtype=np.float32)
     if coords.ndim != 2 or coords.shape[1] != 3:
         raise InputError(f"coords must be (N, 3), got {coords.shape}.")
     n_atoms = coords.shape[0]
@@ -152,6 +98,12 @@ def shrake_rupley(
         return np.zeros(0, dtype=np.float64)
 
     expanded = np.asarray(radii, dtype=np.float32) + probe_radius
+    key = (n_atoms, n_points, _digest(coords), _digest(expanded))
+    with _AREA_CACHE_LOCK:
+        cached = _AREA_CACHE.get(key)
+        if cached is not None:
+            _AREA_CACHE.move_to_end(key)
+            return cached
     exposed = sphere_point_exposure(
         coords,
         expanded,
@@ -159,7 +111,18 @@ def shrake_rupley(
         _fibonacci_sphere,
     )
     counts = exposed.reshape(n_atoms, n_points).sum(axis=1)
-    return 4.0 * np.pi * expanded.astype(np.float64) ** 2 * (counts / n_points)
+    areas = 4.0 * np.pi * expanded.astype(np.float64) ** 2 * (counts / n_points)
+    areas.setflags(write=False)
+    with _AREA_CACHE_LOCK:
+        _AREA_CACHE[key] = areas
+        while len(_AREA_CACHE) > _AREA_CACHE_MAX:
+            _AREA_CACHE.popitem(last=False)
+    return areas
+
+
+def _digest(array: np.ndarray) -> bytes:
+    """Content key for an array, so a recycled buffer cannot be served stale."""
+    return blake2b(np.ascontiguousarray(array), digest_size=16).digest()
 
 
 # ---------------------------------------------------------------------------
@@ -169,10 +132,11 @@ def shrake_rupley(
 
 @dataclass(frozen=True)
 class ResidueArea:
-    """The fields of a freesasa residue area that plmol reads.
+    """Per-residue areas, absolute and relative.
 
-    ``relative*`` values are fractions of ``RESIDUE_MAX_SASA`` -- the same
-    convention freesasa uses, where 1.0 means fully exposed.
+    ``relative*`` values are fractions of ``RESIDUE_MAX_SASA``, where 1.0 means
+    fully exposed. The names are the ones freesasa used, so code written
+    against 0.3.x still reads them.
     """
 
     total: float
@@ -188,7 +152,7 @@ class ResidueArea:
 
 
 class NativeSasaStructure:
-    """The ``freesasa.Structure`` accessors plmol uses, backed by ``PDBParser``."""
+    """The atom table a SASA result is indexed by, from plmol's own parser."""
 
     def __init__(
         self,
@@ -224,7 +188,7 @@ class NativeSasaStructure:
 
 
 class NativeSasaResult:
-    """The ``freesasa.Result`` accessors plmol uses."""
+    """Per-atom and per-residue areas for one structure."""
 
     def __init__(self, structure: NativeSasaStructure, areas: np.ndarray):
         self._structure = structure
@@ -300,11 +264,10 @@ def native_structure_result(
     probe_radius: float = DEFAULT_PROBE_RADIUS,
     n_points: int = DEFAULT_SASA_POINTS,
 ) -> Tuple[NativeSasaStructure, NativeSasaResult]:
-    """Parse a PDB and compute SASA without freesasa.
+    """Parse a PDB and compute its SASA.
 
     Atoms come from plmol's own ``PDBParser``, so the atom set matches every
-    other feature the library derives from the same file -- unlike freesasa,
-    which reads records the parser drops.
+    other feature the library derives from the same file.
 
     Args:
         pdb_file: Path to a PDB file.
@@ -338,5 +301,5 @@ def element_radius(element: Optional[str]) -> float:
 
 
 def is_polar_element(element: Optional[str]) -> bool:
-    """Whether an element counts as polar, matching freesasa's classifier."""
+    """Whether an element counts as polar."""
     return (element or "").strip().upper()[:1] in POLAR_ELEMENTS

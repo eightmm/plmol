@@ -92,8 +92,8 @@ class TestKnnMaskBipartiteNumpy:
         assert not mask.any()
 
 
-class TestBurialIndexFreeSasaReuse:
-    """compute_burial_index may reuse a file-based FreeSASA result."""
+class TestBurialIndex:
+    """burial_index is 1 - sasa/RESIDUE_MAX_SASA, from plmol's own areas."""
 
     @staticmethod
     def _atoms(pdb_path):
@@ -101,66 +101,34 @@ class TestBurialIndexFreeSasaReuse:
 
         atoms = PDBParser(pdb_path).protein_atoms
         positions = np.array([a.coords for a in atoms], dtype=np.float64)
-        res_names = [a.res_name for a in atoms]
-        atom_names = [a.atom_name for a in atoms]
-        return positions, res_names, atom_names, len(atoms)
+        return (positions, [a.res_name for a in atoms],
+                [a.atom_name for a in atoms], len(atoms))
 
-    @staticmethod
-    def _standardized(pdb_path):
-        """The path the featurizers actually hand to compute_burial_index."""
-        from plmol.protein.featurizer import ProteinFeaturizer
-
-        featurizer = ProteinFeaturizer(pdb_path)
-        return featurizer, featurizer.tmp_pdb or featurizer.input_file
-
-    def test_reuse_matches_the_atom_by_atom_path(self, example_pdb):
+    def test_it_spans_a_real_range(self, example_pdb):
         from plmol.utils import compute_burial_index
 
-        featurizer, path = self._standardized(example_pdb)
-        positions, res_names, atom_names, n = self._atoms(path)
-        built = compute_burial_index(positions, res_names, atom_names, n)
-        reused = compute_burial_index(
-            positions, res_names, atom_names, n, pdb_file=path
-        )
-        assert reused.shape == built.shape
-        assert np.allclose(reused, built, atol=1e-6)
-        del featurizer
+        burial = compute_burial_index(*self._atoms(example_pdb))
+        assert burial.shape[0] > 0
+        assert 0.0 <= burial.min() and burial.max() <= 1.0
+        assert burial.std() > 0.01, "a near-constant column is the old bug"
 
-    def test_reuse_is_taken_for_a_standardized_file(self, example_pdb):
-        from plmol.utils import _burial_index_from_file
-
-        featurizer, path = self._standardized(example_pdb)
-        _, res_names, atom_names, n = self._atoms(path)
-        assert _burial_index_from_file(path, res_names, atom_names, n) is not None
-        del featurizer
-
-    def test_guard_rejects_a_raw_pdb_with_extra_records(self, example_pdb):
-        """FreeSASA reads records the parser drops, so the atom lists differ."""
-        from plmol.utils import _burial_index_from_file
-
-        _, res_names, atom_names, n = self._atoms(example_pdb)
-        assert _burial_index_from_file(example_pdb, res_names, atom_names, n) is None
-
-    def test_guard_rejects_mismatched_names(self, example_pdb):
-        from plmol.utils import _burial_index_from_file
-
-        featurizer, path = self._standardized(example_pdb)
-        _, res_names, atom_names, n = self._atoms(path)
-        renamed = list(atom_names)
-        renamed[0] = "ZZZ"
-        assert _burial_index_from_file(path, res_names, renamed, n) is None
-        del featurizer
-
-    def test_falls_back_when_the_path_is_unusable(self, example_pdb, tmp_path):
+    def test_the_pdb_file_argument_no_longer_changes_the_answer(self, example_pdb):
+        """It used to select a reuse path; the areas are cached on the
+        coordinates now, so it is kept only for callers written against 0.3.x."""
         from plmol.utils import compute_burial_index
 
-        positions, res_names, atom_names, n = self._atoms(example_pdb)
-        built = compute_burial_index(positions, res_names, atom_names, n)
-        fallback = compute_burial_index(
-            positions, res_names, atom_names, n, pdb_file=str(tmp_path / "missing.pdb")
+        atoms = self._atoms(example_pdb)
+        assert np.array_equal(
+            compute_burial_index(*atoms),
+            compute_burial_index(*atoms, pdb_file=example_pdb),
         )
-        assert np.allclose(fallback, built)
 
+    def test_no_coordinates_gives_the_neutral_value(self):
+        from plmol.utils import compute_burial_index
+
+        assert np.array_equal(
+            compute_burial_index(None, [], [], 4), np.full(4, 0.5, dtype=np.float32)
+        )
 
 class TestDihedralAngles:
     """One batched 4-point dihedral, shared by the protein and nucleic paths."""

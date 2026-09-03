@@ -16,9 +16,6 @@ pip install 'plmol[mmcif]'
 # Faster k-nearest-neighbour queries for the surface path (scipy)
 pip install 'plmol[spatial]'
 
-# freesasa as the SASA backend, instead of plmol's own Shrake-Rupley
-pip install 'plmol[sasa]'
-
 # For development
 pip install -e ".[dev]"
 ```
@@ -36,11 +33,9 @@ graph = to_torch(Protein.from_pdb("protein.pdb").featurize(mode="graph"))
 
 Everything else is optional, and every mode runs without any of it. torch is
 needed only for `to_torch` and for the protein language models, which are torch
-models. scipy and freesasa are the defaults for the queries and the areas they
-cover when they happen to be installed; see
-[Spatial Backends](docs/protein.md#spatial-backends) and
-[SASA Backends](docs/protein.md#sasa-backends) for what changes when they are
-not.
+models. scipy makes the surface path's neighbour queries about 1.4x faster and
+is used when present; see [Spatial Backends](docs/protein.md#spatial-backends)
+for what changes when it is not.
 
 ## Quick Start
 

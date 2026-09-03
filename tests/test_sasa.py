@@ -1,33 +1,15 @@
-"""Tests for the SASA backends.
+"""Tests for solvent accessible surface area.
 
-freesasa remains the default and its numbers are what the rest of the suite
-gates on. These tests cover the native implementation, the backend selector,
-and the behaviour when freesasa is not installed -- which used to produce
-zeros and 0.5s presented as features.
+plmol computes SASA itself as of 0.4.0 -- there is no backend to choose. These
+pin the algorithm against its definition and against the failure it used to
+have: a missing dependency turning the SASA block into zeros and every
+burial_index into 0.5, handed back as features.
 """
 
 import numpy as np
 import pytest
 
-from plmol import (
-    DependencyError,
-    InputError,
-    Protein,
-    SASA_BACKENDS,
-    get_sasa_backend,
-    resolve_sasa_backend,
-    set_sasa_backend,
-    shrake_rupley,
-)
-from plmol import sasa as sasa_module
-
-
-@pytest.fixture(autouse=True)
-def restore_backend():
-    """Never let a test leak its backend choice into the rest of the suite."""
-    previous = get_sasa_backend()
-    yield
-    set_sasa_backend(previous)
+from plmol import InputError, Protein, shrake_rupley
 
 
 # -- The algorithm ------------------------------------------------------------
@@ -101,38 +83,7 @@ class TestShrakeRupley:
 # -- Backend selection --------------------------------------------------------
 
 
-class TestBackendSelection:
-    def test_default_is_auto_and_resolves_to_freesasa_here(self):
-        assert get_sasa_backend() in SASA_BACKENDS
-        set_sasa_backend("auto")
-        assert resolve_sasa_backend() == "freesasa"
-
-    def test_explicit_choices(self):
-        set_sasa_backend("native")
-        assert resolve_sasa_backend() == "native"
-        set_sasa_backend("freesasa")
-        assert resolve_sasa_backend() == "freesasa"
-
-    def test_unknown_backend_is_rejected(self):
-        with pytest.raises(InputError, match="Unknown SASA backend"):
-            set_sasa_backend("nope")
-
-    def test_requesting_freesasa_without_it_installed_raises(self, monkeypatch):
-        set_sasa_backend("freesasa")
-        monkeypatch.setattr(sasa_module, "_import_freesasa", lambda: None)
-        with pytest.raises(DependencyError, match="not installed"):
-            resolve_sasa_backend()
-
-    def test_auto_falls_back_to_native(self, monkeypatch):
-        set_sasa_backend("auto")
-        monkeypatch.setattr(sasa_module, "_import_freesasa", lambda: None)
-        assert resolve_sasa_backend() == "native"
-
-
-# -- Native results are usable ------------------------------------------------
-
-
-class TestNativeResults:
+class TestResults:
     def test_structure_and_result_expose_what_the_featurizers_read(self, example_pdb):
         from plmol.sasa import native_structure_result
 
@@ -153,7 +104,7 @@ class TestNativeResults:
         _, result = native_structure_result(example_pdb)
         values = [v for chain in result.residueAreas().values() for v in chain.values()]
         relative = np.array([v.relativeTotal for v in values])
-        assert relative.max() <= 2.0, "fractions, matching freesasa's convention"
+        assert relative.max() <= 2.0, "fractions, matching SASA's convention"
 
     def test_polar_classification_matches_the_element_rule(self):
         from plmol.sasa import is_polar_element
@@ -163,37 +114,20 @@ class TestNativeResults:
         assert not is_polar_element("")
 
 
-class TestFeaturesWithoutFreesasa:
+class TestFeaturesAreReal:
     """The behaviour this module exists to fix."""
 
     def test_residue_sasa_is_not_zeros(self, example_pdb):
-        set_sasa_backend("native")
         graph = Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]
         block = [t for t in graph["node_features"] if t.shape[-1] == 12][0]
         assert np.abs(block).sum() > 0
         assert block.std() > 0.01
 
     def test_burial_index_is_not_a_constant(self, example_pdb):
-        set_sasa_backend("native")
         atom_graph = Protein.from_pdb(example_pdb).featurize(mode="atom_graph")["atom_graph"]
         burial = np.asarray(atom_graph["burial_index"])
         assert not np.allclose(burial, 0.5)
         assert burial.std() > 0.01
-
-    def test_native_tracks_freesasa_closely(self, example_pdb):
-        """Different algorithm and radii, so agreement is high but not exact."""
-        def residue_block():
-            graph = Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]
-            return [t for t in graph["node_features"] if t.shape[-1] == 12][0]
-
-        set_sasa_backend("freesasa")
-        with_freesasa = residue_block()
-        set_sasa_backend("native")
-        native = residue_block()
-
-        for column in (0, 1, 2, 3, 4):  # absolute areas
-            r = np.corrcoef(with_freesasa[:, column], native[:, column])[0, 1]
-            assert r > 0.98, f"column {column} correlation {r}"
 
 
 class TestResidueBurialIndexIsInformative:
@@ -206,16 +140,13 @@ class TestResidueBurialIndexIsInformative:
         assert burial.max() > 0.9 and burial.min() < 0.5
 
 
-class TestEveryModeWorksWithoutFreesasa:
-    """freesasa is an extra, so the whole pipeline has to run without it.
+class TestEveryModeProducesSasa:
+    """Every mode that derives something from SASA gets real numbers.
 
-    Rather than uninstalling it, the native backend is forced -- the same code
-    path an environment without freesasa takes.
+    This is the shape of the failure 0.2.x had when freesasa was missing:
+    zeros in the residue block and 0.5 everywhere else, handed back as
+    features rather than raised.
     """
-
-    @pytest.fixture(autouse=True)
-    def force_native(self):
-        set_sasa_backend("native")
 
     def test_residue_graph(self, example_pdb):
         graph = Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]

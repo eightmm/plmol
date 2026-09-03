@@ -7,7 +7,6 @@ and graph-based interaction features.
 """
 
 import logging
-import contextlib
 from typing import Tuple, List, Optional, Dict, Any
 
 from collections import defaultdict
@@ -23,14 +22,6 @@ from .geometry import (
     calculate_backbone_torsion,
     calculate_self_distances_vectors,
 )
-try:
-    import freesasa as fs
-    fs.setVerbosity(fs.nowarnings)
-    FREESASA_AVAILABLE = True
-except ImportError:
-    FREESASA_AVAILABLE = False
-    fs = None
-
 # Import unified PDB parsing utilities from canonical location
 from .utils import (
     PDBParser,
@@ -70,17 +61,6 @@ CHI_ANGLE_RESIDUE_INDICES = {
 
 # ILE residue index for special handling
 ILE_RESIDUE_INDEX = np.array([7])
-
-
-@contextlib.contextmanager
-def suppress_freesasa_warnings():
-    """
-    Context manager to suppress FreeSASA warnings about unknown atoms.
-    """
-    from ..utils import suppress_freesasa_warnings as _suppress_freesasa_warnings
-
-    with _suppress_freesasa_warnings():
-        yield
 
 
 class ResidueFeaturizer:

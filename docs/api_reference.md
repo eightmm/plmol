@@ -40,7 +40,7 @@ plmol/
 ├── arrays.py                       # numpy spellings of the torch ops, and to_torch
 ├── cavity.py                       # LIGSITE cavity detection, no ligand needed
 ├── utils.py                        # SASA/burial helpers and kNN mask utilities
-├── sasa.py                         # Shrake-Rupley SASA; freesasa or native backend
+├── sasa.py                         # Shrake-Rupley SASA
 ├── spatial.py                      # Neighbour search; sphere occlusion, knn, NeighbourIndex
 ├── constants/
 │   ├── __init__.py                 # Re-exports all constants (amino_acids, nucleic_acids, elements, etc.)
@@ -188,15 +188,14 @@ Enclosed spaces found from the structure alone. See
 
 ### Backends
 
-Both cover an optional dependency: the library runs without either, on its own
-numpy implementation. See [Spatial Backends](protein.md#spatial-backends) and
-[SASA Backends](protein.md#sasa-backends).
+Covers an optional dependency: the library runs without scipy, on its own
+uniform grid. See [Spatial Backends](protein.md#spatial-backends).
 
 - `set_spatial_backend(name)`, `get_spatial_backend()`, `resolve_spatial_backend()` — `"auto"` | `"scipy"` | `"native"`.
 - `knn(data, queries, k)` — the *k* nearest points, nearest first.
 - `NeighbourIndex(points)` — the same query against a fixed point set, built once.
-- `set_sasa_backend(name)`, `get_sasa_backend()`, `resolve_sasa_backend()` — `"auto"` | `"freesasa"` | `"native"`.
-- `shrake_rupley(coords, radii)` — per-atom SASA in square Angstrom.
+- `shrake_rupley(coords, radii)` — per-atom SASA in square Angstrom. There is
+  no backend to choose as of 0.4.0; see [SASA](protein.md#sasa).
 
 ### Error Hierarchy
 

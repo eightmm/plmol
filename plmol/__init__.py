@@ -37,13 +37,7 @@ from .spatial import (
     resolve_spatial_backend,
     set_spatial_backend,
 )
-from .sasa import (
-    SASA_BACKENDS,
-    get_sasa_backend,
-    resolve_sasa_backend,
-    set_sasa_backend,
-    shrake_rupley,
-)
+from .sasa import shrake_rupley
 from .graph_view import FEATURE_DIMS, as_graph, collate, feature_dims
 from .ligand.fragment_graph import build_fragment_graph
 from .ligand.graph_edge_features import (
@@ -76,7 +70,7 @@ from .errors import PlmolError, InputError, DependencyError, FeatureError
 from .specs import FEATURE_SPECS, FeatureSpec
 from . import constants
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "Protein", "ProteinFeaturizer", "PDBStandardizer", "ResidueFeaturizer", "AtomFeaturizer",
@@ -91,8 +85,7 @@ __all__ = [
     "BOND_VIEW_CHANNELS", "BOND_VIEW_DROPPED_CHANNELS", "bond_view_channels",
     "bond_view_channels",
     "as_graph", "collate", "feature_dims", "FEATURE_DIMS",
-    "SASA_BACKENDS", "set_sasa_backend", "get_sasa_backend",
-    "resolve_sasa_backend", "shrake_rupley",
+    "shrake_rupley",
     "to_torch", "to_numpy",
     "Cavity", "detect_cavities", "element_vdw_radii",
     "BasePair", "find_base_pairs",

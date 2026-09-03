@@ -100,15 +100,14 @@ class TestFeaturizingWithoutTorch:
         """, root)
         assert "interaction" in out and "protein" in out
 
-    def test_with_scipy_and_freesasa_gone_as_well(self, root):
-        """The three optional dependencies are independent of each other."""
-        out = run_without(["torch", "scipy", "freesasa"], f"""
-            from plmol import Protein, resolve_sasa_backend, resolve_spatial_backend
+    def test_with_scipy_gone_as_well(self, root):
+        """The two optional dependencies are independent of each other."""
+        out = run_without(["torch", "scipy"], f"""
+            from plmol import Protein, resolve_spatial_backend
             surface = Protein.from_pdb({root + '/examples/10gs_protein.pdb'!r}).featurize(mode="surface")
-            print(resolve_sasa_backend(), resolve_spatial_backend(),
-                  surface["surface"]["points"].shape[0] > 0)
+            print(resolve_spatial_backend(), surface["surface"]["points"].shape[0] > 0)
         """, root)
-        assert out == "native native True"
+        assert out == "native True"
 
 
 class TestToTorch:

@@ -43,13 +43,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# scipy and freesasa are here because the tests compare the native backends
-# against them; the library itself treats both as optional. torch is here for
-# the to_torch round-trip tests.
+# scipy is here because the tests compare the native neighbour search against
+# it; the library itself treats it as optional. torch is here for the to_torch
+# round-trip tests.
 dev = [
   "pytest>=8.0",
   "scipy>=1.8.0",
-  "freesasa>=2.1.0",
   "torch>=1.9.0"
 ]
 # plmol returns numpy. torch is needed only to convert those arrays with
@@ -65,11 +64,6 @@ mmcif = [
 # uniform grid instead; the results agree, the grid is slower.
 spatial = [
     "scipy>=1.8.0",
-]
-# freesasa is the default SASA backend when installed. plmol computes SASA
-# natively without it; the two differ slightly in algorithm and radii.
-sasa = [
-    "freesasa>=2.1.0",
 ]
 # Protein language models. Both are optional: plmol imports and runs without
 # either, and asking for a model from a missing backend raises DependencyError

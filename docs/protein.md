@@ -23,73 +23,40 @@ protein = Protein.from_structure("protein.cif", chain_id="A")
 | `standardize` | `bool` | `True` | Standardize PDB (remove non-standard, fix naming) |
 | `keep_hydrogens` | `bool` | `False` | Keep hydrogen atoms |
 
-## SASA Backends
+## SASA
 
-SASA feeds the residue 12-dim block, the atom graph's `burial_index`,
-`sasa`, `relative_sasa` and `is_polar_sasa`, the surface burial channel and
-voxel channel 15.
+SASA feeds the residue 12-dim block, the atom graph's `burial_index`, `sasa`,
+`relative_sasa` and `is_polar_sasa`, the surface burial channel and voxel
+channel 15.
 
-```python
-from plmol import set_sasa_backend, resolve_sasa_backend
+plmol computes it itself: Shrake-Rupley, 100 sample points per atom, a 1.4 A
+probe, and its own element-based `VDW_RADIUS` table. The occlusion test
+considers every overlapping neighbour rather than a fixed number of nearest
+ones, so no sampling cap can make an area come out too large. Areas are cached
+on the coordinates, so a Protein asked for `graph`, `atom_graph`, `voxel` and
+`surface` computes them once rather than four times.
 
-resolve_sasa_backend()        # "freesasa" when it is installed
-set_sasa_backend("native")    # plmol's own Shrake-Rupley
-set_sasa_backend("auto")      # the default: freesasa, else native
-```
+**freesasa was removed in 0.4.0.** It had been the default when installed;
+this path is 1.3 to 2.0 times faster on every mode that uses SASA, and one
+implementation the library owns beats two that disagree.
 
-| Backend | Algorithm | Radii |
-|---------|-----------|-------|
-| `freesasa` | Lee-Richards, 20 slices | freesasa's ProtOr, atom-type dependent |
-| `native` | Shrake-Rupley, 100 points | plmol's `VDW_RADIUS`, element based |
+| Mode | 0.3.x with freesasa | 0.4.0 |
+|------|--------------------|-------|
+| `graph` | 145 ms | 95 ms |
+| `atom_graph` | 110 ms | 56 ms |
+| `surface` | 335 ms | 254 ms |
+| `voxel` | 150 ms | 77 ms |
 
-The native occlusion test is exact: it finds the atom pairs whose spheres can
-overlap and tests each atom's sample directions against each neighbour, so no
-neighbour cap can make an area come out too large. `shrake_rupley` therefore no
-longer takes `max_neighbours`, and `DEFAULT_SASA_NEIGHBOURS` and
-`SURFACE_BURIAL_KNN` are gone with it.
+Values from 0.3.x and earlier were freesasa's, computed with Lee-Richards and
+ProtOr radii. Per atom the two correlate at r=0.982 and the totals differ by
+2%; most of that is the radius table rather than the algorithm, since matching
+against freesasa's own Shrake-Rupley leaves r=0.979. Every SASA-derived column
+moved at 0.4.0 and nothing else did.
 
-The cap they set was never observed to bite. At most 18 atoms can reach a given
-sample point on a 3260-atom protein, under the 24 that were allowed, and the
-areas came out identical at 16, 24 and 48 even on a cluster packed tight enough
-that 78% of sample points had more than 24 atoms in reach -- a point is buried
-by its nearest neighbours or not at all. What is gone is the caveat, and the
-saturation warning that came with it.
-
-**freesasa stays the default**, because it is what plmol's published feature
-values were computed with and switching silently would move every one of them.
-It is, however, no longer the faster of the two. The native path has been
-optimised since; freesasa's `calc` is C that plmol cannot reach into.
-
-| Mode | `freesasa` | `native` | |
-|------|-----------|----------|---|
-| `graph` | 148 ms | 91 ms | 1.6x |
-| `atom_graph` | 117 ms | 54 ms | 2.2x |
-| `surface` | 369 ms | 301 ms | 1.2x |
-| `voxel` | 154 ms | 90 ms | 1.7x |
-
-Measured on a 3260-atom protein, minimum of seven interleaved runs. Choosing
-`native` is a change in values as well as in speed -- see the agreement table
-below before making it the default for a project.
-
-The native path also exists so the library degrades honestly rather than
-silently: before it, a missing freesasa turned the residue SASA block into
-zeros and every `burial_index` into 0.5, and those were handed back as
-features.
-
-Agreement between the two, measured on a 3260-atom protein:
-
-| Comparison | Correlation |
-|------------|-------------|
-| native vs freesasa's own Shrake-Rupley, same radii | 0.994 |
-| native vs freesasa default (Lee-Richards, ProtOr radii) | 0.982 per atom, +2% total area |
-| residue absolute-area columns | > 0.99 |
-
-The `relative*` columns agree less closely (0.78–0.99) because freesasa
-normalises polar, apolar and main-chain areas by separate per-class reference
-values, while the native path normalises everything by the residue's
-`RESIDUE_MAX_SASA`. Polar/apolar classification is identical: freesasa's
-classifier calls N, O and S polar, and the native element rule reproduces that
-exactly on protein atoms.
+Polar and apolar are split on the element -- N, O and S are polar -- read from
+the parser's element field rather than the first letter of the atom name, so
+the SE of a selenomethionine is selenium. That rule agreed with freesasa's
+classifier on 100% of a 3260-atom structure while both existed.
 
 ## Spatial Backends
 
@@ -377,7 +344,7 @@ Edge construction: all atom pairs within `distance_cutoff`. When `knn_cutoff` is
 | `[0]` | `sasa` | 1 | [0, ~) | Per-atom absolute SASA (A^2) |
 | `[1]` | `relative_sasa` | 1 | [0, 1] | SASA / residue_max_sasa (Tien et al. 2013) |
 | `[2]` | `burial_index` | 1 | [0, 1] | Burial index (1.0 = fully buried, 0.0 = fully exposed) |
-| `[3]` | `is_polar_sasa` | 1 | {0, 1} | 1.0 if polar SASA atom (freesasa classifier) |
+| `[3]` | `is_polar_sasa` | 1 | {0, 1} | 1.0 when the element is N, O or S |
 | `[4]` | `is_backbone` | 1 | {0, 1} | 1.0 if backbone atom (N, CA, C, O), 0.0 if sidechain |
 | `[5]` | `formal_charge` | 1 | [-0.5, 1] | Partial charge at physiological pH |
 | `[6]` | `is_hbond_donor` | 1 | {0, 1} | 1.0 if H-bond donor |
