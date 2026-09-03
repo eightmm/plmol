@@ -8,11 +8,7 @@ from typing import Dict, Tuple, Optional, List
 logger = logging.getLogger(__name__)
 
 from ..arrays import FLOAT, INT
-from .utils import (
-    PDBParser,
-    is_atom_record, is_hetatm_record, is_hydrogen, parse_pdb_atom_line,
-    normalize_residue_name,
-)
+from .utils import PDBParser, normalize_residue_name
 from ..constants import (
     # Amino acid mappings
     AMINO_ACID_LETTERS,
@@ -93,8 +89,15 @@ class AtomFeaturizer:
         return token, coord
 
     def get_protein_atom_features(self, pdb_file: str) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Extract atom-level features from PDB file.
+        """Atom tokens and coordinates for a PDB file.
+
+        Parses through :class:`~plmol.parsers.PDBParser` and hands the atoms
+        to :meth:`get_protein_atom_features_from_parser`. It used to walk the
+        file's lines itself with a filter of its own that dropped only water
+        and hydrogen, so a structure with a metal or a ligand came back with
+        those tokenised as protein -- six atoms where the parser gives four.
+        Going through the parser is also four times quicker, because the file
+        has already been read.
 
         Args:
             pdb_file: Path to PDB file
@@ -104,54 +107,7 @@ class AtomFeaturizer:
                 - token: np.ndarray of shape [n_atoms] with atom type tokens
                 - coord: np.ndarray of shape [n_atoms, 3] with 3D coordinates
         """
-        token, coord = [], []
-
-        with open(pdb_file, 'r') as file:
-            lines = file.readlines()
-
-        for line in lines:
-            # Use unified parsing functions
-            if not (is_atom_record(line) or is_hetatm_record(line)):
-                continue
-
-            # Skip hydrogens
-            if is_hydrogen(line):
-                continue
-
-            # Parse line components (now includes element)
-            record_type, atom_type, res_type, res_num, chain_id, xyz, element = parse_pdb_atom_line(line)
-
-            # Skip water molecules
-            if res_type == 'HOH':
-                continue
-
-            # Skip terminal oxygen and modified residues
-            if atom_type == 'OXT' or res_type in ['LLP', 'PTR']:
-                continue
-
-            # Normalize residue name (handles metal, HIS/CYS variants, unknown)
-            res_type_norm = normalize_residue_name(res_type, atom_type)
-
-            # Handle unknown residues - need special atom_type handling
-            if res_type_norm == 'UNK':
-                res_type = 'XXX'
-                # For non-standard residues, try to preserve key atoms
-                if atom_type not in ['N', 'CA', 'C', 'O', 'CB', 'P', 'S', 'SE']:
-                    # Use first character as generic atom type
-                    atom_type = atom_type[0] if atom_type else 'C'
-            else:
-                res_type = res_type_norm
-
-            # Get token ID
-            tok = self.res_atm_token.get((res_type, atom_type), UNK_TOKEN)
-
-            token.append(tok)
-            coord.append(xyz)
-
-        token = np.array(token, dtype=INT)
-        coord = np.array(coord, dtype=FLOAT)
-
-        return token, coord
+        return self.get_protein_atom_features_from_parser(PDBParser(pdb_file))
 
     def get_atom_sasa(self, pdb_file: str) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
         """

@@ -7,6 +7,41 @@ from plmol.protein.atom_featurizer import AtomFeaturizer
 from plmol.protein.utils import PDBParser
 
 
+class TestTheTwoEntryPointsAreOne:
+    """get_protein_atom_features(path) and ..._from_parser(parser) tokenise the
+    same atoms. The path one used to walk the file itself with a filter that
+    dropped only water and hydrogen, so a metal or a ligand was handed back
+    tokenised as protein."""
+
+    STRUCTURE = (
+        "ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00  0.00           N\n"
+        "ATOM      2  CA  ALA A   1       1.458   0.000   0.000  1.00  0.00           C\n"
+        "ATOM      3  C   ALA A   1       2.009   1.420   0.000  1.00  0.00           C\n"
+        "ATOM      4  O   ALA A   1       1.251   2.390   0.000  1.00  0.00           O\n"
+        "ATOM      5  OXT ALA A   1       3.300   1.500   0.000  1.00  0.00           O\n"
+        "HETATM    6 ZN    ZN A 301       8.000   8.000   8.000  1.00 20.00          ZN\n"
+        "HETATM    7  C1  LIG A 401       5.000   5.000   5.000  1.00 20.00           C\n"
+        "HETATM    8  O   HOH A 501      12.000  12.000  12.000  1.00 20.00           O\n"
+        "END\n"
+    )
+
+    def test_a_metal_and_a_ligand_are_not_protein_atoms(self, tmp_path):
+        path = tmp_path / "metal.pdb"
+        path.write_text(self.STRUCTURE)
+        PDBParser.clear_cache()
+        token, coord = AtomFeaturizer().get_protein_atom_features(str(path))
+        assert token.shape[0] == 4, "N, CA, C, O -- not the zinc, the ligand or OXT"
+        assert coord.shape == (4, 3)
+
+    def test_both_entry_points_agree(self, example_pdb):
+        PDBParser.clear_cache()
+        featurizer = AtomFeaturizer()
+        by_path = featurizer.get_protein_atom_features(example_pdb)
+        by_parser = featurizer.get_protein_atom_features_from_parser(PDBParser(example_pdb))
+        assert np.array_equal(by_path[0], by_parser[0])
+        assert np.array_equal(by_path[1], by_parser[1])
+
+
 class TestAtomFeaturizerMini:
     def test_get_protein_atom_features(self, mini_pdb):
         PDBParser.clear_cache()
