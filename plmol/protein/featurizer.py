@@ -772,7 +772,7 @@ class ProteinFeaturizer:
             return self._cache[cache_key]
 
         result = compute_backbone_features(
-            self.coords, self.residues, self.residue_types, k_neighbors
+            _np(self.coords), self.residues, _np(self.residue_types), k_neighbors
         )
 
         self._cache[cache_key] = result

@@ -6,9 +6,9 @@ and full backbone feature assembly.
 
 from typing import Dict, List, Optional, Tuple, Any
 
-import torch
-import torch.nn.functional as F
+import numpy as np
 
+from ..arrays import FLOAT, INT, normalize, pairwise_distances
 from .geometry import (
     calculate_dihedral,
     calculate_local_frames,
@@ -17,33 +17,11 @@ from .geometry import (
 )
 
 
-# --- migration bridge -------------------------------------------------------
-# protein/geometry.py computes in numpy now. These convert at its call sites and
-# go away when this file converts too.
-
-
-def _np(value):
-    """torch in, numpy out."""
-    if isinstance(value, tuple):
-        return tuple(_np(item) for item in value)
-    return value.detach().cpu().numpy() if hasattr(value, "detach") else value
-
-
-def _pt(value):
-    """numpy in, torch out."""
-    import numpy as _numpy
-
-    if isinstance(value, tuple):
-        return tuple(_pt(item) for item in value)
-    return torch.from_numpy(value) if isinstance(value, _numpy.ndarray) else value
-
-
-
 
 def compute_backbone_dihedrals(
-    coords: torch.Tensor,
+    coords: np.ndarray,
     chain_indices: Dict[str, List[int]],
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """Chain-boundary-aware phi/psi/omega.
 
     Reuses the vectorized calculate_dihedral() per chain,
@@ -63,8 +41,8 @@ def compute_backbone_dihedrals(
         mask: (L, 3) — bool, True where valid
     """
     L = coords.shape[0]
-    dihedrals = torch.zeros(L, 3)
-    mask = torch.zeros(L, 3, dtype=torch.bool)
+    dihedrals = np.zeros((L, 3), dtype=FLOAT)
+    mask = np.zeros((L, 3), dtype=bool)
 
     for chain_id, indices in chain_indices.items():
         idx = sorted(indices)
@@ -72,10 +50,10 @@ def compute_backbone_dihedrals(
         if n < 2:
             continue
 
-        idx_t = torch.tensor(idx, dtype=torch.long)
+        idx_t = np.array(idx, dtype=INT)
         # Extract N-CA-C for this chain and call vectorized dihedral
         chain_nac = coords[idx_t, :3, :]  # (n, 3, 3)
-        raw = _pt(calculate_dihedral(_np(chain_nac)))  # (n, 3)
+        raw = calculate_dihedral(chain_nac)  # (n, 3)
 
         # phi: raw[:, 0] — valid for positions 1..n-1 (first is padding 0)
         dihedrals[idx_t[1:], 0] = raw[1:, 0]
@@ -93,10 +71,10 @@ def compute_backbone_dihedrals(
 
 
 def build_backbone_knn_graph(
-    coords: torch.Tensor,
+    coords: np.ndarray,
     k: int = 30,
     chain_indices: Optional[Dict[str, List[int]]] = None,
-) -> Dict[str, torch.Tensor]:
+) -> Dict[str, np.ndarray]:
 
     """kNN graph over CA atoms.
 
@@ -117,43 +95,48 @@ def build_backbone_knn_graph(
 
     if L == 0:
         return {
-            'edge_index': torch.zeros(2, 0, dtype=torch.long),
-            'edge_dist': torch.zeros(0),
-            'edge_unit_vec': torch.zeros(0, 3),
-            'edge_seq_sep': torch.zeros(0, dtype=torch.long),
-            'edge_same_chain': torch.zeros(0, dtype=torch.bool),
+            'edge_index': np.zeros((2, 0), dtype=INT),
+            'edge_dist': np.zeros(0, dtype=FLOAT),
+            'edge_unit_vec': np.zeros((0, 3), dtype=FLOAT),
+            'edge_seq_sep': np.zeros(0, dtype=INT),
+            'edge_same_chain': np.zeros(0, dtype=bool),
         }
 
     k_eff = min(k, L - 1)
 
     # CA-CA distance matrix
-    dist_matrix = torch.cdist(ca, ca)  # (L, L)
+    dist_matrix = pairwise_distances(ca, ca)  # (L, L)
     # Set self-distance to inf
-    dist_matrix.fill_diagonal_(float('inf'))
+    np.fill_diagonal(dist_matrix, np.inf)
 
-    # kNN: top-k smallest distances per node
-    topk_dist, topk_idx = torch.topk(dist_matrix, k_eff, dim=1, largest=False)
+    # kNN: the k smallest distances per node, nearest first. Partition selects
+    # them and the sort within the selection puts them in order, which is what
+    # torch.topk(largest=False) returned.
+    rows = np.arange(L, dtype=INT)[:, None]
+    nearest = np.argpartition(dist_matrix, k_eff - 1, axis=1)[:, :k_eff]
+    nearest = nearest[rows, np.argsort(dist_matrix[rows, nearest], axis=1, kind="stable")]
+    topk_dist = dist_matrix[rows, nearest]
 
     # Build edge_index
-    src = torch.arange(L).unsqueeze(1).expand(-1, k_eff).reshape(-1)
-    dst = topk_idx.reshape(-1)
-    edge_index = torch.stack([src, dst], dim=0)  # (2, L*k_eff)
+    src = np.repeat(np.arange(L, dtype=INT), k_eff)
+    dst = nearest.reshape(-1).astype(INT)
+    edge_index = np.stack([src, dst], axis=0)  # (2, L*k_eff)
 
     # Edge distances
     edge_dist = topk_dist.reshape(-1)
 
     # Unit vectors i->j
     diff = ca[dst] - ca[src]  # (E, 3)
-    edge_unit_vec = F.normalize(diff, dim=-1)
+    edge_unit_vec = normalize(diff, axis=-1)
 
     # Sequence separation and same-chain flag
     E = edge_index.shape[1]
-    edge_seq_sep = torch.zeros(E, dtype=torch.long)
-    edge_same_chain = torch.zeros(E, dtype=torch.bool)
+    edge_seq_sep = np.zeros(E, dtype=INT)
+    edge_same_chain = np.zeros(E, dtype=bool)
 
     if chain_indices is not None:
         # Build residue-to-chain mapping
-        res_to_chain = torch.full((L,), -1, dtype=torch.long)
+        res_to_chain = np.full(L, -1, dtype=INT)
         for chain_idx, (chain_id, indices) in enumerate(chain_indices.items()):
             for ri in indices:
                 res_to_chain[ri] = chain_idx
@@ -164,11 +147,7 @@ def build_backbone_knn_graph(
         edge_same_chain = same_chain
 
         # Sequence separation: |i - j| for same chain, 0 for cross-chain
-        edge_seq_sep = torch.where(
-            same_chain,
-            (src - dst).abs(),
-            torch.zeros_like(src),
-        )
+        edge_seq_sep = np.where(same_chain, np.abs(src - dst), 0).astype(INT)
 
     return {
         'edge_index': edge_index,
@@ -180,10 +159,10 @@ def build_backbone_knn_graph(
 
 
 def compute_edge_frame_features(
-    ca_coords: torch.Tensor,
-    orientation_frames: torch.Tensor,
-    edge_index: torch.Tensor,
-) -> Dict[str, torch.Tensor]:
+    ca_coords: np.ndarray,
+    orientation_frames: np.ndarray,
+    edge_index: np.ndarray,
+) -> Dict[str, np.ndarray]:
     """Compute SE(3)-invariant edge features in local reference frames.
 
     For each edge (i, j):
@@ -207,12 +186,12 @@ def compute_edge_frame_features(
     # Project displacement into source residue's local frame
     # frames[:, :, k] = k-th basis vector → R^T @ disp = [x·disp, y·disp, z·disp]
     frames_src = orientation_frames[src]  # (E, 3, 3)
-    edge_local_pos = torch.einsum('edk,ed->ek', frames_src, disp)  # (E, 3)
+    edge_local_pos = np.einsum('edk,ed->ek', frames_src, disp)  # (E, 3)
 
     # Relative orientation: R_src^T @ R_dst
     frames_dst = orientation_frames[dst]  # (E, 3, 3)
-    edge_rel_orient = torch.bmm(
-        frames_src.transpose(1, 2), frames_dst
+    edge_rel_orient = np.matmul(
+        frames_src.transpose(0, 2, 1), frames_dst
     )  # (E, 3, 3)
 
     return {
@@ -222,9 +201,9 @@ def compute_edge_frame_features(
 
 
 def compute_backbone_features(
-    coords: torch.Tensor,
+    coords: np.ndarray,
     residues: list,
-    residue_types: torch.Tensor,
+    residue_types: np.ndarray,
     k_neighbors: int = 30,
 ) -> Dict[str, Any]:
     """Full backbone feature assembly.
@@ -258,43 +237,43 @@ def compute_backbone_features(
     backbone_coords = coords[:, :4, :]  # (L, 4, 3)
 
     # Residue mask: True if all 4 backbone atoms are present (non-zero)
-    backbone_norms = torch.norm(backbone_coords, dim=-1)  # (L, 4)
-    residue_mask = (backbone_norms > 0).all(dim=1)  # (L,)
+    backbone_norms = np.linalg.norm(backbone_coords, axis=-1)  # (L, 4)
+    residue_mask = (backbone_norms > 0).all(axis=1)  # (L,)
 
     # Virtual CB
-    cb_coords = _pt(calculate_virtual_cb(_np(coords)))
+    cb_coords = calculate_virtual_cb(coords)
 
     # Chain-aware backbone dihedrals
     dihedrals, dihedrals_mask = compute_backbone_dihedrals(coords, chain_indices)
 
     # Sin/cos encoding of dihedrals (L, 6): [sin(phi), cos(phi), sin(psi), cos(psi), sin(omega), cos(omega)]
-    dihedrals_sincos = torch.zeros(num_residues, 6)
-    dihedrals_sincos[:, 0] = torch.sin(dihedrals[:, 0])
-    dihedrals_sincos[:, 1] = torch.cos(dihedrals[:, 0])
-    dihedrals_sincos[:, 2] = torch.sin(dihedrals[:, 1])
-    dihedrals_sincos[:, 3] = torch.cos(dihedrals[:, 1])
-    dihedrals_sincos[:, 4] = torch.sin(dihedrals[:, 2])
-    dihedrals_sincos[:, 5] = torch.cos(dihedrals[:, 2])
+    dihedrals_sincos = np.zeros((num_residues, 6), dtype=FLOAT)
+    dihedrals_sincos[:, 0] = np.sin(dihedrals[:, 0])
+    dihedrals_sincos[:, 1] = np.cos(dihedrals[:, 0])
+    dihedrals_sincos[:, 2] = np.sin(dihedrals[:, 1])
+    dihedrals_sincos[:, 3] = np.cos(dihedrals[:, 1])
+    dihedrals_sincos[:, 4] = np.sin(dihedrals[:, 2])
+    dihedrals_sincos[:, 5] = np.cos(dihedrals[:, 2])
     # Zero out invalid positions (where mask is False)
-    dihedrals_sincos[:, 0:2] *= dihedrals_mask[:, 0:1].float()
-    dihedrals_sincos[:, 2:4] *= dihedrals_mask[:, 1:2].float()
-    dihedrals_sincos[:, 4:6] *= dihedrals_mask[:, 2:3].float()
+    dihedrals_sincos[:, 0:2] *= dihedrals_mask[:, 0:1].astype(FLOAT)
+    dihedrals_sincos[:, 2:4] *= dihedrals_mask[:, 1:2].astype(FLOAT)
+    dihedrals_sincos[:, 4:6] *= dihedrals_mask[:, 2:3].astype(FLOAT)
 
     # Local orientation frames
-    orientation_frames = _pt(calculate_local_frames(_np(coords)))
+    orientation_frames = calculate_local_frames(coords)
 
-    # Chain IDs as integer tensor
+    # Chain IDs as an integer array
     chain_id_map = {cid: i for i, cid in enumerate(sorted(chain_indices.keys()))}
-    chain_ids = torch.tensor(
+    chain_ids = np.array(
         [chain_id_map[residues[i][0]] for i in range(num_residues)],
-        dtype=torch.long,
+        dtype=INT,
     )
 
     # kNN graph
     graph = build_backbone_knn_graph(coords, k=k_neighbors, chain_indices=chain_indices)
 
     # RBF encoding of CA-CA distances
-    edge_rbf = _pt(rbf_encode(_np(graph['edge_dist'])))  # (E, 16)
+    edge_rbf = rbf_encode(graph['edge_dist'])  # (E, 16)
 
     # SE(3)-invariant edge features in local frames
     ca_coords = coords[:, 1]  # (L, 3)

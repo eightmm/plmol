@@ -1,6 +1,6 @@
 """Tests for plmol/protein/backbone_featurizer.py."""
 
-import torch
+import numpy as np
 
 from plmol.protein.backbone_featurizer import (
     compute_backbone_dihedrals,
@@ -11,15 +11,15 @@ from plmol.protein.backbone_featurizer import (
 from plmol.protein.geometry import calculate_local_frames
 
 
-def _make_coords(L: int, atoms_per_res: int = 5) -> torch.Tensor:
-    coords = torch.zeros(L, atoms_per_res, 3)
+def _make_coords(L: int, atoms_per_res: int = 5) -> np.ndarray:
+    coords = np.zeros((L, atoms_per_res, 3), dtype=np.float32)
     for i in range(L):
         z = i * 3.8
-        coords[i, 0] = torch.tensor([-0.5, 0.0, z - 1.0])  # N
-        coords[i, 1] = torch.tensor([0.0, 0.0, z])          # CA
-        coords[i, 2] = torch.tensor([0.5, 0.0, z + 0.5])    # C
-        coords[i, 3] = torch.tensor([0.5, 1.0, z + 0.5])    # O
-        coords[i, 4] = torch.tensor([0.0, 1.5, z])          # CB
+        coords[i, 0] = [-0.5, 0.0, z - 1.0]  # N
+        coords[i, 1] = [0.0, 0.0, z]          # CA
+        coords[i, 2] = [0.5, 0.0, z + 0.5]    # C
+        coords[i, 3] = [0.5, 1.0, z + 0.5]    # O
+        coords[i, 4] = [0.0, 1.5, z]          # CB
     return coords
 
 
@@ -31,7 +31,7 @@ class TestComputeBackboneDihedrals:
         dihedrals, mask = compute_backbone_dihedrals(coords, chain_indices)
         assert dihedrals.shape == (L, 3)
         assert mask.shape == (L, 3)
-        assert mask.dtype == torch.bool
+        assert mask.dtype == np.bool_
 
     def test_multi_chain(self):
         L = 8
@@ -85,8 +85,8 @@ class TestBuildBackboneKnnGraph:
     def test_unit_vectors_normalized(self):
         coords = _make_coords(8)
         graph = build_backbone_knn_graph(coords, k=3)
-        norms = torch.norm(graph["edge_unit_vec"], dim=-1)
-        assert torch.allclose(norms, torch.ones_like(norms), atol=1e-5)
+        norms = np.linalg.norm(graph["edge_unit_vec"], axis=-1)
+        assert np.allclose(norms, 1.0, atol=1e-5)
 
 
 class TestComputeEdgeFrameFeatures:
@@ -94,13 +94,11 @@ class TestComputeEdgeFrameFeatures:
         L = 5
         coords = _make_coords(L)
         ca_coords = coords[:, 1]
-        # calculate_local_frames computes in numpy; this consumer still wants
-        # tensors, so convert at the boundary the way the featurizer does.
-        frames = torch.from_numpy(calculate_local_frames(coords.numpy()))
+        frames = calculate_local_frames(coords)
         # Make simple edge_index: fully connected minus self
-        src = torch.arange(L).repeat_interleave(L - 1)
-        dst = torch.cat([torch.cat([torch.arange(i), torch.arange(i + 1, L)]) for i in range(L)])
-        edge_index = torch.stack([src, dst])
+        src = np.repeat(np.arange(L), L - 1)
+        dst = np.concatenate([np.concatenate([np.arange(i), np.arange(i + 1, L)]) for i in range(L)])
+        edge_index = np.stack([src, dst])
         E = edge_index.shape[1]
         result = compute_edge_frame_features(ca_coords, frames, edge_index)
         assert result["edge_local_pos"].shape == (E, 3)
@@ -112,7 +110,7 @@ class TestComputeBackboneFeatures:
         L = 8
         coords = _make_coords(L)
         residues = [("A", i + 1, 0) for i in range(4)] + [("B", i + 1, 4) for i in range(4)]
-        residue_types = torch.zeros(L, dtype=torch.long)
+        residue_types = np.zeros(L, dtype=np.int64)
         result = compute_backbone_features(coords, residues, residue_types, k_neighbors=3)
 
         assert result["backbone_coords"].shape == (L, 4, 3)
