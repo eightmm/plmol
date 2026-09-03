@@ -153,19 +153,18 @@ def gaussian_smear_to_grid(
     span = (cutoff / resolution)[:, None]
     lo = np.maximum(0, np.floor(frac - span)).astype(np.intp)
     hi = np.minimum(np.array([D, H, W]), np.ceil(frac + span).astype(np.intp) + 1)
+    # About half a protein's atoms fall outside the box the grid covers, and
+    # some carry no feature at all. Both are found once here rather than tested
+    # again on every pass through the loop.
+    live = np.flatnonzero((hi > lo).all(axis=1) & features.any(axis=1))
     # Most channels are zero for any given atom (about 5 of 16 for proteins),
     # so only those are multiplied and accumulated.
-    nonzero_channels = [np.flatnonzero(row) for row in features]
+    nonzero_channels = [np.flatnonzero(features[i]) for i in live]
 
-    for i in range(n_atoms):
-        channels = nonzero_channels[i]
-        if channels.size == 0:
-            continue
-
+    for slot, i in enumerate(live):
+        channels = nonzero_channels[slot]
         lo0, lo1, lo2 = lo[i]
         hi0, hi1, hi2 = hi[i]
-        if lo0 >= hi0 or lo1 >= hi1 or lo2 >= hi2:
-            continue
 
         # Offsets from the atom to each voxel centre, as three 1-D arrays that
         # broadcast into the sub-grid.
@@ -176,7 +175,9 @@ def gaussian_smear_to_grid(
 
         sigma = sigmas[i]
         gauss = np.exp(-dist_sq / (2.0 * sigma * sigma))
-        gauss[dist_sq > cutoff_sq[i]] = 0.0
+        # Multiplying by the mask beats assigning through it: same zeros and
+        # same surviving values, without building an index list from the bools.
+        gauss *= dist_sq <= cutoff_sq[i]
 
         sub_grid = grid[:, lo0:hi0, lo1:hi1, lo2:hi2]
         sub_grid[channels] += (
