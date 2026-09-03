@@ -129,7 +129,7 @@ model = MyGNN(in_channels=dims["node_features"], edge_dim=dims["edge_features"])
 | `ligand` | `bond_graph` | node 29, edge 96 |
 | `ligand` | `fragment_graph` | node 62, edge 31 |
 | `ligand` | `descriptor` | descriptors 62 |
-| `protein` | `graph` | node 78, node_vector 31, edge 39, edge_vector 8 |
+| `protein` | `graph` | node 82, node_vector 31, edge 39, edge_vector 8 |
 | `protein` | `atom_graph` | node 10, node_tokens 3, edge 6 |
 | `nucleic_acid` | `graph` | node 23, node_tokens 1, edge 3 |
 | `nucleic_acid` | `atom_graph` | node 0 (token-only: use `node_tokens`), node_tokens 1, edge 1 |

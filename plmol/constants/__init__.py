@@ -87,6 +87,7 @@ from .amino_acids import (
     METAL_RESIDUES,
 
     # Atom-level feature constants
+    RESIDUE_MAX_CLASS_SASA,
     RESIDUE_MAX_SASA,
     FORMAL_CHARGE_MAP,
     HBOND_DONOR_ATOMS,
@@ -349,6 +350,7 @@ __all__ = [
     'PTM_RESIDUES',
     'NUCLEIC_ACID_RESIDUES',
     'METAL_RESIDUES',
+    'RESIDUE_MAX_CLASS_SASA',
     'RESIDUE_MAX_SASA',
     'FORMAL_CHARGE_MAP',
     'HBOND_DONOR_ATOMS',

@@ -291,21 +291,25 @@ class ResidueFeaturizer:
         Calculate Solvent Accessible Surface Area (SASA) for each residue.
 
         Returns:
-            SASA features array of shape [num_residues, 7]:
-                - total, polar, apolar, mainChain, sideChain, each over
-                  RESIDUE_MAX_SASA for the residue
-                - burial_index (1.0 - total/max_sasa)
+            SASA features array of shape [num_residues, 11]:
+                - polar, apolar, mainChain, sideChain over RESIDUE_MAX_SASA:
+                  what fraction of the residue's whole surface each class
+                  accounts for. The total is relativeTotal below, which is the
+                  same quantity under its proper name.
+                - relativeTotal, relativePolar, relativeApolar,
+                  relativeMainChain, relativeSideChain, each over
+                  RESIDUE_MAX_CLASS_SASA: how exposed that class is against
+                  how exposed it could be
+                - burial_index (1.0 - relativeTotal)
                 - polar_apolar_ratio (polar / (polar + apolar))
 
-            Until 0.4.0 there were 12, the extra five being relativeTotal,
-            relativePolar, relativeApolar, relativeMainChain and
-            relativeSideChain. freesasa normalised each of those by its own
-            per-class reference, so they said something the first five did not;
-            plmol normalises everything by the residue's total, which made them
-            bit-identical duplicates of columns 0 to 4.
+            The two groups answer different questions. They were the same
+            numbers in 0.3.x and briefly in 0.4.0, because the per-class
+            references did not exist and everything was divided by the
+            residue's total.
         """
         num_residues = len(self.get_residues())
-        sasa_dim = 7  # Number of SASA features per residue
+        sasa_dim = 11  # Number of SASA features per residue
 
 
         # Build reverse mapping: res_type_int -> 3-letter code for RESIDUE_MAX_SASA lookup
@@ -334,11 +338,15 @@ class ResidueFeaturizer:
                     polar_apolar_ratio = values.polar / (values.polar + values.apolar + 1e-8)
 
                     sasas.append([
-                        values.total / max_sasa,
                         values.polar / max_sasa,
                         values.apolar / max_sasa,
                         values.mainChain / max_sasa,
                         values.sideChain / max_sasa,
+                        values.relativeTotal,
+                        values.relativePolar,
+                        values.relativeApolar,
+                        values.relativeMainChain,
+                        values.relativeSideChain,
                         burial_index,
                         polar_apolar_ratio,
                     ])

@@ -383,7 +383,7 @@ FEATURE_DIMS: Dict[str, Dict[str, Dict[str, int]]] = {
     },
     "protein": {
         "graph": {
-            "node_features": 78,
+            "node_features": 82,
             "node_vector_features": 31,
             "edge_features": 39,
             "edge_vector_features": 8,

@@ -76,4 +76,4 @@ class TestResidueFeaturizerReal:
         sasa = rf.calculate_sasa()
         assert isinstance(sasa, np.ndarray)
         assert sasa.ndim == 2
-        assert sasa.shape[1] == 7
+        assert sasa.shape[1] == 11

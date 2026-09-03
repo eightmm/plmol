@@ -387,6 +387,45 @@ RESIDUE_MAX_SASA = {
 }
 
 # =============================================================================
+# Reference SASA per class (Angstrom^2)
+# =============================================================================
+# RESIDUE_MAX_SASA says how much surface a residue can expose in total. These
+# say how much of that surface each class can expose, which is what a relative
+# polar or main-chain area has to be divided by -- dividing them by the total
+# instead gives back the absolute fraction, not a relative exposure.
+#
+# The split comes from plmol's own Shrake-Rupley on Gly-X-Gly tripeptides, eight
+# MMFF-optimised conformers per residue, averaged. Only the *fractions* are
+# taken from that calculation; each is multiplied by RESIDUE_MAX_SASA so the
+# totals stay anchored to the published table rather than to a conformer
+# ensemble. The fractions vary by 0.01 to 0.03 across conformers.
+#
+# GLY has no side chain, so its sideChain reference is zero and a relative
+# side-chain area is reported as zero rather than divided by it.
+RESIDUE_MAX_CLASS_SASA: dict[str, dict[str, float]] = {
+    'ALA': {'polar':   49.9, 'apolar':   79.1, 'mainChain':   63.2, 'sideChain':   65.8},
+    'ARG': {'polar':  178.4, 'apolar':   95.6, 'mainChain':   48.1, 'sideChain':  225.9},
+    'ASN': {'polar':  148.4, 'apolar':   46.6, 'mainChain':   56.7, 'sideChain':  138.3},
+    'ASP': {'polar':  146.8, 'apolar':   46.2, 'mainChain':   58.0, 'sideChain':  135.0},
+    'CYS': {'polar':  124.6, 'apolar':   42.4, 'mainChain':   52.9, 'sideChain':  114.1},
+    'GLN': {'polar':  155.5, 'apolar':   69.5, 'mainChain':   51.8, 'sideChain':  173.2},
+    'GLU': {'polar':  156.0, 'apolar':   67.0, 'mainChain':   54.2, 'sideChain':  168.8},
+    'GLY': {'polar':   60.6, 'apolar':   43.4, 'mainChain':  104.0, 'sideChain':    0.0},
+    'HIS': {'polar':   95.3, 'apolar':  128.7, 'mainChain':   50.3, 'sideChain':  173.7},
+    'ILE': {'polar':   34.7, 'apolar':  162.3, 'mainChain':   41.8, 'sideChain':  155.2},
+    'LEU': {'polar':   40.3, 'apolar':  160.7, 'mainChain':   48.9, 'sideChain':  152.1},
+    'LYS': {'polar':  109.2, 'apolar':  126.8, 'mainChain':   52.4, 'sideChain':  183.6},
+    'MET': {'polar':   94.0, 'apolar':  130.0, 'mainChain':   54.4, 'sideChain':  169.6},
+    'PHE': {'polar':   40.8, 'apolar':  199.2, 'mainChain':   46.8, 'sideChain':  193.2},
+    'PRO': {'polar':   36.4, 'apolar':  122.6, 'mainChain':   48.1, 'sideChain':  110.9},
+    'SER': {'polar':  104.4, 'apolar':   50.6, 'mainChain':   62.6, 'sideChain':   92.4},
+    'THR': {'polar':   87.6, 'apolar':   84.4, 'mainChain':   53.4, 'sideChain':  118.6},
+    'TRP': {'polar':   68.8, 'apolar':  216.2, 'mainChain':   46.1, 'sideChain':  238.9},
+    'TYR': {'polar':   98.6, 'apolar':  164.4, 'mainChain':   46.4, 'sideChain':  216.6},
+    'VAL': {'polar':   38.2, 'apolar':  135.8, 'mainChain':   46.0, 'sideChain':  128.0},
+}
+
+# =============================================================================
 # Formal Charges at Physiological pH (per-atom)
 # =============================================================================
 # Partial charges for charged residue sidechain atoms

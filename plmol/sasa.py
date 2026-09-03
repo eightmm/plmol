@@ -28,6 +28,7 @@ import numpy as np
 from .constants import (
     DEFAULT_VDW_RADIUS,
     ELEMENT_SYMBOL_TO_ATOMIC_NUMBER,
+    RESIDUE_MAX_CLASS_SASA,
     RESIDUE_MAX_SASA,
     VDW_RADIUS,
 )
@@ -134,9 +135,10 @@ def _digest(array: np.ndarray) -> bytes:
 class ResidueArea:
     """Per-residue areas, absolute and relative.
 
-    ``relative*`` values are fractions of ``RESIDUE_MAX_SASA``, where 1.0 means
-    fully exposed. The names are the ones freesasa used, so code written
-    against 0.3.x still reads them.
+    ``relativeTotal`` is a fraction of ``RESIDUE_MAX_SASA``; the other four are
+    fractions of :data:`RESIDUE_MAX_CLASS_SASA`, the surface each class can
+    expose. 1.0 means fully exposed either way. The names are the ones freesasa
+    used, and so is the per-class normalisation.
     """
 
     total: float
@@ -211,6 +213,17 @@ class NativeSasaResult:
         return self._residue_areas
 
 
+def _relative(area: float, reference: Optional[float]) -> float:
+    """*area* over its class reference; 0.0 when the class cannot exist.
+
+    Glycine has no side chain, so its side-chain reference is zero and the
+    relative value is zero rather than a division by it.
+    """
+    if not reference:
+        return 0.0
+    return area / reference
+
+
 def _residue_areas(
     structure: NativeSasaStructure, areas: np.ndarray
 ) -> Dict[str, Dict[str, ResidueArea]]:
@@ -243,18 +256,22 @@ def _residue_areas(
                 else:
                     side += area
 
-            scale = 1.0 / reference
+            # Each class is measured against how much of that class the
+            # residue can expose, not against its total surface. Dividing
+            # everything by the total would make these the same numbers as the
+            # absolute areas over RESIDUE_MAX_SASA.
+            classes = RESIDUE_MAX_CLASS_SASA.get(residue_name, {})
             out[chain][number] = ResidueArea(
                 total=total,
                 polar=polar,
                 apolar=apolar,
                 mainChain=main,
                 sideChain=side,
-                relativeTotal=total * scale,
-                relativePolar=polar * scale,
-                relativeApolar=apolar * scale,
-                relativeMainChain=main * scale,
-                relativeSideChain=side * scale,
+                relativeTotal=total / reference,
+                relativePolar=_relative(polar, classes.get("polar")),
+                relativeApolar=_relative(apolar, classes.get("apolar")),
+                relativeMainChain=_relative(main, classes.get("mainChain")),
+                relativeSideChain=_relative(side, classes.get("sideChain")),
             )
     return out
 
