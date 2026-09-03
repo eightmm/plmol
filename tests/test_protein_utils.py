@@ -189,7 +189,7 @@ class TestModifiedResiduesStayInTheChain:
         path, _ = self._chain(tmp_path)
         parser = PDBParser(path, skip_cache=True)
         assert len(parser.get_sequence()) == 4, "a modified residue is still a residue"
-        assert parser.get_sequence()[1] == "Y", "PTR is a tyrosine"
+        assert parser.get_sequence() == "AYKG", "PTR is a tyrosine, LLP a lysine"
 
     def test_the_residue_graph_has_every_residue(self, tmp_path):
         from plmol import Protein
@@ -207,10 +207,11 @@ class TestModifiedResiduesStayInTheChain:
         path, _ = self._chain(tmp_path)
         atom_graph = Protein.from_pdb(path).featurize(mode="atom_graph")["atom_graph"]
         atoms = np.asarray(atom_graph["coords"]).shape[0]
-        # 20 in the file, 19 here: standardising maps PTR onto TYR and TYR has
-        # no phosphorus, which is the PTM-to-parent behaviour the mapping asks
-        # for. What matters is that nothing downstream drops more.
-        assert atoms == 19
+        # 20 in the file, 18 here: standardising maps PTR onto TYR and LLP onto
+        # LYS, and neither parent has the atom the modification adds. That is
+        # the PTM-to-parent behaviour the mapping asks for; what matters is
+        # that nothing downstream drops more.
+        assert atoms == 18
         for key in ("sasa", "relative_sasa", "burial_index", "is_polar_sasa"):
             assert np.asarray(atom_graph[key]).shape[0] == atoms, key
 

@@ -126,6 +126,23 @@ class TestResidueTablesCoverTheTwenty:
         assert set(K.RESIDUE_NAME_MAPPING.values()) <= self.TWENTY | caps | {"UNK", "METAL"}
 
 
+class TestTheModifiedResidueTablesStayInStep:
+    """RESIDUE_NAME_MAPPING says what a modified residue becomes;
+    PTM_RESIDUES says which entries are modifications rather than protonation
+    states, and that is what ptm_handling switches on. A name in one and not
+    the other is a residue one of the four modes cannot see."""
+
+    def test_every_ptm_has_a_parent(self):
+        assert set(K.PTM_RESIDUES) <= set(K.RESIDUE_NAME_MAPPING)
+
+    def test_every_ptm_maps_to_a_standard_residue(self):
+        parents = {K.RESIDUE_NAME_MAPPING[p] for p in K.PTM_RESIDUES}
+        assert parents <= set(K.AMINO_ACID_LETTERS)
+
+    def test_the_preserved_atom_lists_name_a_known_ptm(self):
+        assert set(K.STANDARD_ATOMS_PTM) <= set(K.PTM_RESIDUES)
+
+
 class TestNucleotideTablesCoverDnaAndRna:
     RESIDUES = set(K.DNA_RESIDUES) | set(K.RNA_RESIDUES)
 

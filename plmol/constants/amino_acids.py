@@ -326,6 +326,24 @@ RESIDUE_NAME_MAPPING = {
     'MEN': 'ASN',  # N-methylasparagine
     'FME': 'MET',  # N-formylmethionine (translation initiation)
 
+    # Each of these is a PDB chemical component whose mon_nstd_parent_comp_id
+    # is the residue on the right. They fell through to UNK until 0.4.x, which
+    # cost the chain a residue apiece.
+    'KCX': 'LYS',  # Lysine NZ-carboxylic acid (urease, metallo-beta-lactamase)
+    'LLP': 'LYS',  # (2-lysyl)-pyridoxal-5'-phosphate, the PLP enzyme active site
+    'MLZ': 'LYS',  # N-methyl-lysine
+    'PYL': 'LYS',  # Pyrrolysine, the 22nd encoded amino acid
+    'PCA': 'GLU',  # Pyroglutamic acid, a common N-terminal modification
+    'CGU': 'GLU',  # Gamma-carboxy-glutamic acid
+    'CSD': 'CYS',  # 3-sulfinoalanine (cysteine sulfinic acid)
+    'CAS': 'CYS',  # S-(dimethylarsinic)-cysteine
+    'SEC': 'CYS',  # Selenocysteine, the 21st encoded amino acid
+    'HIC': 'HIS',  # 4-methyl-histidine
+    'NEP': 'HIS',  # N1-phosphonohistidine
+    'TYS': 'TYR',  # O-sulfo-tyrosine
+    'SAC': 'SER',  # N-acetyl-serine
+    'MHO': 'MET',  # S-oxymethionine
+
     # -----------------------------------------------------------------
     # N-terminal and C-terminal variants (keep as is for HETATM)
     # -----------------------------------------------------------------
@@ -336,12 +354,13 @@ RESIDUE_NAME_MAPPING = {
 
 # List of PTM residue codes for special handling
 PTM_RESIDUES = {
-    'SEP', 'TPO', 'PTR',  # Phosphorylation
-    'MSE',  # Selenomethionine
+    'SEP', 'TPO', 'PTR', 'NEP',  # Phosphorylation
+    'MSE', 'SEC',  # Selenium
     'HYP',  # Hydroxyproline
-    'MLY', 'M3L', 'ALY',  # Methylation/Acetylation
-    'CSO', 'CSS', 'CME', 'OCS',  # Cysteine modifications
-    'MEN', 'FME',  # Other modifications
+    'MLY', 'M3L', 'ALY', 'MLZ', 'HIC', 'SAC',  # Methylation/Acetylation
+    'CSO', 'CSS', 'CME', 'OCS', 'CSD', 'CAS',  # Cysteine modifications
+    'KCX', 'CGU', 'TYS', 'PCA', 'LLP', 'PYL', 'MHO',  # Other modifications
+    'MEN', 'FME',
 }
 
 # Nucleic acid residues to exclude
