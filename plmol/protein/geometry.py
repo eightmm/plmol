@@ -6,42 +6,50 @@ by any featurizer module (residue, backbone, interaction, etc.).
 
 from typing import Tuple
 
-import torch
-import torch.nn.functional as F
+import numpy as np
+
+from ..arrays import FLOAT, normalize, pad_last, pairwise_distances
+
+#: Pairwise vector slots kept out of the 5x5 intra-residue grid: everything but
+#: the diagonal, in row-major order.
+_OFF_DIAGONAL = np.array(
+    [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23],
+    dtype=np.int64,
+)
 
 
-def calculate_dihedral(coords: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+def calculate_dihedral(coords: np.ndarray, eps: float = 1e-8) -> np.ndarray:
     """Calculate dihedral angles from coordinates.
 
     Args:
-        coords: Coordinate tensor of shape (N, M, 3) where N is the number
+        coords: Coordinate array of shape (N, M, 3) where N is the number
             of residues and M is the number of atoms per residue.
         eps: Small value for numerical stability.
 
     Returns:
-        Dihedral angles tensor of shape (N, M).
+        Dihedral angles array of shape (N, M).
     """
     shape = coords.shape
     coords_flat = coords.reshape(shape[0] * shape[1], shape[2])
 
-    U = F.normalize(coords_flat[1:, :] - coords_flat[:-1, :], dim=-1)
+    U = normalize(coords_flat[1:, :] - coords_flat[:-1, :], axis=-1)
     u_2 = U[:-2, :]
     u_1 = U[1:-1, :]
     u_0 = U[2:, :]
 
-    n_2 = F.normalize(torch.cross(u_2, u_1, dim=1), dim=-1)
-    n_1 = F.normalize(torch.cross(u_1, u_0, dim=1), dim=-1)
+    n_2 = normalize(np.cross(u_2, u_1, axis=1), axis=-1)
+    n_1 = normalize(np.cross(u_1, u_0, axis=1), axis=-1)
 
     cosD = (n_2 * n_1).sum(-1)
-    cosD = torch.clamp(cosD, -1 + eps, 1 - eps)
+    cosD = np.clip(cosD, -1 + eps, 1 - eps)
 
-    D = torch.sign((u_2 * n_1).sum(-1)) * torch.acos(cosD)
-    D = F.pad(D, (1, 2), 'constant', 0)
+    D = np.sign((u_2 * n_1).sum(-1)) * np.arccos(cosD)
+    D = pad_last(D, 1, 2)
 
-    return D.view((int(D.size(0) / shape[1]), shape[1]))
+    return D.reshape((D.shape[0] // shape[1], shape[1]))
 
 
-def calculate_local_frames(coords: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+def calculate_local_frames(coords: np.ndarray, eps: float = 1e-8) -> np.ndarray:
     """Calculate local N-CA-C coordinate frames for each residue.
 
     Args:
@@ -50,34 +58,34 @@ def calculate_local_frames(coords: torch.Tensor, eps: float = 1e-8) -> torch.Ten
         eps: Small value for numerical stability.
 
     Returns:
-        Local frames tensor of shape (L, 3, 3).
+        Local frames array of shape (L, 3, 3).
     """
     p_N, p_Ca, p_C = coords[:, 0, :], coords[:, 1, :], coords[:, 2, :]
 
     u = p_N - p_Ca
     v = p_C - p_Ca
 
-    x_axis = F.normalize(u, dim=-1, eps=eps)
-    z_axis = F.normalize(torch.cross(u, v, dim=-1), dim=-1, eps=eps)
-    y_axis = torch.cross(z_axis, x_axis, dim=-1)
+    x_axis = normalize(u, axis=-1, eps=eps)
+    z_axis = normalize(np.cross(u, v, axis=-1), axis=-1, eps=eps)
+    y_axis = np.cross(z_axis, x_axis, axis=-1)
 
-    return torch.stack([x_axis, y_axis, z_axis], dim=2)
+    return np.stack([x_axis, y_axis, z_axis], axis=2)
 
 
 def calculate_backbone_curvature(
-    coords: torch.Tensor,
-    terminal_flags: Tuple[torch.Tensor, torch.Tensor],
+    coords: np.ndarray,
+    terminal_flags: Tuple[np.ndarray, np.ndarray],
     eps: float = 1e-8,
-) -> torch.Tensor:
+) -> np.ndarray:
     """Calculate backbone curvature from CA coordinates.
 
     Args:
         coords: Residue coordinates of shape (L, MAX_ATOMS, 3). Index 1=CA.
-        terminal_flags: Tuple of (n_terminal, c_terminal) boolean tensors.
+        terminal_flags: Tuple of (n_terminal, c_terminal) boolean arrays.
         eps: Small value for numerical stability.
 
     Returns:
-        Backbone curvature tensor of shape (L,).
+        Backbone curvature array of shape (L,).
     """
     ca_coords = coords[:, 1, :]
 
@@ -88,10 +96,10 @@ def calculate_backbone_curvature(
     v1 = p_im1 - p_i
     v2 = p_ip1 - p_i
 
-    cos_theta = (F.normalize(v1, dim=-1, eps=eps) * F.normalize(v2, dim=-1, eps=eps)).sum(dim=-1)
-    curvature_rad = torch.acos(torch.clamp(cos_theta, -1.0 + eps, 1.0 - eps))
+    cos_theta = (normalize(v1, axis=-1, eps=eps) * normalize(v2, axis=-1, eps=eps)).sum(axis=-1)
+    curvature_rad = np.arccos(np.clip(cos_theta, -1.0 + eps, 1.0 - eps))
 
-    curvature_rad = F.pad(curvature_rad, (1, 1), 'constant', 0)
+    curvature_rad = pad_last(curvature_rad, 1, 1)
     n_terminal, c_terminal = terminal_flags
     curvature_rad = curvature_rad * ~n_terminal
     curvature_rad = curvature_rad * ~c_terminal
@@ -100,19 +108,19 @@ def calculate_backbone_curvature(
 
 
 def calculate_backbone_torsion(
-    coords: torch.Tensor,
-    terminal_flags: Tuple[torch.Tensor, torch.Tensor],
+    coords: np.ndarray,
+    terminal_flags: Tuple[np.ndarray, np.ndarray],
     eps: float = 1e-8,
-) -> torch.Tensor:
+) -> np.ndarray:
     """Calculate backbone torsion from CA coordinates.
 
     Args:
         coords: Residue coordinates of shape (L, MAX_ATOMS, 3). Index 1=CA.
-        terminal_flags: Tuple of (n_terminal, c_terminal) boolean tensors.
+        terminal_flags: Tuple of (n_terminal, c_terminal) boolean arrays.
         eps: Small value for numerical stability.
 
     Returns:
-        Backbone torsion tensor of shape (L,).
+        Backbone torsion array of shape (L,).
     """
     ca_coords = coords[:, 1, :]
 
@@ -125,14 +133,14 @@ def calculate_backbone_torsion(
     b2 = p2 - p1
     b3 = p3 - p2
 
-    n1 = F.normalize(torch.cross(b1, b2, dim=-1), dim=-1, eps=eps)
-    n2 = F.normalize(torch.cross(b2, b3, dim=-1), dim=-1, eps=eps)
+    n1 = normalize(np.cross(b1, b2, axis=-1), axis=-1, eps=eps)
+    n2 = normalize(np.cross(b2, b3, axis=-1), axis=-1, eps=eps)
 
-    x = (n1 * n2).sum(dim=-1)
-    y = (torch.cross(n1, n2, dim=-1) * F.normalize(b2, dim=-1, eps=eps)).sum(dim=-1)
-    torsion_rad = torch.atan2(y, x)
+    x = (n1 * n2).sum(axis=-1)
+    y = (np.cross(n1, n2, axis=-1) * normalize(b2, axis=-1, eps=eps)).sum(axis=-1)
+    torsion_rad = np.arctan2(y, x)
 
-    torsion_rad = F.pad(torsion_rad, (1, 2), 'constant', 0)
+    torsion_rad = pad_last(torsion_rad, 1, 2)
     n_terminal, c_terminal = terminal_flags
     torsion_rad = torsion_rad * ~n_terminal
     torsion_rad = torsion_rad * ~c_terminal
@@ -140,13 +148,13 @@ def calculate_backbone_torsion(
     return torsion_rad
 
 
-def calculate_virtual_cb(coords: torch.Tensor) -> torch.Tensor:
+def calculate_virtual_cb(coords: np.ndarray) -> np.ndarray:
     """Virtual CB from N-CA-C geometry (ProteinMPNN coefficients).
 
     Works uniformly for all residues including GLY.
 
     Args:
-        coords: Tensor of shape (L, MAX_ATOMS, 3). Index 0=N, 1=CA, 2=C.
+        coords: Array of shape (L, MAX_ATOMS, 3). Index 0=N, 1=CA, 2=C.
 
     Returns:
         Virtual CB positions of shape (L, 3).
@@ -154,13 +162,13 @@ def calculate_virtual_cb(coords: torch.Tensor) -> torch.Tensor:
     N, CA, C = coords[:, 0], coords[:, 1], coords[:, 2]
     b = CA - N
     c = C - CA
-    a = torch.cross(b, c, dim=-1)
+    a = np.cross(b, c, axis=-1)
     return -0.58273431 * a + 0.56802827 * b - 0.54067466 * c + CA
 
 
 def calculate_self_distances_vectors(
-    coords: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    coords: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
     """Calculate intra-residue distances and vectors.
 
     Uses atoms N(0), CA(1), C(2), O(3) and sidechain centroid(-1).
@@ -173,41 +181,38 @@ def calculate_self_distances_vectors(
             - distances: (L, 10) upper-triangle pairwise distances
             - vectors: (L, 20, 3) selected pairwise vectors
     """
-    coords_subset = torch.cat([coords[:, :4, :], coords[:, -1:, :]], dim=1)
+    coords_subset = np.concatenate([coords[:, :4, :], coords[:, -1:, :]], axis=1)
 
-    distance = torch.cdist(coords_subset, coords_subset)
-    mask_sca = torch.triu(torch.ones_like(distance), diagonal=1).bool()
-    distance = torch.masked_select(distance, mask_sca).view(distance.shape[0], -1)
+    distance = pairwise_distances(coords_subset, coords_subset)
+    mask_sca = np.triu(np.ones_like(distance), k=1).astype(bool)
+    distance = distance[mask_sca].reshape(distance.shape[0], -1)
 
     vectors = coords_subset[:, None] - coords_subset[:, :, None]
-    vectors = vectors.view(coords.shape[0], 25, 3)
-    vectors = torch.index_select(
-        vectors, 1,
-        torch.tensor([1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23]),
-    )
+    vectors = vectors.reshape(coords.shape[0], 25, 3)
+    vectors = vectors[:, _OFF_DIAGONAL]
 
-    return torch.nan_to_num(distance), torch.nan_to_num(vectors)
+    return np.nan_to_num(distance), np.nan_to_num(vectors)
 
 
 def rbf_encode(
-    distances: torch.Tensor,
+    distances: np.ndarray,
     d_min: float = 0.0,
     d_max: float = 20.0,
     num_rbf: int = 16,
-) -> torch.Tensor:
+) -> np.ndarray:
     """Gaussian Radial Basis Function encoding of distances.
 
     Standard encoding used by ProteinMPNN, GVP, PiFold, etc.
 
     Args:
-        distances: Arbitrary-shape distance tensor.
+        distances: Arbitrary-shape distance array.
         d_min: Minimum center value.
         d_max: Maximum center value.
         num_rbf: Number of Gaussian basis functions.
 
     Returns:
-        Encoded tensor with shape (*distances.shape, num_rbf).
+        Encoded array with shape (*distances.shape, num_rbf).
     """
-    mu = torch.linspace(d_min, d_max, num_rbf, device=distances.device)
+    mu = np.linspace(d_min, d_max, num_rbf, dtype=FLOAT)
     sigma = (d_max - d_min) / num_rbf
-    return torch.exp(-((distances.unsqueeze(-1) - mu) ** 2) / (2 * sigma ** 2))
+    return np.exp(-((distances[..., None] - mu) ** 2) / (2 * sigma ** 2))

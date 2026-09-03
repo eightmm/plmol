@@ -41,6 +41,30 @@ from ..voxel import build_protein_voxel
 from .utils import PDBParser
 
 
+# --- migration bridge -------------------------------------------------------
+# protein/geometry.py computes in numpy now. These convert at its call sites and
+# go away when this file converts too.
+
+
+def _np(value):
+    """torch in, numpy out."""
+    if isinstance(value, tuple):
+        return tuple(_np(item) for item in value)
+    return value.detach().cpu().numpy() if hasattr(value, "detach") else value
+
+
+def _pt(value):
+    """numpy in, torch out."""
+    import numpy as _numpy
+
+    if isinstance(value, tuple):
+        return tuple(_pt(item) for item in value)
+    return torch.from_numpy(value) if isinstance(value, _numpy.ndarray) else value
+
+
+
+
+
 class ProteinFeaturizer:
     """
     Efficient protein featurizer that parses PDB once and caches results.
@@ -170,14 +194,11 @@ class ProteinFeaturizer:
                 self.coords, self.residue_types
             )
             terminal_flags = self.get_terminal_flags()
-            curvature = calculate_backbone_curvature(
-                self.coords, (terminal_flags['n_terminal'], terminal_flags['c_terminal'])
-            )
-            torsion = calculate_backbone_torsion(
-                self.coords, (terminal_flags['n_terminal'], terminal_flags['c_terminal'])
-            )
-            self_distance, self_vector = calculate_self_distances_vectors(
-                self.coords
+            flags = _np((terminal_flags['n_terminal'], terminal_flags['c_terminal']))
+            curvature = _pt(calculate_backbone_curvature(_np(self.coords), flags))
+            torsion = _pt(calculate_backbone_torsion(_np(self.coords), flags))
+            self_distance, self_vector = _pt(
+                calculate_self_distances_vectors(_np(self.coords))
             )
 
             self._cache['geometric'] = {

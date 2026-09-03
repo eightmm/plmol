@@ -94,7 +94,9 @@ class TestComputeEdgeFrameFeatures:
         L = 5
         coords = _make_coords(L)
         ca_coords = coords[:, 1]
-        frames = calculate_local_frames(coords)
+        # calculate_local_frames computes in numpy; this consumer still wants
+        # tensors, so convert at the boundary the way the featurizer does.
+        frames = torch.from_numpy(calculate_local_frames(coords.numpy()))
         # Make simple edge_index: fully connected minus self
         src = torch.arange(L).repeat_interleave(L - 1)
         dst = torch.cat([torch.cat([torch.arange(i), torch.arange(i + 1, L)]) for i in range(L)])

@@ -1,6 +1,6 @@
 """Tests for plmol/protein/geometry.py — stateless geometric computations."""
 
-import torch
+import numpy as np
 
 from plmol.protein.geometry import (
     calculate_dihedral,
@@ -13,9 +13,12 @@ from plmol.protein.geometry import (
 )
 
 
-def _make_coords(L: int, atoms_per_res: int = 5) -> torch.Tensor:
+_rng = np.random.default_rng(0)
+
+
+def _make_coords(L: int, atoms_per_res: int = 5) -> np.ndarray:
     """Create synthetic residue coords (L, atoms_per_res, 3) along z-axis."""
-    coords = torch.zeros(L, atoms_per_res, 3)
+    coords = np.zeros((L, atoms_per_res, 3), dtype=np.float32)
     backbone_atoms = [
         (-0.5, 0.0, -1.0),   # N
         (0.0, 0.0, 0.0),     # CA
@@ -27,7 +30,7 @@ def _make_coords(L: int, atoms_per_res: int = 5) -> torch.Tensor:
         z = i * 3.8
         for j in range(min(atoms_per_res, len(backbone_atoms))):
             bx, by, bz = backbone_atoms[j]
-            coords[i, j] = torch.tensor([bx, by, z + bz])
+            coords[i, j] = [bx, by, z + bz]
     return coords
 
 
@@ -41,7 +44,7 @@ class TestCalculateDihedral:
     def test_values_finite(self):
         coords = _make_coords(10, atoms_per_res=3)
         result = calculate_dihedral(coords)
-        assert torch.isfinite(result).all()
+        assert np.isfinite(result).all()
 
 
 class TestCalculateLocalFrames:
@@ -58,14 +61,14 @@ class TestCalculateLocalFrames:
             R = frames[i]
             # R^T R should be close to identity
             identity = R.T @ R
-            assert torch.allclose(identity, torch.eye(3), atol=1e-5)
+            assert np.allclose(identity, np.eye(3), atol=1e-5)
 
 
 class TestCalculateBackboneCurvature:
     def test_shape(self):
         L = 8
         coords = _make_coords(L)
-        terminal = (torch.zeros(L, dtype=torch.bool), torch.zeros(L, dtype=torch.bool))
+        terminal = (np.zeros(L, dtype=bool), np.zeros(L, dtype=bool))
         terminal[0][0] = True
         terminal[1][-1] = True
         result = calculate_backbone_curvature(coords, terminal)
@@ -75,8 +78,8 @@ class TestCalculateBackboneCurvature:
         """Terminal residues should have zero curvature."""
         L = 5
         coords = _make_coords(L)
-        n_term = torch.zeros(L, dtype=torch.bool)
-        c_term = torch.zeros(L, dtype=torch.bool)
+        n_term = np.zeros(L, dtype=bool)
+        c_term = np.zeros(L, dtype=bool)
         n_term[0] = True
         c_term[-1] = True
         result = calculate_backbone_curvature(coords, (n_term, c_term))
@@ -88,16 +91,16 @@ class TestCalculateBackboneTorsion:
     def test_shape(self):
         L = 8
         coords = _make_coords(L)
-        terminal = (torch.zeros(L, dtype=torch.bool), torch.zeros(L, dtype=torch.bool))
+        terminal = (np.zeros(L, dtype=bool), np.zeros(L, dtype=bool))
         result = calculate_backbone_torsion(coords, terminal)
         assert result.shape == (L,)
 
     def test_values_finite(self):
         L = 6
         coords = _make_coords(L)
-        terminal = (torch.zeros(L, dtype=torch.bool), torch.zeros(L, dtype=torch.bool))
+        terminal = (np.zeros(L, dtype=bool), np.zeros(L, dtype=bool))
         result = calculate_backbone_torsion(coords, terminal)
-        assert torch.isfinite(result).all()
+        assert np.isfinite(result).all()
 
 
 class TestCalculateVirtualCb:
@@ -111,7 +114,7 @@ class TestCalculateVirtualCb:
         coords = _make_coords(3)
         cb = calculate_virtual_cb(coords)
         ca = coords[:, 1]
-        dists = torch.norm(cb - ca, dim=-1)
+        dists = np.linalg.norm(cb - ca, axis=-1)
         assert (dists > 0.1).all()  # CB is not at CA position
 
 
@@ -125,34 +128,60 @@ class TestCalculateSelfDistancesVectors:
     def test_no_nan(self):
         coords = _make_coords(5)
         distances, vectors = calculate_self_distances_vectors(coords)
-        assert torch.isfinite(distances).all()
-        assert torch.isfinite(vectors).all()
+        assert np.isfinite(distances).all()
+        assert np.isfinite(vectors).all()
 
 
 class TestRbfEncode:
     def test_shape(self):
-        d = torch.tensor([1.0, 5.0, 10.0, 15.0])
+        d = np.array([1.0, 5.0, 10.0, 15.0])
         encoded = rbf_encode(d)
         assert encoded.shape == (4, 16)
 
     def test_custom_params(self):
-        d = torch.tensor([0.5, 1.5])
+        d = np.array([0.5, 1.5])
         encoded = rbf_encode(d, d_min=0.0, d_max=5.0, num_rbf=8)
         assert encoded.shape == (2, 8)
 
     def test_values_positive(self):
-        d = torch.tensor([3.0])
+        d = np.array([3.0])
         encoded = rbf_encode(d)
         assert (encoded >= 0).all()
 
     def test_peak_at_center(self):
         """RBF should peak at the center closest to the input distance."""
-        d = torch.tensor([0.0])
+        d = np.array([0.0])
         encoded = rbf_encode(d, d_min=0.0, d_max=20.0, num_rbf=16)
         # First center (0.0) should have maximum response
         assert encoded[0, 0] > encoded[0, -1]
 
     def test_2d_input(self):
-        d = torch.randn(3, 4).abs()
+        d = np.abs(_rng.standard_normal((3, 4))).astype(np.float32)
         encoded = rbf_encode(d, num_rbf=8)
         assert encoded.shape == (3, 4, 8)
+
+
+class TestFloatWidthIsPreserved:
+    """float32 in, float32 out.
+
+    numpy defaults to 64-bit where torch defaulted to 32-bit, so every array
+    these build has to say which it wants. A function that quietly widens costs
+    twice the memory downstream and stops matching the rest of the features.
+    """
+
+    def test_every_function_returns_float32(self):
+        coords = _make_coords(8)
+        terminal = (np.zeros(8, dtype=bool), np.zeros(8, dtype=bool))
+        distances, vectors = calculate_self_distances_vectors(coords)
+        outputs = {
+            "dihedral": calculate_dihedral(coords[:, :3]),
+            "local_frames": calculate_local_frames(coords),
+            "curvature": calculate_backbone_curvature(coords, terminal),
+            "torsion": calculate_backbone_torsion(coords, terminal),
+            "virtual_cb": calculate_virtual_cb(coords),
+            "self_distances": distances,
+            "self_vectors": vectors,
+            "rbf": rbf_encode(distances),
+        }
+        widened = {name: str(a.dtype) for name, a in outputs.items() if a.dtype != np.float32}
+        assert widened == {}

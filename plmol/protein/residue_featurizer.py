@@ -57,6 +57,30 @@ from ..constants import (
 )
 
 
+# --- migration bridge -------------------------------------------------------
+# protein/geometry.py computes in numpy now. These convert at its call sites and
+# go away when this file converts too.
+
+
+def _np(value):
+    """torch in, numpy out."""
+    if isinstance(value, tuple):
+        return tuple(_np(item) for item in value)
+    return value.detach().cpu().numpy() if hasattr(value, "detach") else value
+
+
+def _pt(value):
+    """numpy in, torch out."""
+    import numpy as _numpy
+
+    if isinstance(value, tuple):
+        return tuple(_pt(item) for item in value)
+    return torch.from_numpy(value) if isinstance(value, _numpy.ndarray) else value
+
+
+
+
+
 # =============================================================================
 # Chi Angle Constants (cached at module level)
 # =============================================================================
@@ -405,14 +429,14 @@ class ResidueFeaturizer:
 
         # Backbone dihedrals
         N_CA_C = coords[:, :3, :]
-        backbone_dihedrals = calculate_dihedral(N_CA_C)
+        backbone_dihedrals = _pt(calculate_dihedral(_np(N_CA_C)))
 
         # Sidechain dihedrals
         N_A_B_G_D_E_Z_ILE = torch.cat([coords[:, :2, :], coords[:, 4:6, :], coords[:, 7:11, :]], dim=1) * is_ILE
         N_A_B_G_D_E_Z_no_ILE = torch.cat([coords[:, :2, :], coords[:, 4:10, :]], dim=1) * is_not_ILE
         N_A_B_G_D_E_Z = N_A_B_G_D_E_Z_ILE + N_A_B_G_D_E_Z_no_ILE
 
-        side_chain_dihedrals = calculate_dihedral(N_A_B_G_D_E_Z)[:, 1:-2] * has_chi
+        side_chain_dihedrals = _pt(calculate_dihedral(_np(N_A_B_G_D_E_Z)))[:, 1:-2] * has_chi
 
         dihedrals = torch.cat([backbone_dihedrals, side_chain_dihedrals], dim=1)
 
@@ -538,15 +562,15 @@ class ResidueFeaturizer:
         terminal_flags = self.get_terminal_flags()
 
         # Local self features
-        self_distance, self_vector = calculate_self_distances_vectors(coords)
+        self_distance, self_vector = _pt(calculate_self_distances_vectors(_np(coords)))
 
         # Local frames
-        local_frames = calculate_local_frames(coords)
+        local_frames = _pt(calculate_local_frames(_np(coords)))
 
         # Dihedral angles and curvature
         dihedrals, has_chi_angles = self.get_dihedral_angles(coords, residue_types)
-        backbone_curvature = calculate_backbone_curvature(coords, terminal_flags)
-        backbone_torsion = calculate_backbone_torsion(coords, terminal_flags)
+        backbone_curvature = _pt(calculate_backbone_curvature(_np(coords), _np(terminal_flags)))
+        backbone_torsion = _pt(calculate_backbone_torsion(_np(coords), _np(terminal_flags)))
 
         degree = torch.cat([dihedrals, backbone_curvature[:, None], backbone_torsion[:, None]], dim=1)
         degree_feature = torch.cat([torch.cos(degree), torch.sin(degree)], dim=1)

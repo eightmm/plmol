@@ -17,6 +17,29 @@ from .geometry import (
 )
 
 
+# --- migration bridge -------------------------------------------------------
+# protein/geometry.py computes in numpy now. These convert at its call sites and
+# go away when this file converts too.
+
+
+def _np(value):
+    """torch in, numpy out."""
+    if isinstance(value, tuple):
+        return tuple(_np(item) for item in value)
+    return value.detach().cpu().numpy() if hasattr(value, "detach") else value
+
+
+def _pt(value):
+    """numpy in, torch out."""
+    import numpy as _numpy
+
+    if isinstance(value, tuple):
+        return tuple(_pt(item) for item in value)
+    return torch.from_numpy(value) if isinstance(value, _numpy.ndarray) else value
+
+
+
+
 def compute_backbone_dihedrals(
     coords: torch.Tensor,
     chain_indices: Dict[str, List[int]],
@@ -52,7 +75,7 @@ def compute_backbone_dihedrals(
         idx_t = torch.tensor(idx, dtype=torch.long)
         # Extract N-CA-C for this chain and call vectorized dihedral
         chain_nac = coords[idx_t, :3, :]  # (n, 3, 3)
-        raw = calculate_dihedral(chain_nac)  # (n, 3)
+        raw = _pt(calculate_dihedral(_np(chain_nac)))  # (n, 3)
 
         # phi: raw[:, 0] — valid for positions 1..n-1 (first is padding 0)
         dihedrals[idx_t[1:], 0] = raw[1:, 0]
@@ -74,6 +97,7 @@ def build_backbone_knn_graph(
     k: int = 30,
     chain_indices: Optional[Dict[str, List[int]]] = None,
 ) -> Dict[str, torch.Tensor]:
+
     """kNN graph over CA atoms.
 
     Args:
@@ -238,7 +262,7 @@ def compute_backbone_features(
     residue_mask = (backbone_norms > 0).all(dim=1)  # (L,)
 
     # Virtual CB
-    cb_coords = calculate_virtual_cb(coords)
+    cb_coords = _pt(calculate_virtual_cb(_np(coords)))
 
     # Chain-aware backbone dihedrals
     dihedrals, dihedrals_mask = compute_backbone_dihedrals(coords, chain_indices)
@@ -257,7 +281,7 @@ def compute_backbone_features(
     dihedrals_sincos[:, 4:6] *= dihedrals_mask[:, 2:3].float()
 
     # Local orientation frames
-    orientation_frames = calculate_local_frames(coords)
+    orientation_frames = _pt(calculate_local_frames(_np(coords)))
 
     # Chain IDs as integer tensor
     chain_id_map = {cid: i for i, cid in enumerate(sorted(chain_indices.keys()))}
@@ -270,7 +294,7 @@ def compute_backbone_features(
     graph = build_backbone_knn_graph(coords, k=k_neighbors, chain_indices=chain_indices)
 
     # RBF encoding of CA-CA distances
-    edge_rbf = rbf_encode(graph['edge_dist'])  # (E, 16)
+    edge_rbf = _pt(rbf_encode(_np(graph['edge_dist'])))  # (E, 16)
 
     # SE(3)-invariant edge features in local frames
     ca_coords = coords[:, 1]  # (L, 3)
