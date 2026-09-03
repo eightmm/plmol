@@ -98,6 +98,8 @@ NO_ELEMENT_COLUMN = [
     ("mercury", _pdb_line("HG", "HG", record="HETATM"), "HG"),
     ("zinc", _pdb_line("ZN", "ZN", record="HETATM"), "ZN"),
     ("calcium ion", _pdb_line("CA", "CA", record="HETATM"), "CA"),
+    ("ligand gamma hydrogen", _pdb_line("HG21", "LIG", record="HETATM"), "H"),
+    ("chlorine in a ligand", _pdb_line("CL1", "LIG", record="HETATM"), "CL"),
 ]
 
 

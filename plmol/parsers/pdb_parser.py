@@ -160,7 +160,7 @@ def parse_pdb_line(line: str) -> ParsedAtom:
 #: for residues that are not standard, where the same two letters are an atom
 #: name rather than an element: CA is the alpha carbon of every amino acid.
 _TWO_LETTER_ELEMENTS = frozenset(
-    {'CA', 'MG', 'ZN', 'FE', 'MN', 'CU', 'CO', 'NI', 'NA', 'CL', 'BR', 'SE', 'HG'}
+    {'CA', 'MG', 'ZN', 'FE', 'MN', 'CU', 'CO', 'NI', 'NA', 'CL', 'BR', 'SE'}
 )
 
 #: Residues built from one-letter elements alone -- C, N, O, S and P. MSE is
@@ -204,6 +204,11 @@ def _infer_element(name_field: str, res_name: str = '') -> str:
         return 'C'  # Default to carbon
     if res_name.strip() in _ONE_LETTER_ELEMENT_RESIDUES:
         return element[0].upper()
+    # A monatomic ion is named after itself: HG in HG, ZN in ZN. This is what
+    # separates a mercury from a ligand's gamma hydrogen, which PDB names HG21
+    # and starts in column 13 like a two-letter element.
+    if len(element) >= 2 and res_name.strip().upper() == element[:2].upper():
+        return element[:2].upper()
     if name_field[:1] == ' ':
         return element[0].upper()
     if len(element) >= 2 and element[:2].upper() in _TWO_LETTER_ELEMENTS:
