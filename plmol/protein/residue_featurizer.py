@@ -29,7 +29,7 @@ from .utils import (
     normalize_residue_name,
 )
 
-from ..arrays import FLOAT, INT, one_hot, pairwise_distances
+from ..arrays import FLOAT, INT, one_hot, pairwise_distances, sanitized
 from ..utils import dense_to_edges, knn_mask, sasa_structure_result
 
 # Import amino acid constants from centralized module
@@ -450,10 +450,10 @@ class ResidueFeaturizer:
             reverse_vector[1:] *= n_mask[:, None, None]
             reverse_distance[1:] *= n_mask[:, None]
 
-        forward_vector = np.nan_to_num(forward_vector)
-        reverse_vector = np.nan_to_num(reverse_vector)
-        forward_distance = np.nan_to_num(forward_distance)
-        reverse_distance = np.nan_to_num(reverse_distance)
+        forward_vector = sanitized(forward_vector, ca_coords, sc_coords)
+        reverse_vector = sanitized(reverse_vector, ca_coords, sc_coords)
+        forward_distance = sanitized(forward_distance, ca_coords, sc_coords)
+        reverse_distance = sanitized(reverse_distance, ca_coords, sc_coords)
 
         return (forward_vector, forward_distance), (reverse_vector, reverse_distance)
 
@@ -479,7 +479,9 @@ class ResidueFeaturizer:
         dm_CA_CA = pairwise_distances(coord_CA, coord_CA)
         dm_SC_SC = pairwise_distances(coord_SC, coord_SC)
         dm_CA_SC = pairwise_distances(coord_CA, coord_SC)
-        dm_SC_CA = pairwise_distances(coord_SC, coord_CA)
+        # |SC_i - CA_j| is |CA_j - SC_i|, and a norm is exactly the norm of the
+        # negated vector, so the fourth matrix is the third transposed.
+        dm_SC_CA = dm_CA_SC.T
 
         adj_CA_CA = (dm_CA_CA < distance_cutoff) * mask
         adj_SC_SC = (dm_SC_SC < distance_cutoff) * mask
@@ -504,10 +506,11 @@ class ResidueFeaturizer:
 
         vector1 = coord_CA_SC[:, None, :] - coord_CA_SC[:, :, :]
         vector3 = coord_CA_SC[:, None, :] - coord_SC_CA[:, :, :]
-        vectors = np.nan_to_num(np.concatenate([vector1, -vector1, vector3, -vector3], axis=2))
+        vectors = np.concatenate([vector1, -vector1, vector3, -vector3], axis=2)
+        vectors = sanitized(vectors, coord_CA, coord_SC)
         vectors = vectors * adj[:, :, None, None].astype(FLOAT)
 
-        return np.nan_to_num(dm_select), adj, vectors
+        return sanitized(dm_select, coord_CA, coord_SC), adj, vectors
 
     def _extract_residue_features(self, coords: np.ndarray, residue_types: np.ndarray) -> \
             Tuple[Tuple, Tuple]:

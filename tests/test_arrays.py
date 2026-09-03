@@ -14,6 +14,7 @@ from plmol.arrays import (
     one_hot,
     pad_last,
     pairwise_distances,
+    sanitized,
     to_numpy,
     to_torch,
 )
@@ -86,6 +87,46 @@ class TestPairwiseDistances:
         expansion = np.sqrt(np.maximum(squared, 0.0))
         direct = pairwise_distances(points, points)
         assert np.abs(direct - truth).max() < np.abs(expansion - truth).max()
+
+
+class TestPairwiseDistancesTranspose:
+    def test_swapping_the_arguments_transposes_the_result_exactly(self):
+        """The residue featurizer builds three of its four distance matrices
+        and transposes the third for the fourth. That is only sound if the two
+        agree bit for bit, which they do: a - b negates b - a exactly, and a
+        norm squares away the sign."""
+        for n in (3, 40, 430):
+            left = (rng.normal(scale=25, size=(n, 3)) + 60).astype(FLOAT)
+            right = (rng.normal(scale=25, size=(n, 3)) + 60).astype(FLOAT)
+            assert np.array_equal(
+                pairwise_distances(right, left), pairwise_distances(left, right).T
+            ), n
+
+
+class TestSanitized:
+    """It answers ``nan_to_num``'s question by looking at the coordinates the
+    array was derived from, which are thousands of values rather than millions."""
+
+    def test_a_finite_array_comes_back_untouched(self):
+        source = rng.normal(size=(20, 3)).astype(FLOAT)
+        derived = pairwise_distances(source, source)
+        assert sanitized(derived, source) is derived
+
+    def test_a_non_finite_source_falls_back_to_the_scrub(self):
+        source = rng.normal(size=(20, 3)).astype(FLOAT)
+        source[3, 1] = np.nan
+        derived = pairwise_distances(source, source)
+        cleaned = sanitized(derived, source)
+        assert np.isfinite(cleaned).all()
+        assert np.array_equal(cleaned, np.nan_to_num(derived))
+
+    def test_every_source_is_examined(self):
+        good = rng.normal(size=(5, 3)).astype(FLOAT)
+        bad = good.copy()
+        bad[0, 0] = np.inf
+        derived = np.full((5, 5), np.nan, dtype=FLOAT)
+        assert not np.isnan(sanitized(derived, good, bad)).any()
+        assert np.isnan(sanitized(derived, good, good)).all()
 
 
 class TestOneHot:

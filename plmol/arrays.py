@@ -64,6 +64,22 @@ def pairwise_distances(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     return np.linalg.norm(left[..., :, None, :] - right[..., None, :, :], axis=-1)
 
 
+def sanitized(derived: np.ndarray, *sources: np.ndarray) -> np.ndarray:
+    """``np.nan_to_num(derived)``, decided by looking at *sources* instead.
+
+    Every caller builds *derived* from *sources* with subtractions and norms,
+    so it holds a non-finite value only where a source does: the magnitudes are
+    atomic coordinates, twenty orders below where float32 overflows. Scanning
+    the coordinates costs a few thousand comparisons rather than the millions
+    the ``(N, N, ...)`` array they expand into would, and answers the same
+    question. When a source *is* non-finite the original scrub runs.
+    """
+    for source in sources:
+        if not np.isfinite(source).all():
+            return np.nan_to_num(derived)
+    return derived
+
+
 def one_hot(indices: np.ndarray, num_classes: int, dtype=FLOAT) -> np.ndarray:
     """``(..., num_classes)`` one-hot rows, as ``F.one_hot`` produces."""
     indices = np.asarray(indices, dtype=INT)
