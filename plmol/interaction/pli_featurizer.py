@@ -71,6 +71,37 @@ class Interaction:
     metadata: Optional[Dict] = field(default_factory=dict)
 
 
+#: Residue names for bulk solvent. Every protein-ligand interaction convention
+#: reports a water-mediated contact separately from a direct one, and this class
+#: has no notion of the water in between, so solvent is not part of the protein.
+_SOLVENT_RESIDUES = frozenset({"HOH", "WAT", "DOD", "SOL"})
+
+
+def _without_solvent(mol: "Chem.Mol") -> "Chem.Mol":
+    """*mol* with its crystallographic waters removed.
+
+    ``Chem.MolFromPDBFile`` keeps them, so a protein read straight from a PDB
+    arrives here with its solvent shell attached -- 169 waters on the 3260-atom
+    example, 11 of them within 4.5 A of the ligand. They inflate every index
+    this class reports and they are counted as protein neighbours by the
+    cross-contact density, which moved on 16 of 33 ligand atoms.
+    """
+    if mol is None:
+        return mol
+    waters = [
+        atom.GetIdx()
+        for atom in mol.GetAtoms()
+        if (info := atom.GetPDBResidueInfo()) is not None
+        and info.GetResidueName().strip().upper() in _SOLVENT_RESIDUES
+    ]
+    if not waters:
+        return mol
+    editable = Chem.RWMol(mol)
+    for idx in sorted(waters, reverse=True):
+        editable.RemoveAtom(idx)
+    return editable.GetMol()
+
+
 class PLInteractionFeaturizer:
     """
     Protein-Ligand Interaction Edge Featurizer (Heavy Atom Only).
@@ -138,7 +169,9 @@ class PLInteractionFeaturizer:
         self._cache: Dict[str, Any] = {}
 
         # Store original molecules and prepare with hydrogens
-        self._protein_with_h = self._prepare_mol_with_hydrogens(protein_mol)
+        self._protein_with_h = self._prepare_mol_with_hydrogens(
+            _without_solvent(protein_mol)
+        )
         self._ligand_with_h = self._prepare_mol_with_hydrogens(ligand_mol)
 
         # Validate 3D coordinates

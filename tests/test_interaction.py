@@ -211,3 +211,51 @@ class TestPocketExtractorUsesTheSharedRules:
         extractor = self._parsed(tmp_path)
         names = [line[12:16].strip() for lines in extractor._residue_lines for line in lines]
         assert names == ["N", "CA", "C", "O", "CB", "N", "CA", "C", "O"]
+
+
+class TestSolventIsNotProtein:
+    """Chem.MolFromPDBFile keeps crystallographic waters, and this class had no
+    notion of them, so they arrived as protein atoms."""
+
+    def test_waters_are_dropped_from_the_protein(self, example_pdb):
+        from rdkit import Chem
+
+        from plmol.interaction.pli_featurizer import _without_solvent
+
+        mol = Chem.MolFromPDBFile(example_pdb, removeHs=False)
+        before = mol.GetNumAtoms()
+        after = _without_solvent(mol).GetNumAtoms()
+        assert after < before
+        remaining = {
+            atom.GetPDBResidueInfo().GetResidueName().strip()
+            for atom in _without_solvent(mol).GetAtoms()
+            if atom.GetPDBResidueInfo() is not None
+        }
+        assert "HOH" not in remaining
+
+    def test_a_mol_without_waters_is_handed_back_unchanged(self):
+        from rdkit import Chem
+
+        from plmol.interaction.pli_featurizer import _without_solvent
+
+        mol = Chem.MolFromSmiles("CCO")
+        assert _without_solvent(mol) is mol
+
+    def test_none_survives(self):
+        from plmol.interaction.pli_featurizer import _without_solvent
+
+        assert _without_solvent(None) is None
+
+    def test_the_ligand_sees_only_protein_neighbours(self, example_pdb, example_sdf):
+        """The cross-contact density counts what is near a ligand atom. With
+        the solvent shell attached it counted waters, and on this complex 16 of
+        33 ligand atoms came out too high."""
+        from plmol import Ligand, Protein
+        from plmol.complex import MolecularComplex
+
+        result = MolecularComplex(
+            molecules={"protein": Protein.from_pdb(example_pdb),
+                       "ligand": Ligand.from_sdf(example_sdf)}
+        ).featurize(requests=["interaction"])["interaction"]
+        assert result["num_protein_atoms"] == 3262, "3431 with the waters counted"
+        assert np.asarray(result["protein_coords"]).shape[0] == result["num_protein_atoms"]
