@@ -46,6 +46,36 @@ class TestCalculateDihedral:
         result = calculate_dihedral(coords)
         assert np.isfinite(result).all()
 
+    def test_it_is_the_same_dihedral_the_rest_of_plmol_uses(self):
+        """The chain walk is a layout, not a second definition. It used to be
+        a second implementation, reading sign(u2.n1) * arccos(n2.n1)."""
+        from plmol.utils import dihedral_angles
+
+        chain = _rng.normal(size=(9, 3, 3)).astype(np.float32) * 3
+        flat = chain.reshape(-1, 3)
+        expected = dihedral_angles(flat[:-3], flat[1:-2], flat[2:-1], flat[3:])
+        got = calculate_dihedral(chain).reshape(-1)[1:-2]
+        assert np.array_equal(got, expected)
+
+    def test_an_angle_beside_a_plane_survives(self):
+        """float32 spacing next to cos = +-1 is 6e-8, so an arc cosine there
+        resolves no finer than about 3.5e-4 rad and snaps anything smaller to
+        zero. Every peptide omega sits in that blind spot."""
+        for angle in (1e-4, -1e-4, np.pi - 1e-4, -(np.pi - 1e-4)):
+            # Central bond along x; the two arms differ by exactly *angle*.
+            quad = np.array([[[-1.0, 1.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                             [[2.0, np.cos(angle), np.sin(angle)],
+                              [9.0, 9.0, 9.0], [8.0, 9.0, 9.0]]], dtype=np.float32)
+            got = float(calculate_dihedral(quad).reshape(-1)[1])
+            assert np.isclose(got, angle, atol=1e-6), (angle, got)
+
+    def test_a_degenerate_quadruple_is_zero_not_noise(self):
+        """Padding slots leave repeated points behind; they must not turn into
+        an angle of a few ten-thousandths."""
+        quad = np.zeros((2, 3, 3), dtype=np.float32)
+        quad[0, 0] = [1.0, 0.0, 0.0]
+        assert calculate_dihedral(quad).reshape(-1)[1] == 0.0
+
 
 class TestCalculateLocalFrames:
     def test_shape(self):
