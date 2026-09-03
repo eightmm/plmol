@@ -9,6 +9,9 @@ polarizabilities, bond lengths, and normalization constants.
 # Van der Waals Radii (Angstrom) - Bondi radii
 # =============================================================================
 
+#: Van der Waals radii in Angstrom. Bondi (1964) throughout -- 23 of the 24
+#: entries that predate this comment are his to the digit -- with Alvarez
+#: (2013) filling the transition metals Bondi did not measure.
 VDW_RADIUS = {
     1: 1.20,    # H
     5: 1.92,    # B
@@ -24,9 +27,13 @@ VDW_RADIUS = {
     17: 1.75,   # Cl
     19: 2.75,   # K
     20: 2.31,   # Ca
-    26: 2.04,   # Fe
+    25: 2.05,   # Mn, Alvarez
+    26: 2.04,   # Fe, Alvarez
+    27: 2.00,   # Co, Alvarez
+    28: 1.63,   # Ni
     29: 1.40,   # Cu
     30: 1.39,   # Zn
+    80: 1.55,   # Hg
     33: 1.85,   # As
     34: 1.90,   # Se
     35: 1.85,   # Br
@@ -79,6 +86,7 @@ DEFAULT_COVALENT_RADIUS = 0.76
 # First Ionization Energy (eV)
 # =============================================================================
 
+#: First ionisation energies in eV, NIST.
 IONIZATION_ENERGY = {
     1: 13.60,   # H
     5: 8.30,    # B
@@ -94,9 +102,13 @@ IONIZATION_ENERGY = {
     17: 12.97,  # Cl
     19: 4.34,   # K
     20: 6.11,   # Ca
+    25: 7.43,   # Mn
     26: 7.90,   # Fe
+    27: 7.88,   # Co
+    28: 7.64,   # Ni
     29: 7.73,   # Cu
     30: 9.39,   # Zn
+    80: 10.44,  # Hg
     33: 9.79,   # As
     34: 9.75,   # Se
     35: 11.81,  # Br
@@ -112,6 +124,8 @@ DEFAULT_IONIZATION_ENERGY = 10.0
 # Atomic Polarizability (Angstrom^3)
 # =============================================================================
 
+#: Static dipole polarisabilities in Angstrom^3, the recommended values
+#: (Schwerdtfeger and Nagle) the CRC handbook tabulates.
 POLARIZABILITY = {
     1: 0.67,    # H
     5: 3.03,    # B
@@ -127,9 +141,13 @@ POLARIZABILITY = {
     17: 2.18,   # Cl
     19: 43.40,  # K
     20: 22.80,  # Ca
+    25: 9.40,   # Mn
     26: 8.40,   # Fe
+    27: 7.50,   # Co
+    28: 6.80,   # Ni
     29: 6.20,   # Cu
     30: 5.75,   # Zn
+    80: 5.70,   # Hg
     33: 4.31,   # As
     34: 3.77,   # Se
     35: 3.05,   # Br
