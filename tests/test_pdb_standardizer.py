@@ -157,3 +157,71 @@ class TestStandardizePdbFunction:
         standardize_pdb(example_pdb, output)
         assert os.path.exists(output)
         assert os.path.getsize(output) > 0
+
+
+class TestResidueOrdering:
+    """Standardising must not reorder the chain.
+
+    _sort_residue_key built the number with ``filter(str.isdigit, ...)``, which
+    drops the minus sign. A construct numbered -2, -1, 0, 1, 2 -- an expression
+    tag, a propeptide, any mature protein numbered from its own first residue --
+    sorted as 2, 1, 0, 1, 2, so the sequence came out scrambled and every
+    backbone neighbour with it.
+    """
+
+    @staticmethod
+    def _build(tmp_path, spec, name):
+        def line(serial, atom_name, res, resnum, icode, xyz, element):
+            row = list(" " * 80)
+            row[0:6] = "ATOM  "
+            row[6:11] = f"{serial:5d}"
+            row[12:16] = (" " + atom_name).ljust(4)[:4]
+            row[17:20] = res.rjust(3)[:3]
+            row[21] = "A"
+            row[22:26] = f"{resnum:4d}"
+            row[26] = icode
+            row[30:38] = f"{xyz[0]:8.3f}"
+            row[38:46] = f"{xyz[1]:8.3f}"
+            row[46:54] = f"{xyz[2]:8.3f}"
+            row[54:60] = "  1.00"
+            row[60:66] = "  0.00"
+            row[76:78] = element.rjust(2)
+            return "".join(row).rstrip() + "\n"
+
+        backbone = [("N", "N"), ("CA", "C"), ("C", "C"), ("O", "O")]
+        text = "".join(
+            line(i * 10 + j, atom_name, res, num, icode,
+                 ((i + 1) * 3.8 + j * 0.4, 0.0, 0.0), element)
+            for i, (num, icode, res) in enumerate(spec)
+            for j, (atom_name, element) in enumerate(backbone, 1)
+        )
+        path = tmp_path / name
+        path.write_text(text + "END\n")
+        return str(path)
+
+    CASES = [
+        ([(-2, " ", "CYS"), (-1, " ", "ASP"), (0, " ", "GLU"),
+          (1, " ", "PHE"), (2, " ", "GLY")], "CDEFG", "negative numbers"),
+        ([(-1, " ", "CYS"), (-1, "A", "ASP"), (0, " ", "GLU"),
+          (1, " ", "PHE")], "CDEF", "negative with an insertion code"),
+        ([(1, " ", "CYS"), (2, " ", "ASP"), (3, " ", "GLU")], "CDE", "plain"),
+        ([(998, " ", "CYS"), (999, " ", "ASP"), (1000, " ", "GLU")], "CDE", "four digits"),
+    ]
+
+    @pytest.mark.parametrize("spec,sequence,label", CASES, ids=[c[2] for c in CASES])
+    @pytest.mark.parametrize("standardize", [True, False])
+    def test_the_chain_keeps_its_order(self, tmp_path, spec, sequence, label, standardize):
+        from plmol import Protein
+
+        path = self._build(tmp_path, spec, f"{label.replace(' ', '_')}.pdb")
+        protein = Protein.from_pdb(path, standardize=standardize)
+        assert protein.featurize(mode="sequence")["sequence"] == sequence
+
+    def test_the_sort_key_keeps_the_sign(self):
+        from plmol.protein.pdb_standardizer import PDBStandardizer
+
+        key = PDBStandardizer()._sort_residue_key
+        assert key(("A", "-2", "ALA")) == ("A", -2, "")
+        assert key(("A", "-1", "ALA")) < key(("A", "0", "ALA")) < key(("A", "1", "ALA"))
+        assert key(("A", "100A", "ALA")) == ("A", 100, "A")
+        assert key(("A", "100", "ALA")) < key(("A", "100A", "ALA"))

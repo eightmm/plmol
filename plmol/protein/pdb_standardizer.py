@@ -6,6 +6,7 @@ It handles residue reordering, atom standardization, and removal of unwanted mol
 """
 
 import os
+import re
 from typing import Dict, List, Tuple, Optional
 
 from ..parsers.pdb_parser import element_symbol, is_hydrogen
@@ -258,9 +259,16 @@ class PDBStandardizer:
             Sort key tuple
         """
         chain_id, res_num_str, res_name = residue_key
-        # Extract numeric part and insertion code
-        res_num = int(''.join(filter(str.isdigit, res_num_str)) or '0')
-        insertion_code = ''.join(filter(str.isalpha, res_num_str))
+        # The number keeps its sign. Filtering for digits dropped the minus, so
+        # a construct numbered -2, -1, 0, 1, 2 -- an expression tag, a
+        # propeptide, any mature protein numbered from its own first residue --
+        # sorted as 2, 1, 0, 1, 2 and came out of standardisation in the wrong
+        # order, with the sequence and every backbone neighbour scrambled.
+        match = re.match(r'^(-?\d+)(.*)$', res_num_str.strip())
+        if match:
+            res_num, insertion_code = int(match.group(1)), match.group(2).strip()
+        else:
+            res_num, insertion_code = 0, res_num_str.strip()
         return (chain_id, res_num, insertion_code)
 
     def _write_standardized_pdb(self, protein_residues: Dict, hetatm_residues: Dict,

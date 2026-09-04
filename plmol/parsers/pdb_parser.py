@@ -476,10 +476,15 @@ class PDBParser(StructureParser):
                     )
                 self._residues[key].atoms.append(atom)
 
+        # Rebuild the residues from the conformers that survived, rather than
+        # filtering the lists already attached to them.
         self._protein_atoms = best_conformers(self._protein_atoms)
-        kept = set(map(id, self._protein_atoms))
         for residue in self._residues.values():
-            residue.atoms = [a for a in residue.atoms if id(a) in kept]
+            residue.atoms = []
+        for atom in self._protein_atoms:
+            self._residues[
+                (atom.chain_id, atom.res_num, atom.insertion_code)
+            ].atoms.append(atom)
 
         if not self._protein_atoms:
             logger.warning(f"No protein atoms found in {self.pdb_path}")

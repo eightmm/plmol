@@ -712,6 +712,51 @@ class TestAlternateConformations:
         key = lambda a: (a.chain_id, a.res_num, a.atom_name, round(a.coords[1], 3))  # noqa: E731
         assert {key(a) for a in from_pdb} == {key(a) for a in from_cif}
 
+    @staticmethod
+    def _alt(name, alt_loc, occupancy, res_num=1, y=0.0):
+        from plmol.parsers.pdb_parser import ParsedAtom
+
+        return ParsedAtom(record_type="ATOM", atom_name=name, res_name="SER",
+                          res_num=res_num, chain_id="A", coords=(0.0, y, 0.0),
+                          element="C", alt_loc=alt_loc, occupancy=occupancy)
+
+    @pytest.mark.parametrize("occupancies,winner", [
+        ((0.6, 0.4), "A"), ((0.4, 0.6), "B"),
+        ((0.5, 0.5), "A"),          # a tie goes to the one written first
+        ((1.0, 1.0), "A"),          # which is what an NMR ensemble looks like
+    ], ids=["A major", "B major", "tie", "both full"])
+    def test_the_tie_goes_to_the_first(self, occupancies, winner):
+        from plmol.parsers.pdb_parser import best_conformers
+
+        kept = best_conformers([self._alt("OG", "A", occupancies[0], y=1.0),
+                                self._alt("OG", "B", occupancies[1], y=-1.0)])
+        assert len(kept) == 1
+        assert kept[0].alt_loc == winner
+
+    def test_three_alternates(self):
+        from plmol.parsers.pdb_parser import best_conformers
+
+        kept = best_conformers([self._alt("OG", "A", 0.3), self._alt("OG", "B", 0.5),
+                                self._alt("OG", "C", 0.2)])
+        assert [a.alt_loc for a in kept] == ["B"]
+
+    def test_file_order_survives_a_replacement(self):
+        """When the minor conformer is written first the winner takes its slot,
+        so atoms do not get reordered across residues -- the hierarchical
+        atom-to-residue mapping reads them positionally."""
+        from plmol.parsers.pdb_parser import best_conformers
+
+        atoms = []
+        for res_num in range(1, 6):
+            atoms.append(self._alt("N", "", 1.0, res_num=res_num))
+            atoms.append(self._alt("CB", "A", 0.4, res_num=res_num, y=1.0))
+            atoms.append(self._alt("CB", "B", 0.6, res_num=res_num, y=-1.0))
+        kept = best_conformers(atoms)
+        assert len(kept) == 10
+        numbers = [a.res_num for a in kept]
+        assert numbers == sorted(numbers)
+        assert [a.atom_name for a in kept[:2]] == ["N", "CB"]
+
     def test_an_atom_without_an_alternate_is_untouched(self, tmp_path):
         """Only atoms carrying a code go through the rule."""
         from plmol.parsers import PDBParser
