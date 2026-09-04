@@ -445,3 +445,58 @@ class TestPocketKeepsInsertionCodedResidues:
         )
         assert pocket.pocket_residues == [("A", 100, "TRP"), ("A", 100, "TRP")]
         assert pocket.insertion_codes == ["", "A"]
+
+
+class TestPocketUsesTheOneParser:
+    """The pocket comes from PDBParser, not from a text walk of its own."""
+
+    STRUCTURE = (
+        "ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00 20.00           N\n"
+        "ATOM      2  CA  ALA A   1       1.450   0.000   0.000  1.00 20.00           C\n"
+        "ATOM      3  C   ALA A   1       2.400   1.000   0.000  1.00 20.00           C\n"
+        "ATOM      4  O   ALA A   1       2.400   2.200   0.000  1.00 20.00           O\n"
+        "ATOM      5  OXT ALA A   1       3.000   3.000   0.000  1.00 20.00           O\n"
+        "HETATM    6  N   MSE A   2       3.700   0.400   0.000  1.00 20.00           N\n"
+        "HETATM    7  CA  MSE A   2       4.900   1.200   0.000  1.00 20.00           C\n"
+        "HETATM    8  C   MSE A   2       6.100   0.400   0.000  1.00 20.00           C\n"
+        "HETATM    9  O   MSE A   2       6.100  -0.800   0.000  1.00 20.00           O\n"
+        "HETATM   10  SE  MSE A   2       5.100   2.900   0.000  1.00 20.00          SE\n"
+        "END\n"
+    )
+
+    def test_a_hetatm_amino_acid_is_a_residue(self, tmp_path):
+        # Selenomethionine is deposited as HETATM. The old walk tested the
+        # record type for the string ATOM and dropped the whole residue; every
+        # other path in plmol asks is_protein_atom, which keeps it.
+        from plmol.interaction.pocket_extractor import PocketExtractor
+
+        path = tmp_path / "mse.pdb"
+        path.write_text(self.STRUCTURE)
+        extractor = PocketExtractor.from_protein(str(path))
+
+        assert [key[:3] for key in extractor._residue_keys] == [
+            ("A", 1, "ALA"), ("A", 2, "MSE")
+        ]
+        assert "SE" in [l[12:16].strip() for l in extractor._residue_lines[1]]
+
+    def test_a_terminal_oxygen_is_not(self, tmp_path):
+        # is_protein_atom excludes OXT, so the pocket agrees with the graph.
+        from plmol.interaction.pocket_extractor import PocketExtractor
+
+        path = tmp_path / "oxt.pdb"
+        path.write_text(self.STRUCTURE)
+        extractor = PocketExtractor.from_protein(str(path))
+        assert "OXT" not in [l[12:16].strip() for l in extractor._residue_lines[0]]
+
+    def test_the_example_pocket_is_unchanged(self, example_pdb, example_sdf):
+        # Lines are regenerated rather than copied, so what RDKit is handed has
+        # to perceive the same way.
+        from plmol.interaction.pocket_extractor import extract_pocket
+        from plmol.parsers.pdb_parser import PDBParser
+
+        PDBParser.clear_cache()
+        ligand = Chem.MolFromMolFile(example_sdf, removeHs=False)
+        pocket = extract_pocket(example_pdb, ligand, distance_cutoff=6.0)[0]
+        assert pocket.num_residues == 24
+        assert pocket.num_atoms == 204
+        assert pocket.pocket_residues[0] == ("A", 7, "TYR")

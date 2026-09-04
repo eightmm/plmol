@@ -10,12 +10,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from rdkit import Chem
 from ..constants import METAL_ELEMENTS, POCKET_MAX_ATOMS_PER_RESIDUE
-from ..parsers.pdb_parser import (
-    best_conformers,
-    element_symbol,
-    is_hydrogen,
-    parse_pdb_line,
-)
+from ..parsers.pdb_parser import PDBParser, format_pdb_line
 from ..rdkit_utils import has_3d
 from ..errors import InputError
 
@@ -279,111 +274,66 @@ class PocketExtractor:
         """
         Parse protein PDB file into residue-based structure.
 
+        The parsing is :class:`~plmol.parsers.pdb_parser.PDBParser`'s rather
+        than this module's own walk over the text, which was the sixth in the
+        package and drifted from the rest in three ways at once: it read the
+        element from the atom name, it kept every alternate conformation, and
+        it decided what counts as a protein atom by testing for the string
+        ``ATOM``. Lines are written back with
+        :func:`~plmol.parsers.pdb_parser.format_pdb_line`, so what RDKit is
+        handed is what the parser read.
+
         Creates:
             - _residue_coords: [num_residue, MAX_ATOMS_PER_RESIDUE, 3] coordinate tensor
             - _residue_lines: List of PDB lines for each residue
             - _residue_keys: List of (chain, resnum, resname, insertion_code) tuples
         """
-        residue_coords: Dict[Tuple, List[List[float]]] = {}
-        residue_lines: Dict[Tuple, List[str]] = {}
-        metal_lines: List[str] = []
-        metal_coords: List[List[float]] = []
+        parser = PDBParser(self.protein_pdb_path)
 
-        with open(self.protein_pdb_path, 'r') as f:
-            for line in f:
-                # Collect HETATM metal atoms for pocket metal preservation
-                if line.startswith('HETATM'):
-                    if element_symbol(line) in _METAL_ELEMENTS:
-                        try:
-                            x = float(line[30:38])
-                            y = float(line[38:46])
-                            z = float(line[46:54])
-                        except ValueError:
-                            continue
-                        metal_lines.append(line)
-                        metal_coords.append([x, y, z])
-                    continue
+        residue_atoms: Dict[Tuple, List] = {}
+        for atom in parser.protein_atoms:
+            key = (atom.chain_id, atom.res_num, atom.res_name, atom.insertion_code)
+            # The cap trims a residue that really has more atoms than the
+            # tensor holds; alternate conformations are already resolved, so it
+            # no longer spends slots on competing copies of the same atom.
+            bucket = residue_atoms.setdefault(key, [])
+            if len(bucket) < MAX_ATOMS_PER_RESIDUE:
+                bucket.append(atom)
 
-                # ATOM lines only (standard amino acids, no HETATM)
-                if not line.startswith('ATOM'):
-                    continue
-
-                # Skip hydrogens, by the parser's rule rather than a fourth
-                # one. Reading the atom name kept every hydrogen PDB numbered
-                # the pre-2007 way, 1HB, whose name starts with a digit.
-                if is_hydrogen(line):
-                    continue
-
-                # Extract residue info
-                chain = line[21] if len(line) > 21 else ' '
-                try:
-                    resnum = int(line[22:26].strip())
-                except ValueError:
-                    continue
-                resname = line[17:20].strip()
-
-                # Extract coordinates
-                try:
-                    x = float(line[30:38])
-                    y = float(line[38:46])
-                    z = float(line[46:54])
-                except ValueError:
-                    continue
-
-                # The insertion code is part of what makes a residue. Without
-                # it 100 and 100A were one key, and since only the first
-                # MAX_ATOMS_PER_RESIDUE atoms of a key are kept, a tryptophan
-                # at 100A lost all fourteen of its atoms to the one at 100.
-                icode = line[26] if len(line) > 26 and line[26] != ' ' else ''
-                key = (chain, resnum, resname, icode)
-
-                # Collected whole, then thinned below. Capping here kept the
-                # first MAX_ATOMS_PER_RESIDUE lines, which for a residue
-                # refined in two conformations meant both copies of its first
-                # few atoms and none of its last few.
-                if key not in residue_coords:
-                    residue_coords[key] = []
-                    residue_lines[key] = []
-                residue_coords[key].append([x, y, z])
-                residue_lines[key].append(line)
-
-        # One position per atom. A side chain modelled in alternate locations is
-        # written two or three times, and the parser's rule -- highest
-        # occupancy, first seen breaks a tie -- is the one applied here too. A
-        # tryptophan with an A and a B side chain used to reach the cap on
-        # NE1 and lose CE2, CE3, CZ2, CZ3 and CH2 outright.
-        for key in list(residue_lines):
-            atoms = [parse_pdb_line(text) for text in residue_lines[key]]
-            keep = {id(atom) for atom in best_conformers(atoms)}
-            kept = [
-                (text, coord)
-                for text, coord, atom in zip(residue_lines[key], residue_coords[key], atoms)
-                if id(atom) in keep
-            ][:MAX_ATOMS_PER_RESIDUE]
-            residue_lines[key] = [text for text, _ in kept]
-            residue_coords[key] = [coord for _, coord in kept]
-
-        # Sort residue keys for consistent ordering
-        self._residue_keys = sorted(residue_coords.keys())
+        self._residue_keys = sorted(residue_atoms.keys())
         num_residues = len(self._residue_keys)
 
-        # Build coordinate tensor [num_residue, MAX_ATOMS, 3]
         self._residue_coords = np.full(
             (num_residues, MAX_ATOMS_PER_RESIDUE, 3),
             np.nan,
-            dtype=np.float32
+            dtype=np.float32,
         )
         self._residue_lines: List[List[str]] = []
 
+        serial = 0
         for i, key in enumerate(self._residue_keys):
-            coords = residue_coords[key]
-            n_atoms = len(coords)
-            self._residue_coords[i, :n_atoms, :] = coords
-            self._residue_lines.append(residue_lines[key])
+            atoms = residue_atoms[key]
+            self._residue_coords[i, :len(atoms), :] = [atom.coords for atom in atoms]
+            lines = []
+            for atom in atoms:
+                serial += 1
+                lines.append(format_pdb_line(atom, serial))
+            self._residue_lines.append(lines)
 
         self._num_residues = num_residues
 
-        # Store metal HETATM data for pocket extraction
+        # Metal HETATM records, kept so a pocket can carry its cofactor.
+        metal_lines: List[str] = []
+        metal_coords: List[List[float]] = []
+        for atom in parser.all_atoms:
+            if atom.record_type != 'HETATM':
+                continue
+            if atom.element.strip().upper() not in _METAL_ELEMENTS:
+                continue
+            serial += 1
+            metal_lines.append(format_pdb_line(atom, serial))
+            metal_coords.append(list(atom.coords))
+
         self._metal_lines = metal_lines
         self._metal_coords = (
             np.array(metal_coords, dtype=np.float32) if metal_coords
