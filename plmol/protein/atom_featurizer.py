@@ -3,6 +3,7 @@ Atom-level protein featurizer for extracting atomic features and SASA.
 """
 
 import logging
+import re
 import numpy as np
 from typing import Dict, Tuple, Optional, List
 logger = logging.getLogger(__name__)
@@ -28,6 +29,12 @@ from ..constants import (
 )
 from ..utils import dihedral_angles, sasa_structure_result
 from ..sasa import is_polar_element
+
+
+def _residue_number(label: str) -> int:
+    """The signed integer part of a residue label such as "100", "-2" or "100A"."""
+    match = re.match(r'^\s*(-?\d+)', str(label))
+    return int(match.group(1)) if match else 0
 
 
 class AtomFeaturizer:
@@ -141,7 +148,10 @@ class AtomFeaturizer:
 
             # Get atom information
             residue_names.append(structure.residueName(i))
-            residue_numbers.append(int(structure.residueNumber(i)))
+            # residueNumber carries the insertion code, as freesasa's did:
+            # "100A" is a residue in its own right. Only the number is wanted
+            # here, and it may be negative.
+            residue_numbers.append(_residue_number(structure.residueNumber(i)))
             atom_names.append(structure.atomName(i).strip())
             chain_labels.append(structure.chainLabel(i))
             radii.append(structure.radius(i))

@@ -631,6 +631,26 @@ class TestInsertionCodes:
         per_residue = [v for chain in result.residueAreas().values() for v in chain.values()]
         assert len(per_residue) == 5
 
+    @pytest.mark.parametrize("standardize", [True, False])
+    def test_every_mode_runs_on_them(self, tmp_path, standardize):
+        """The atom path reads residueNumber, which carries the code -- so it
+        parses the number out rather than calling int() on "100A"."""
+        from plmol import Protein
+
+        path = self._structure(tmp_path, self.SAME)
+        protein = Protein.from_pdb(path, standardize=standardize)
+        for mode in ("sequence", "graph", "atom_graph", "backbone", "surface", "voxel"):
+            assert protein.featurize(mode=mode)[mode] is not None, mode
+
+    def test_a_negative_number_parses_too(self):
+        from plmol.protein.atom_featurizer import _residue_number
+
+        assert _residue_number("100") == 100
+        assert _residue_number("100A") == 100
+        assert _residue_number("-2") == -2
+        assert _residue_number("-2B") == -2
+        assert _residue_number("") == 0
+
     def test_they_come_out_in_sequence_order(self, tmp_path):
         """100 before 100A before 100B, not sorted by residue type."""
         from plmol.protein.residue_featurizer import ResidueFeaturizer
