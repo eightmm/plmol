@@ -101,7 +101,11 @@ def calculate_backbone_curvature(
     cos_theta = (normalize(v1, axis=-1, eps=eps) * normalize(v2, axis=-1, eps=eps)).sum(axis=-1)
     curvature_rad = np.arccos(np.clip(cos_theta, -1.0 + eps, 1.0 - eps))
 
-    curvature_rad = pad_last(curvature_rad, 1, 1)
+    # The window needs three CA atoms, so a chain shorter than that yields
+    # none and the padding alone would be longer than the chain. Trimming to
+    # the residue count keeps the promised (L,) shape: a one-residue chain has
+    # no curvature and says so with a zero rather than a broadcast error.
+    curvature_rad = pad_last(curvature_rad, 1, 1)[:ca_coords.shape[0]]
     n_terminal, c_terminal = terminal_flags
     curvature_rad = curvature_rad * ~n_terminal
     curvature_rad = curvature_rad * ~c_terminal
@@ -142,7 +146,10 @@ def calculate_backbone_torsion(
     y = (np.cross(n1, n2, axis=-1) * normalize(b2, axis=-1, eps=eps)).sum(axis=-1)
     torsion_rad = np.arctan2(y, x)
 
-    torsion_rad = pad_last(torsion_rad, 1, 2)
+    # Four CA atoms are needed for a torsion, so a chain of three or fewer
+    # yields none and the padding alone would be longer than the chain. Same
+    # trim as the curvature: the shape is (L,) whatever L is.
+    torsion_rad = pad_last(torsion_rad, 1, 2)[:ca_coords.shape[0]]
     n_terminal, c_terminal = terminal_flags
     torsion_rad = torsion_rad * ~n_terminal
     torsion_rad = torsion_rad * ~c_terminal

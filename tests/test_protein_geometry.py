@@ -1,6 +1,7 @@
 """Tests for plmol/protein/geometry.py — stateless geometric computations."""
 
 import numpy as np
+import pytest
 
 from plmol.protein.geometry import (
     calculate_dihedral,
@@ -215,3 +216,63 @@ class TestFloatWidthIsPreserved:
         }
         widened = {name: str(a.dtype) for name, a in outputs.items() if a.dtype != np.float32}
         assert widened == {}
+
+
+class TestShortChains:
+    """A chain shorter than the window still has to come back with one value
+    per residue.
+
+    Curvature reads three CA atoms and torsion four, so a short chain yields
+    none of either -- and the padding alone was then longer than the chain.
+    calculate_backbone_torsion returned three values for a dipeptide and the
+    terminal mask, of length two, could not be broadcast against it. Every
+    graph-mode featurization of a structure with fewer than three residues
+    died on it, with a bare ValueError from inside numpy.
+    """
+
+    @pytest.mark.parametrize("length", [0, 1, 2, 3, 4, 5, 8])
+    def test_one_value_per_residue(self, length):
+        coords = _rng.normal(size=(length, 15, 3)).astype(np.float32) * 3
+        flags = (np.zeros(length, dtype=bool), np.zeros(length, dtype=bool))
+        assert calculate_backbone_curvature(coords, flags).shape == (length,)
+        assert calculate_backbone_torsion(coords, flags).shape == (length,)
+
+    @pytest.mark.parametrize("length", [1, 2, 3])
+    def test_a_short_chain_has_no_curvature_or_torsion(self, length):
+        """No window fits, so the honest answer is zero rather than an error."""
+        coords = _rng.normal(size=(length, 15, 3)).astype(np.float32) * 3
+        flags = (np.zeros(length, dtype=bool), np.zeros(length, dtype=bool))
+        assert np.all(calculate_backbone_torsion(coords, flags) == 0.0)
+        if length < 3:
+            assert np.all(calculate_backbone_curvature(coords, flags) == 0.0)
+
+    def test_a_dipeptide_featurizes(self, tmp_path):
+        from plmol import Protein
+
+        def line(serial, name, res, resnum, xyz, element):
+            row = list(" " * 80)
+            row[0:6] = "ATOM  "
+            row[6:11] = f"{serial:5d}"
+            row[12:16] = (" " + name).ljust(4)[:4]
+            row[17:20] = res.rjust(3)[:3]
+            row[21] = "A"
+            row[22:26] = f"{resnum:4d}"
+            row[30:38] = f"{xyz[0]:8.3f}"
+            row[38:46] = f"{xyz[1]:8.3f}"
+            row[46:54] = f"{xyz[2]:8.3f}"
+            row[54:60] = "  1.00"
+            row[60:66] = "  0.00"
+            row[76:78] = element.rjust(2)
+            return "".join(row).rstrip() + "\n"
+
+        backbone = [("N", "N"), ("CA", "C"), ("C", "C"), ("O", "O")]
+        text = "".join(
+            line(i * 10 + j, name, "ALA", i, (i * 3.8 + j * 0.5, 0.0, 0.0), element)
+            for i in (1, 2) for j, (name, element) in enumerate(backbone, 1)
+        )
+        path = tmp_path / "dipeptide.pdb"
+        path.write_text(text + "END\n")
+
+        for mode in ("sequence", "graph", "atom_graph", "backbone", "surface", "voxel"):
+            result = Protein.from_pdb(str(path)).featurize(mode=mode)[mode]
+            assert result is not None, mode
