@@ -31,6 +31,34 @@ class StructureParser(ABC):
         ...
 
     @property
+    def metal_atoms(self) -> List["ParsedAtom"]:
+        """HETATM records whose element is a metal.
+
+        ``protein_atoms`` excludes them -- they are not residues -- but they are
+        part of the site: coordination is one of the interactions plmol detects,
+        and a pocket keeps its cofactor.
+        """
+        from ..constants import METAL_ELEMENTS
+
+        return [
+            atom for atom in self.all_atoms
+            if atom.record_type == "HETATM"
+            and atom.element.strip().upper() in METAL_ELEMENTS
+        ]
+
+    @property
+    def protein_atoms_with_metals(self) -> List["ParsedAtom"]:
+        """``protein_atoms`` followed by :attr:`metal_atoms`.
+
+        The protein side of an interaction, as every consumer of it wants it:
+        the residues plus the ions they hold, and nothing else. Reading a whole
+        structure file with RDKit instead gives the ligands and the solvent
+        too, and for 4HHB gives no molecule at all -- proximity bonding across
+        the heme boundary puts five bonds on a carbon and sanitisation refuses.
+        """
+        return list(self.protein_atoms) + self.metal_atoms
+
+    @property
     @abstractmethod
     def file_path(self) -> str:
         """Path to the source structure file."""

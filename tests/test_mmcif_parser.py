@@ -480,7 +480,7 @@ class TestOneCifGivesBothMolecules:
         from plmol.complex import MolecularComplex
 
         complex_ = MolecularComplex.from_mmcif(mini_complex_cif, standardize=False)
-        assert set(complex_.molecules) == {"protein", "ligand"}
+        assert set(complex_.molecules) == {"protein", "ligand", "ligand_2"}
 
         ligand = complex_.molecules["ligand"]
         # Coordinates say which atoms are bonded, not which bonds are aromatic.
@@ -488,6 +488,44 @@ class TestOneCifGivesBothMolecules:
         # cyclohexane.
         assert Chem.MolToSmiles(ligand._rdmol) == "c1ccccc1"
         assert ligand.metadata["bond_orders_from_file"] is True
+
+    def test_two_copies_of_one_ligand_come_out_the_same(self, mini_complex_cif):
+        # The fixture holds the same benzene twice, the second with its atoms
+        # nudged. Bonds inferred from distance differ between copies -- the four
+        # hemes of 4HHB come out with 48, 49, 49 and 51 -- so the table has to be
+        # what builds them, not what corrects them afterwards.
+        from rdkit import Chem
+        from plmol.complex import MolecularComplex
+
+        molecules = MolecularComplex.from_mmcif(mini_complex_cif, standardize=False).molecules
+        first = Chem.MolToSmiles(molecules["ligand"]._rdmol)
+        second = Chem.MolToSmiles(molecules["ligand_2"]._rdmol)
+        assert first == second == "c1ccccc1"
+
+    def test_a_metal_is_not_a_ligand(self, mini_complex_cif):
+        # A lone zinc used to come back as Ligand("[Zn]"), and in 3PTB the
+        # calcium sits before the benzamidine in the file and took the "ligand"
+        # key outright.
+        from plmol.complex import MolecularComplex
+        from plmol.parsers.mmcif_parser import MMCIFParser
+
+        assert "ZN" not in {
+            r["res_name"] for r in MMCIFParser(mini_complex_cif).get_ligand_residues()
+        }
+        molecules = MolecularComplex.from_mmcif(mini_complex_cif, standardize=False).molecules
+        assert all(
+            m.metadata.get("mmcif_ligand", {}).get("res_name") != "ZN"
+            for k, m in molecules.items() if k.startswith("ligand")
+        )
+
+    def test_the_metal_is_on_the_protein_side(self, mini_complex_cif):
+        # It belongs there: metal coordination is one of the interactions.
+        from plmol.parsers.mmcif_parser import MMCIFParser
+
+        parser = MMCIFParser(mini_complex_cif)
+        assert [a.res_name for a in parser.metal_atoms] == ["ZN"]
+        names = {a.res_name for a in parser.protein_atoms_with_metals}
+        assert names == {"GLY", "ZN"}
 
     def test_a_file_without_the_table_still_loads(self, mini_complex_cif, tmp_path):
         from rdkit import Chem
@@ -500,6 +538,7 @@ class TestOneCifGivesBothMolecules:
 
         ligand = MolecularComplex.from_mmcif(str(path), standardize=False).molecules["ligand"]
         assert ligand.metadata["bond_orders_from_file"] is False
+        # Proximity bonding is the fallback, and it gives the flat ring.
         assert Chem.MolToSmiles(ligand._rdmol) == "C1CCCCC1"
 
     def test_both_sides_featurize(self, mini_complex_cif):
@@ -544,3 +583,42 @@ class TestTheProteinSideExcludesTheLigand:
         }
         # The metal stays: coordination is one of the interactions detected.
         assert kept == {"GLY", "ZN"}
+
+
+class TestALenientReadForAnAwkwardStructure:
+    """MolFromPDBFile refuses a whole file over one bond it should not have made."""
+
+    def test_a_five_valent_carbon_does_not_lose_the_protein(self, tmp_path):
+        # Two carbons 1.4 A apart in a ring RDKit also bonds across: the
+        # histidine CG of 4HHB ends up with five bonds and strict sanitisation
+        # returns None for the entire structure.
+        from plmol.rdkit_utils import mol_from_pdb_file
+
+        path = tmp_path / "crowded.pdb"
+        path.write_text(
+            "ATOM      1  CB  HIS A   1       0.000   0.000   0.000  1.00 20.00           C\n"
+            "ATOM      2  CG  HIS A   1       1.500   0.000   0.000  1.00 20.00           C\n"
+            "ATOM      3  ND1 HIS A   1       2.300   1.100   0.000  1.00 20.00           N\n"
+            "ATOM      4  CD2 HIS A   1       2.300  -1.100   0.000  1.00 20.00           C\n"
+            "ATOM      5  CE1 HIS A   1       3.100   0.500   0.000  1.00 20.00           C\n"
+            "ATOM      6  NE2 HIS A   1       3.400  -0.800   0.000  1.00 20.00           N\n"
+            "END\n"
+        )
+        from rdkit import Chem
+        assert Chem.MolFromPDBFile(str(path), removeHs=False) is None
+        mol = mol_from_pdb_file(str(path))
+        assert mol is not None and mol.GetNumAtoms() == 6
+
+    def test_a_normal_structure_reads_the_same_either_way(self, example_pdb):
+        from rdkit import Chem
+        from plmol.constants import PHARMACOPHORE_SMARTS
+        from plmol.rdkit_utils import mol_from_pdb_file, substructure_matches
+
+        strict = Chem.MolFromPDBFile(example_pdb, removeHs=False)
+        through = mol_from_pdb_file(example_pdb)
+        assert strict.GetNumBonds() == through.GetNumBonds()
+        for name in ("hydrophobic", "aromatic", "h_donor", "h_acceptor"):
+            pattern = Chem.MolFromSmarts(PHARMACOPHORE_SMARTS[name])
+            assert len(substructure_matches(strict, pattern)) == len(
+                substructure_matches(through, pattern)
+            )

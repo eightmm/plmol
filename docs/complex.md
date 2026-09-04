@@ -34,19 +34,31 @@ chains into a `Protein`, the nucleic acid chains into a `NucleicAcid`, and every
 non-water HETATM residue into a `Ligand`, so `featurize(requests="all")` returns
 the protein, ligand and interaction blocks from a single file.
 
-> **The ligand's bond orders come from the file's `_chem_comp_bond` table.** An
-> HETATM record says where an atom is, not whether a bond is double or aromatic;
-> read from coordinates alone a ligand comes back entirely single-bonded, its
-> benzene rings as cyclohexanes and its carbonyls as alcohols. A PDBx/mmCIF entry
-> from the PDB carries the table that says, and it is applied on load —
-> `ligand.metadata["bond_orders_from_file"]` reports whether it was there. A file
-> written without one (many conversion tools omit it) yields the flat molecule,
-> and the bond orders should be supplied another way, e.g.
+> **The ligand's bonds come from the file's `_chem_comp_bond` table.** An HETATM
+> record says where an atom is, not what it is bonded to; connectivity inferred
+> from distance is both incomplete and invented, and differently for each copy —
+> the four hemes of 4HHB come out with 48, 49, 49 and 51 bonds. A PDBx/mmCIF
+> entry from the PDB carries the table that says which atom names are joined and
+> how, so the bonds are built from it and the stereocentres assigned from the
+> coordinates. The 10GS ligand then matches its deposited SDF exactly, apart from
+> the protonation state the component definition specifies, and all four hemes of
+> 4HHB come out identical.
+>
+> `ligand.metadata["bond_orders_from_file"]` reports whether the table was there;
+> `["component_bond_report"]` counts the bonds applied, the table entries whose
+> atoms the model lacks (every hydrogen, when hydrogens were dropped), and any
+> model atom the table does not name. A file written without a table — many
+> conversion tools omit it — falls back to distance, and the bond orders should be
+> supplied another way, e.g.
 > `AllChem.AssignBondOrdersFromTemplate(Chem.MolFromSmiles(reference), mol)`.
 
-More than one ligand residue gives `ligand`, `ligand_2`, `ligand_3`, …; a whole
-entry usually holds buffer and cryoprotectant molecules alongside the one of
-interest, so pass `ligand_resname="VWW"` or `ligand_chain=` to pick it out.
+Metals are not ligands. A zinc or a calcium goes on the protein side, where
+coordination is detected as an interaction, rather than becoming a one-atom
+`Ligand` — in 3PTB the calcium precedes the benzamidine in the file and used to
+take the `ligand` key outright. Everything else non-water becomes `ligand`,
+`ligand_2`, `ligand_3`, … in file order; a whole entry usually holds buffer and
+cryoprotectant alongside the molecule of interest, so pass `ligand_resname="BEN"`
+or `ligand_chain=` to pick it out.
 
 ```python
 

@@ -153,53 +153,106 @@ _BOND_ORDERS = {
 }
 
 
-def apply_component_bond_orders(mol: Chem.Mol, bonds: dict) -> Chem.Mol:
-    """Set a PDB-derived molecule's bond orders from a component bond table.
+def mol_from_pdb_file(path: str, remove_hs: bool = False):
+    """A PDB file as an RDKit molecule, tolerating a bond RDKit should not have made.
 
-    Coordinates say which atoms are close enough to be bonded; they do not say
-    whether a bond is single, double or aromatic. A ligand read from HETATM
-    records alone therefore comes back entirely single-bonded, which turns a
-    benzene ring into a cyclohexane and a carbonyl into an alcohol, and every
-    feature drawn from the molecule with it.
+    ``MolFromPDBFile`` infers connectivity from distance, and on an older or
+    lower-resolution structure it sometimes joins two atoms that are merely
+    close: in 4HHB it bonds the CG and CE1 of a histidine, 1,3 across the
+    imidazole ring, which leaves the carbon with five bonds and makes
+    sanitisation refuse the whole file. Reading it strictly returned nothing at
+    all, so the interaction featurizer had no protein to work with.
 
-    *bonds* maps ``frozenset({atom_name_1, atom_name_2})`` to an order name, as
-    :meth:`plmol.parsers.mmcif_parser.MMCIFParser.get_component_bonds` returns
-    it. Atoms are matched by their PDB name, so the table and the molecule need
-    not agree on order or on which hydrogens are present.
-
-    Returns the molecule unchanged if it carries no PDB atom names, if the
-    table is empty, or if the result will not sanitize -- a wrong answer that
-    parses is worse than the flat one it replaced.
+    Strict sanitisation is tried first and the valence check is skipped only if
+    it fails. On a structure that passes strictly the two agree exactly -- same
+    bonds, and the same matches for every pharmacophore pattern.
     """
-    if not bonds or mol is None or mol.GetNumBonds() == 0:
+    mol = Chem.MolFromPDBFile(path, removeHs=remove_hs)
+    if mol is not None:
         return mol
+    mol = Chem.MolFromPDBFile(path, removeHs=remove_hs, sanitize=False)
+    if mol is None:
+        return None
+    try:
+        Chem.SanitizeMol(mol, sanitizeOps=Chem.SANITIZE_ALL ^ Chem.SANITIZE_PROPERTIES)
+    except Exception:
+        return None
+    return mol
 
-    names = {}
+
+def mol_from_component_bonds(mol: Chem.Mol, bonds: dict) -> "tuple[Optional[Chem.Mol], dict]":
+    """Rebuild a PDB-derived molecule's bonds from a component bond table.
+
+    Coordinates say which atoms are close, not which are bonded, and RDKit's
+    proximity bonding gets it wrong differently for every copy: the four hemes
+    of 4HHB come out with 48, 49, 49 and 51 bonds, some invented and some
+    missing. Setting bond orders on that cannot repair it -- an invented bond
+    is still there afterwards, and the molecule then fails to sanitize.
+
+    So the bonds are taken from the table instead, which says exactly which
+    atom names are joined and how. *mol* is expected to carry the atoms and no
+    bonds (read with ``proximityBonding=False``); *bonds* is what
+    :meth:`plmol.parsers.mmcif_parser.MMCIFParser.get_component_bonds` returns
+    for this component.
+
+    Returns:
+        ``(molecule, report)``. The molecule is ``None`` when the result will
+        not sanitize, so the caller can fall back. The report counts
+        ``bonds_applied``, ``skipped_bonds`` -- table entries naming an atom
+        the model does not have, which covers every hydrogen when hydrogens
+        were dropped and is how a truncated ligand shows up -- and
+        ``atoms_unknown``, model atoms the table does not name.
+    """
+    report = {"bonds_applied": 0, "skipped_bonds": 0, "atoms_unknown": 0}
+    if not bonds or mol is None:
+        return None, report
+
+    index_of = {}
     for atom in mol.GetAtoms():
         info = atom.GetPDBResidueInfo()
         if info is None:
-            return mol
-        names[atom.GetIdx()] = info.GetName().strip()
+            return None, report
+        index_of.setdefault(info.GetName().strip(), atom.GetIdx())
+
+    named = set(index_of)
+    report["atoms_unknown"] = sum(
+        1 for name in named
+        if not any(name in pair for pair in bonds)
+    )
 
     editable = Chem.RWMol(mol)
-    applied = 0
-    for bond in editable.GetBonds():
-        key = frozenset((names[bond.GetBeginAtomIdx()], names[bond.GetEndAtomIdx()]))
-        order = _BOND_ORDERS.get(bonds.get(key, ""))
-        if order is None:
+    for pair, order_name in bonds.items():
+        first, second = tuple(pair)
+        left, right = index_of.get(first), index_of.get(second)
+        if left is None or right is None:
+            report["skipped_bonds"] += 1
             continue
-        bond.SetBondType(order)
-        bond.SetIsAromatic(order == Chem.BondType.AROMATIC)
-        applied += 1
-    if not applied:
-        return mol
+        order = _BOND_ORDERS.get(order_name)
+        if order is None or editable.GetBondBetweenAtoms(left, right) is not None:
+            continue
+        editable.AddBond(left, right, order)
+        report["bonds_applied"] += 1
 
+    if not report["bonds_applied"]:
+        return None, report
+
+    for bond in editable.GetBonds():
+        bond.SetIsAromatic(bond.GetBondType() == Chem.BondType.AROMATIC)
     for atom in editable.GetAtoms():
         atom.SetIsAromatic(any(b.GetIsAromatic() for b in atom.GetBonds()))
+        atom.SetNoImplicit(False)
 
     result = editable.GetMol()
     try:
         Chem.SanitizeMol(result)
     except Exception:
-        return mol
-    return result
+        return None, report
+    # The table carries no stereochemistry and the atoms arrive without bonds,
+    # so nothing has assigned any. The coordinates have it: without this the
+    # rebuilt ligand came back flat where the deposited SDF has four centres.
+    if result.GetNumConformers():
+        try:
+            Chem.AssignStereochemistryFrom3D(result)
+        except Exception:
+            pass
+    return result, report

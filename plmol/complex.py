@@ -19,7 +19,7 @@ from .interaction import (
 )
 from .io import load_ligand_input, load_protein_input
 from .ligand.core import Ligand
-from .rdkit_utils import apply_component_bond_orders
+from .rdkit_utils import mol_from_component_bonds, mol_from_pdb_file
 from .protein.core import Protein
 from .specs import FEATURE_SPECS, is_all_mode, normalize_modes, normalize_requests
 
@@ -166,9 +166,17 @@ class MolecularComplex(TempFileOwner):
 
         parser = MMCIFParser(path, include_nucleic_acids=True)
 
-        # Write a shared temp PDB for protein
+        # A temp PDB of the polymer and its metals only. Writing the whole
+        # entry put the ligands and the solvent inside the Protein: RDKit reads
+        # that file for the interaction featurizer, and proximity bonding
+        # across a heme boundary gives a carbon five bonds, so 4HHB produced no
+        # protein molecule at all. Metals stay -- coordination is detected.
+        from .parsers.pdb_parser import format_pdb_line
+
         with tempfile.NamedTemporaryFile(suffix=".pdb", delete=False, mode="w") as f:
-            f.write(parser.to_pdb_string())
+            for serial, atom in enumerate(parser.protein_atoms_with_metals, start=1):
+                f.write(format_pdb_line(atom, serial))
+            f.write("END\n")
             tmp_path = f.name
 
         molecules: dict = {}
@@ -214,12 +222,30 @@ class MolecularComplex(TempFileOwner):
                 pdb_block = cls._ligand_pdb_block_from_atom_data(atom_data, ligand_info)
                 if not pdb_block:
                     continue
-                mol = Chem.MolFromPDBBlock(
-                    pdb_block,
-                    removeHs=not add_hs,
-                    sanitize=True,
-                    proximityBonding=True,
-                )
+
+                # The file's own bond table first. It says which atom names are
+                # joined and how; distance only says which are close, and gets
+                # it wrong differently for each copy -- the four hemes of 4HHB
+                # come out with 48, 49, 49 and 51 bonds.
+                table = component_bonds.get(ligand_info["res_name"], {})
+                mol, report = None, {}
+                if table:
+                    bare = Chem.MolFromPDBBlock(
+                        pdb_block,
+                        removeHs=not add_hs,
+                        sanitize=False,
+                        proximityBonding=False,
+                    )
+                    mol, report = mol_from_component_bonds(bare, table)
+
+                from_file = mol is not None
+                if mol is None:
+                    mol = Chem.MolFromPDBBlock(
+                        pdb_block,
+                        removeHs=not add_hs,
+                        sanitize=True,
+                        proximityBonding=True,
+                    )
                 if mol is None:
                     mol = Chem.MolFromPDBBlock(
                         pdb_block,
@@ -229,13 +255,12 @@ class MolecularComplex(TempFileOwner):
                     )
                 if mol is None or mol.GetNumAtoms() == 0:
                     continue
-                table = component_bonds.get(ligand_info["res_name"], {})
-                if table:
-                    mol = apply_component_bond_orders(mol, table)
                 ligand = Ligand(mol)
                 ligand.metadata["source"] = path
                 ligand.metadata["mmcif_ligand"] = ligand_info
-                ligand.metadata["bond_orders_from_file"] = bool(table)
+                ligand.metadata["bond_orders_from_file"] = from_file
+                if report:
+                    ligand.metadata["component_bond_report"] = report
                 loaded_ligands.append(ligand)
 
             for idx, ligand in enumerate(loaded_ligands):
@@ -517,7 +542,7 @@ class MolecularComplex(TempFileOwner):
             if self._protein_mol_cache is None:
                 if protein_obj._pdb_path is None:
                     raise InputError("Protein PDB path is required for interaction features.")
-                self._protein_mol_cache = Chem.MolFromPDBFile(protein_obj._pdb_path, removeHs=False)
+                self._protein_mol_cache = mol_from_pdb_file(protein_obj._pdb_path)
             protein_mol = self._protein_mol_cache
 
         if protein_mol is None:

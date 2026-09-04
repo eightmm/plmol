@@ -374,14 +374,27 @@ class MMCIFParser(StructureParser):
 
         Each dict: {chain_id, res_name, res_num}
         """
-        from ..constants import AMINO_ACID_3TO1, NUCLEIC_ACID_RESIDUES
-        _SKIP = set(AMINO_ACID_3TO1.keys()) | NUCLEIC_ACID_RESIDUES | {"HOH", "WAT"}
+        from ..constants import (
+            AMINO_ACID_3TO1,
+            METAL_ELEMENTS,
+            METAL_RESIDUES,
+            NUCLEIC_ACID_RESIDUES,
+        )
+        # Metals are not ligands. A lone zinc came back as Ligand("[Zn]") and,
+        # in 3PTB, the calcium sits before the benzamidine in the file and took
+        # the "ligand" key outright, so the interaction featurizer measured the
+        # protein against its structural ion and reported nothing. They belong
+        # on the protein side, which protein_atoms_with_metals puts them on.
+        _SKIP = (set(AMINO_ACID_3TO1.keys()) | NUCLEIC_ACID_RESIDUES
+                 | METAL_RESIDUES | {"HOH", "WAT", "DOD", "SOL"})
 
         result = []
         model = self._structure[0]
         for chain in model:
             for res in chain:
                 rname = res.name.strip()
+                if all(a.element.name.upper() in METAL_ELEMENTS for a in res):
+                    continue
                 if res.het_flag == "H" and rname not in _SKIP:
                     result.append({
                         "chain_id": chain.name,
