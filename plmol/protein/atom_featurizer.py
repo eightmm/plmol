@@ -27,8 +27,12 @@ from ..constants import (
     HBOND_ACCEPTOR_ATOMS,
     BACKBONE_ATOM_SET,
 )
-from ..utils import dihedral_angles, sasa_structure_result
-from .geometry import peptide_bonded
+from ..utils import (
+    PEPTIDE_BOND_MAX,
+    dihedral_angles,
+    residue_chain_breaks,
+    sasa_structure_result,
+)
 from ..sasa import is_polar_element
 
 
@@ -360,6 +364,15 @@ class AtomFeaturizer:
                 residue_backbone[key][atom.atom_name] = atom.coords
 
         residue_order = sorted(residue_backbone)
+        missing = np.full(3, np.nan)
+        breaks = residue_chain_breaks(
+            [key[0] for key in residue_order],
+            np.array([residue_backbone[k].get('C', missing) for k in residue_order],
+                     dtype=np.float64).reshape(-1, 3),
+            np.array([residue_backbone[k].get('N', missing) for k in residue_order],
+                     dtype=np.float64).reshape(-1, 3),
+            PEPTIDE_BOND_MAX,
+        )
 
         # Collect the residues that have a complete phi and psi definition,
         # then evaluate both dihedrals in one batched pass.
@@ -367,27 +380,18 @@ class AtomFeaturizer:
         phi_quads, psi_quads, angle_rows = [], [], []
         for idx in range(n_res):
             key = residue_order[idx]
-            chain = key[0]
             curr_bb = residue_backbone.get(key, {})
             if not ('N' in curr_bb and 'CA' in curr_bb and 'C' in curr_bb):
                 continue
             if idx == 0 or idx == n_res - 1:
                 continue
-            prev_key = residue_order[idx - 1]
-            next_key = residue_order[idx + 1]
-            if prev_key[0] != chain or next_key[0] != chain:
+            # phi reads back across one join and psi forward across the next;
+            # both have to be real bonds. residue_chain_breaks already answered
+            # for the chain change, the missing atom and the distance.
+            if breaks[idx - 1] or breaks[idx]:
                 continue
-            prev_bb = residue_backbone.get(prev_key, {})
-            next_bb = residue_backbone.get(next_key, {})
-            if 'C' not in prev_bb or 'N' not in next_bb:
-                continue
-            # Adjacent in the list is not the same as bonded. A crystal
-            # structure with a disordered loop jumps from residue 50 to 60, and
-            # phi and psi measured across that jump describe a bond that is not
-            # there.
-            if not (peptide_bonded(prev_bb['C'], curr_bb['N'])
-                    and peptide_bonded(curr_bb['C'], next_bb['N'])):
-                continue
+            prev_bb = residue_backbone[residue_order[idx - 1]]
+            next_bb = residue_backbone[residue_order[idx + 1]]
             phi_quads.append((prev_bb['C'], curr_bb['N'], curr_bb['CA'], curr_bb['C']))
             psi_quads.append((curr_bb['N'], curr_bb['CA'], curr_bb['C'], next_bb['N']))
             angle_rows.append(key)

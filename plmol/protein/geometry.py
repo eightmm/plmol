@@ -19,24 +19,6 @@ _OFF_DIAGONAL = np.array(
 )
 
 
-#: Longest C-N distance still counted as a peptide bond, in Angstrom. A real one
-#: is about 1.33; the slack covers a low-resolution model without admitting the
-#: several-Angstrom jump a missing loop leaves behind.
-PEPTIDE_BOND_MAX = 2.0
-
-
-def peptide_bonded(c_coords, n_coords) -> np.ndarray:
-    """Whether the C of one residue and the N of the next are actually bonded.
-
-    Accepts single points or batches; returns a bool of the matching shape.
-    Adjacent in a file, or adjacent in a sorted residue list, is not the same
-    as bonded: a crystal structure jumps over a disordered loop, and two chains
-    sit side by side.
-    """
-    delta = np.asarray(c_coords, dtype=np.float64) - np.asarray(n_coords, dtype=np.float64)
-    return np.sum(delta * delta, axis=-1) <= PEPTIDE_BOND_MAX ** 2
-
-
 def calculate_dihedral(
     coords: np.ndarray,
     eps: float = 1e-8,

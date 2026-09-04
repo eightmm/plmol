@@ -143,6 +143,59 @@ def dihedral_angles(
     return np.where(valid, np.arctan2(y, x), 0.0)
 
 
+#: Longest C-N distance still counted as a peptide bond, in Angstrom. A real one
+#: is about 1.33; the slack covers a low-resolution model without admitting the
+#: several-Angstrom jump a missing loop leaves behind.
+PEPTIDE_BOND_MAX = 2.0
+
+#: The same for the O3'-P phosphodiester bond, which is about 1.6 A long.
+PHOSPHODIESTER_BOND_MAX = 2.2
+
+
+def residue_chain_breaks(
+    chain_ids,
+    tail_coords: np.ndarray,
+    head_coords: np.ndarray,
+    max_distance: float,
+) -> np.ndarray:
+    """``(L - 1,)`` bool: where consecutive residues are *not* joined.
+
+    A residue list sorted by (chain, number, insertion code) is not a chain of
+    bonds. Two strands of a duplex sit side by side in it, and a crystal
+    structure jumps over a disordered stretch as if nothing were missing. Every
+    feature that spans two residues -- phi, psi, omega, the secondary-structure
+    heuristic, alpha, epsilon and zeta -- has to ask first.
+
+    A pair breaks when the chain changes, when either bonding atom is missing
+    (pass NaN for it), or when the bond would be longer than *max_distance*.
+
+    Args:
+        chain_ids: Chain label per residue, length ``L``.
+        tail_coords: ``(L, 3)`` the atom each residue bonds forward from -- the
+            backbone C for a protein, O3' for a nucleic acid.
+        head_coords: ``(L, 3)`` the atom each residue bonds backward from -- N
+            for a protein, P for a nucleic acid.
+        max_distance: Longest bond still counted, in Angstrom.
+
+    Returns:
+        ``(L - 1,)`` bool, True where residue ``i`` and ``i + 1`` are unjoined.
+    """
+    tail = np.asarray(tail_coords, dtype=np.float64)
+    head = np.asarray(head_coords, dtype=np.float64)
+    n_residues = tail.shape[0]
+    if n_residues < 2:
+        return np.zeros(max(n_residues - 1, 0), dtype=bool)
+
+    delta = tail[:-1] - head[1:]
+    # NaN propagates through the sum and compares False, so a residue missing
+    # its bonding atom breaks rather than bonding to the origin.
+    with np.errstate(invalid='ignore'):
+        bonded = np.sum(delta * delta, axis=-1) <= max_distance ** 2
+
+    labels = np.asarray(chain_ids, dtype=object)
+    return ~bonded | (labels[:-1] != labels[1:])
+
+
 def dense_to_edges(adjacency):
     """Split a dense ``(N, N, C)`` adjacency into edge indices and edge values.
 

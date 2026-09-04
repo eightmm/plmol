@@ -10,7 +10,6 @@ from plmol.protein.geometry import (
     calculate_backbone_torsion,
     calculate_virtual_cb,
     calculate_self_distances_vectors,
-    peptide_bonded,
     rbf_encode,
 )
 
@@ -305,14 +304,3 @@ class TestDihedralBreaks:
         assert np.array_equal(
             calculate_dihedral(coords), calculate_dihedral(coords, breaks=None)
         )
-
-
-class TestPeptideBonded:
-    def test_a_real_bond_and_a_gap(self):
-        assert peptide_bonded([0.0, 0.0, 0.0], [1.33, 0.0, 0.0])
-        assert not peptide_bonded([0.0, 0.0, 0.0], [13.5, 0.0, 0.0])
-
-    def test_it_takes_batches(self):
-        c = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
-        n = np.array([[1.33, 0.0, 0.0], [5.0, 0.0, 0.0]])
-        assert peptide_bonded(c, n).tolist() == [True, False]

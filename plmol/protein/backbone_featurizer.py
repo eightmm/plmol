@@ -9,11 +9,11 @@ from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 
 from ..arrays import FLOAT, INT, normalize, pairwise_distances
+from ..utils import PEPTIDE_BOND_MAX, residue_chain_breaks
 from .geometry import (
     calculate_dihedral,
     calculate_local_frames,
     calculate_virtual_cb,
-    peptide_bonded,
     rbf_encode,
 )
 
@@ -57,7 +57,9 @@ def compute_backbone_dihedrals(
         # Consecutive within a chain is not the same as bonded: a crystal
         # structure jumps over a disordered loop and the residues either side
         # are neighbours in this list without being neighbours in the protein.
-        breaks = ~peptide_bonded(chain_nac[:-1, 2], chain_nac[1:, 0])
+        breaks = residue_chain_breaks(
+            [chain_id] * n, chain_nac[:, 2], chain_nac[:, 0], PEPTIDE_BOND_MAX
+        )
         raw = calculate_dihedral(chain_nac, breaks=breaks)  # (n, 3)
 
         # phi: raw[:, 0] — valid for positions 1..n-1 (first is padding 0)

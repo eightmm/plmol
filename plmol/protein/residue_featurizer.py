@@ -21,7 +21,6 @@ from .geometry import (
     calculate_backbone_curvature,
     calculate_backbone_torsion,
     calculate_self_distances_vectors,
-    peptide_bonded,
 )
 # Import unified PDB parsing utilities from canonical location
 from .utils import (
@@ -32,7 +31,13 @@ from .utils import (
 )
 
 from ..arrays import FLOAT, INT, one_hot, pairwise_distances, sanitized
-from ..utils import dense_to_edges, knn_mask, sasa_structure_result
+from ..utils import (
+    PEPTIDE_BOND_MAX,
+    dense_to_edges,
+    knn_mask,
+    residue_chain_breaks,
+    sasa_structure_result,
+)
 
 # Import amino acid constants from centralized module
 from ..constants import (
@@ -404,17 +409,18 @@ class ResidueFeaturizer:
         as consecutive.
         """
         residues = self.get_residues()
-        breaks = np.ones(max(len(residues) - 1, 0), dtype=bool)
-        for index in range(len(residues) - 1):
-            current, following = residues[index], residues[index + 1]
-            if current[0] != following[0]:
-                continue
-            c_atom = self._atom_coords.get(current, {}).get('C')
-            n_atom = self._atom_coords.get(following, {}).get('N')
-            if c_atom is None or n_atom is None:
-                continue
-            breaks[index] = not bool(peptide_bonded(c_atom, n_atom))
-        return breaks
+        missing = np.full(3, np.nan)
+        carbon = np.array(
+            [self._atom_coords.get(key, {}).get('C', missing) for key in residues],
+            dtype=np.float64,
+        ).reshape(-1, 3)
+        nitrogen = np.array(
+            [self._atom_coords.get(key, {}).get('N', missing) for key in residues],
+            dtype=np.float64,
+        ).reshape(-1, 3)
+        return residue_chain_breaks(
+            [key[0] for key in residues], carbon, nitrogen, PEPTIDE_BOND_MAX
+        )
 
     def get_dihedral_angles(self, coords: np.ndarray, res_types: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """

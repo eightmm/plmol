@@ -2,7 +2,13 @@
 
 import numpy as np
 
-from plmol.utils import knn_mask, knn_mask_bipartite_numpy
+from plmol.utils import (
+    PEPTIDE_BOND_MAX,
+    PHOSPHODIESTER_BOND_MAX,
+    knn_mask,
+    knn_mask_bipartite_numpy,
+    residue_chain_breaks,
+)
 
 
 class TestKnnMask:
@@ -223,3 +229,39 @@ class TestNumpyNeighbourHelpers:
         adjacency = np.array([[0.0, 1.5], [0.0, 0.0]], dtype=np.float32)
         src, dst, values = dense_to_edges(adjacency)
         assert src.tolist() == [0] and dst.tolist() == [1] and values.tolist() == [1.5]
+
+
+class TestResidueChainBreaks:
+    """Consecutive rows of a sorted residue list are not always bonded."""
+
+    TAIL = np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]])
+    HEAD = np.array([[0.0, 0.0, 0.0], [1.33, 0.0, 0.0], [20.0, 0.0, 0.0]])
+
+    def test_a_real_bond_and_a_gap(self):
+        # 0->1 is 1.33 A, a peptide bond; 1->2 is 10 A, a missing loop.
+        breaks = residue_chain_breaks(["A", "A", "A"], self.TAIL, self.HEAD, 2.0)
+        assert breaks.tolist() == [False, True]
+
+    def test_a_chain_change_is_always_a_break(self):
+        breaks = residue_chain_breaks(["A", "B", "B"], self.TAIL, self.HEAD, 2.0)
+        assert breaks.tolist() == [True, True]
+
+    def test_a_missing_atom_breaks_rather_than_bonding_to_the_origin(self):
+        tail = self.TAIL.copy()
+        tail[0] = np.nan
+        breaks = residue_chain_breaks(["A", "A", "A"], tail, self.HEAD, 2.0)
+        assert breaks.tolist() == [True, True]
+
+    def test_short_inputs(self):
+        assert residue_chain_breaks(["A"], self.TAIL[:1], self.HEAD[:1], 2.0).tolist() == []
+        empty = np.zeros((0, 3))
+        assert residue_chain_breaks([], empty, empty, 2.0).tolist() == []
+
+    def test_the_threshold_is_the_caller_s(self):
+        # The phosphodiester bond is longer than the peptide bond, and both
+        # constants live beside the function.
+        assert PHOSPHODIESTER_BOND_MAX > PEPTIDE_BOND_MAX
+        tail = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        head = np.array([[0.0, 0.0, 0.0], [2.1, 0.0, 0.0]])
+        assert residue_chain_breaks(["A", "A"], tail, head, PEPTIDE_BOND_MAX).tolist() == [True]
+        assert residue_chain_breaks(["A", "A"], tail, head, PHOSPHODIESTER_BOND_MAX).tolist() == [False]
