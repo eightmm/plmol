@@ -627,15 +627,22 @@ class ProteinFeaturizer:
             residue_nums = atom_features['metadata']['residue_numbers']
             residue_number_tensor = np.array(residue_nums, dtype=INT)
 
-            # Create residue_count: sequential index starting from 0
+            # Create residue_count: sequential index starting from 0.
+            # The insertion code is part of what makes a residue: 100 and 100A
+            # share a number and are two residues, and without it their atoms
+            # were pooled into one entry of atom_to_residue.
             chain_labels = atom_features['metadata']['chain_labels']
+            insertion_codes = atom_features['metadata'].get(
+                'insertion_codes', [''] * len(residue_number_tensor)
+            )
             residue_count = np.zeros_like(residue_number_tensor)
             if len(residue_number_tensor) > 0:
                 current_count = 0
                 residue_count[0] = current_count
                 for i in range(1, len(residue_number_tensor)):
                     residue_changed = (residue_number_tensor[i] != residue_number_tensor[i-1]) or \
-                                    (chain_labels[i] != chain_labels[i-1])
+                                    (chain_labels[i] != chain_labels[i-1]) or \
+                                    (insertion_codes[i] != insertion_codes[i-1])
                     if residue_changed:
                         current_count += 1
                     residue_count[i] = current_count
@@ -652,8 +659,18 @@ class ProteinFeaturizer:
             # same_residue: 1 if both atoms belong to same residue
             same_residue = (residue_count[src] == residue_count[dst]).astype(FLOAT)
 
-            # sequence_separation: |residue_count_i - residue_count_j|, capped at 32
-            seq_sep = np.abs(residue_count[src] - residue_count[dst]).astype(FLOAT)
+            # sequence_separation: how far apart in the chain, capped at 32.
+            # Measured on residue numbers rather than on residue_count, which is
+            # a running index: a crystal structure that jumps from residue 50 to
+            # 60 over a disordered loop used to report those two as neighbours.
+            # Two atoms on different chains have no sequence relationship at
+            # all, so they get the cap; before, two short chains put them a few
+            # residues apart, as if one ran into the other.
+            chain_array = np.asarray(chain_labels, dtype=object)
+            seq_sep = np.abs(
+                residue_number_tensor[src] - residue_number_tensor[dst]
+            ).astype(FLOAT)
+            seq_sep[chain_array[src] != chain_array[dst]] = 32.0
             seq_sep = np.minimum(seq_sep, 32.0)
 
             # unit_vector: normalized direction from src to dst

@@ -370,7 +370,7 @@ and loose per-edge arrays into `node_tokens`, `node_features` and
 | Key | Shape | Type | Description |
 |-----|-------|------|-------------|
 | `node_features` | `(A,)` | `int64` | Atom token ID (0-186, for `nn.Embedding`) -- same as `atom_tokens` |
-| `atom_to_residue` | `(A,)` | `int64` | Maps each atom to 0-indexed residue index (= `residue_count`) |
+| `atom_to_residue` | `(A,)` | `int64` | Maps each atom to 0-indexed residue index (= `residue_count`); chain, residue number and insertion code all start a new residue, so 100 and 100A are two |
 | `residue_atom_indices` | `List[List[int]]` | -- | Atom indices per residue (reverse of `atom_to_residue`) |
 | Node token features | 3 arrays | `int64` | Integer tokens for embedding layers |
 | Node scalar features | 11 arrays | `float32` | Continuous per-atom features (total 11-dim) |
@@ -406,7 +406,7 @@ array. There are eleven of them:
 | `formal_charge` | 1 | [-0.5, 1] | Partial charge at physiological pH |
 | `is_hbond_donor` | 1 | {0, 1} | 1.0 if H-bond donor |
 | `is_hbond_acceptor` | 1 | {0, 1} | 1.0 if H-bond acceptor |
-| `secondary_structure` | 3 | {0, 1} | One-hot [helix, sheet, coil] from phi/psi Ramachandran |
+| `secondary_structure` | 3 | {0, 1} | One-hot [helix, sheet, coil] from phi/psi Ramachandran. A residue whose neighbour is not actually peptide-bonded to it -- a chain end, or either side of a missing loop -- stays coil |
 
 `as_graph` concatenates them into `node_features`, **10-dim**, in this order.
 `relative_sasa` is left out because `burial_index` is exactly `1 -
@@ -429,7 +429,7 @@ relative_sasa`; it stays available under its own key in the raw dict.
 |-------|-----|-------|------|-------------|
 | `[0]` | `edge_distances` | `(E,)` | `float32` | Euclidean distance (A) |
 | `[1]` | `same_residue` | `(E,)` | `float32` | 1.0 if both atoms in same residue |
-| `[2]` | `sequence_separation` | `(E,)` | `float32` | \|residue_i - residue_j\|, capped at 32 |
+| `[2]` | `sequence_separation` | `(E,)` | `float32` | \|residue number_i - residue number_j\| along one chain, capped at 32. Two atoms on different chains have no sequence relationship and get the cap |
 | `[3:6]` | `unit_vector` | `(E, 3)` | `float32` | Normalized direction vector src -> dst |
 
 ### Metadata

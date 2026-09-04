@@ -31,6 +31,18 @@ from ..utils import dihedral_angles, sasa_structure_result
 from ..sasa import is_polar_element
 
 
+#: Longest C-N distance still counted as a peptide bond, in Angstrom. A real one
+#: is about 1.33; the slack covers a low-resolution model without admitting the
+#: several-Angstrom jump a missing loop leaves behind.
+PEPTIDE_BOND_MAX = 2.0
+
+
+def _is_peptide_bond(c_coords, n_coords) -> bool:
+    """Whether the C of one residue and the N of the next are actually bonded."""
+    delta = np.asarray(c_coords, dtype=np.float64) - np.asarray(n_coords, dtype=np.float64)
+    return bool(np.dot(delta, delta) <= PEPTIDE_BOND_MAX ** 2)
+
+
 def _residue_number(label: str) -> int:
     """The signed integer part of a residue label such as "100", "-2" or "100A"."""
     match = re.match(r'^\s*(-?\d+)', str(label))
@@ -187,6 +199,7 @@ class AtomFeaturizer:
         res_names = []
         res_nums = []
         chain_ids = []
+        insertion_codes = []
 
         for atom in parser.protein_atoms:
 
@@ -230,6 +243,7 @@ class AtomFeaturizer:
             res_names.append(res_name_clean)
             res_nums.append(atom.res_num)
             chain_ids.append(atom.chain_id)
+            insertion_codes.append(atom.insertion_code)
 
         return {
             'residue_tokens': residue_tokens, 'atom_elements': atom_elements,
@@ -238,6 +252,7 @@ class AtomFeaturizer:
             'formal_charges': formal_charges, 'is_hbond_donor': is_hbond_donor,
             'is_hbond_acceptor': is_hbond_acceptor, 'atom_names': atom_names,
             'res_names': res_names, 'res_nums': res_nums, 'chain_ids': chain_ids,
+            'insertion_codes': insertion_codes,
         }
 
     def _compute_derived_scalars(
@@ -320,6 +335,7 @@ class AtomFeaturizer:
                 'residue_numbers': per_atom['res_nums'][:min_len],
                 'atom_names': per_atom['atom_names'][:min_len],
                 'chain_labels': per_atom['chain_ids'][:min_len],
+                'insertion_codes': per_atom['insertion_codes'][:min_len],
             }
         }
 
@@ -340,19 +356,21 @@ class AtomFeaturizer:
         Returns:
             (n_atoms, 3) float32 tensor: [is_helix, is_sheet, is_coil] per atom
         """
-        # Group residues and find backbone N/CA/C coords
-        residue_order = []  # list of (chain, resnum)
-        residue_backbone = {}  # (chain, resnum) -> {'N': xyz, 'CA': xyz, 'C': xyz}
-        seen = set()
+        # Group residues and find backbone N/CA/C coords.
+        # The key carries the insertion code: 100 and 100A are two residues, and
+        # merging them handed one of them the other's backbone. The order is the
+        # residues' own, not the file's, so a file that lists them in some other
+        # order still gets phi and psi from the right neighbours.
+        residue_backbone = {}  # (chain, resnum, icode) -> {'N': xyz, 'CA': xyz, 'C': xyz}
 
         for atom in parser.protein_atoms:
-            key = (atom.chain_id, atom.res_num)
-            if key not in seen:
-                seen.add(key)
-                residue_order.append(key)
+            key = (atom.chain_id, atom.res_num, atom.insertion_code)
+            if key not in residue_backbone:
                 residue_backbone[key] = {}
             if atom.atom_name in ('N', 'CA', 'C'):
                 residue_backbone[key][atom.atom_name] = atom.coords
+
+        residue_order = sorted(residue_backbone)
 
         # Collect the residues that have a complete phi and psi definition,
         # then evaluate both dihedrals in one batched pass.
@@ -373,6 +391,13 @@ class AtomFeaturizer:
             prev_bb = residue_backbone.get(prev_key, {})
             next_bb = residue_backbone.get(next_key, {})
             if 'C' not in prev_bb or 'N' not in next_bb:
+                continue
+            # Adjacent in the list is not the same as bonded. A crystal
+            # structure with a disordered loop jumps from residue 50 to 60, and
+            # phi and psi measured across that jump describe a bond that is not
+            # there.
+            if not (_is_peptide_bond(prev_bb['C'], curr_bb['N'])
+                    and _is_peptide_bond(curr_bb['C'], next_bb['N'])):
                 continue
             phi_quads.append((prev_bb['C'], curr_bb['N'], curr_bb['CA'], curr_bb['C']))
             psi_quads.append((curr_bb['N'], curr_bb['CA'], curr_bb['C'], next_bb['N']))
@@ -406,7 +431,8 @@ class AtomFeaturizer:
         for atom in parser.protein_atoms:
             if len(ss_rows) >= n_atoms:
                 break
-            ss_rows.append(residue_ss.get((atom.chain_id, atom.res_num), (0.0, 0.0, 1.0)))
+            key = (atom.chain_id, atom.res_num, atom.insertion_code)
+            ss_rows.append(residue_ss.get(key, (0.0, 0.0, 1.0)))
 
         ss = np.zeros((n_atoms, 3), dtype=FLOAT)
         if ss_rows:
