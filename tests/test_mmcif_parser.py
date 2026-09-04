@@ -558,6 +558,53 @@ class TestOneCifGivesBothMolecules:
         assert len(bonds["BNZ"]) == 6
         assert set(bonds["BNZ"].values()) == {"AROMATIC"}
 
+    def test_a_bond_keeps_the_two_atoms_in_the_order_the_table_wrote_them(
+        self, mini_complex_cif
+    ):
+        """The key was a frozenset, and a frozenset of two strings iterates in
+        an order that depends on the interpreter's hash seed. The molecule
+        built from it got its bonds begin-to-end one way in one process and the
+        other way in the next."""
+        from plmol.parsers.mmcif_parser import MMCIFParser
+
+        bonds = MMCIFParser(mini_complex_cif).get_component_bonds()
+        assert list(bonds["BNZ"]) == [
+            ("C1", "C2"), ("C2", "C3"), ("C3", "C4"),
+            ("C4", "C5"), ("C5", "C6"), ("C6", "C1"),
+        ]
+
+    def test_the_rebuilt_molecule_runs_each_bond_the_table_s_way(
+        self, mini_complex_cif
+    ):
+        """The order above is only worth keeping if it reaches the molecule."""
+        from rdkit import Chem
+
+        from plmol.parsers.mmcif_parser import MMCIFParser
+        from plmol.rdkit_utils import mol_from_component_bonds
+
+        table = MMCIFParser(mini_complex_cif).get_component_bonds()["BNZ"]
+        bare = Chem.MolFromPDBBlock(
+            "\n".join(
+                f"HETATM{index:5d}  C{index}  BNZ A 101      "
+                f"{index:6.3f}{0.0:8.3f}{0.0:8.3f}  1.00 20.00           C"
+                for index in range(1, 7)
+            ),
+            sanitize=False,
+            removeHs=False,
+            proximityBonding=False,
+        )
+        mol, report = mol_from_component_bonds(bare, table)
+        assert mol is not None and report["bonds_applied"] == 6
+
+        name_of = [
+            atom.GetPDBResidueInfo().GetName().strip() for atom in mol.GetAtoms()
+        ]
+        written = [
+            (name_of[bond.GetBeginAtomIdx()], name_of[bond.GetEndAtomIdx()])
+            for bond in mol.GetBonds()
+        ]
+        assert written == list(table)
+
 
 class TestTheProteinSideExcludesTheLigand:
     """A whole entry read as one file put the ligand inside the protein."""

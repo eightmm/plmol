@@ -229,8 +229,13 @@ def mol_from_component_bonds(mol: Chem.Mol, bonds: dict) -> "tuple[Optional[Chem
     )
 
     editable = Chem.RWMol(mol)
-    for pair, order_name in bonds.items():
-        first, second = tuple(pair)
+    # The pair is ordered, and the bond is added in that order. It used to be a
+    # frozenset unpacked with tuple(), whose order depends on the hash seed, so
+    # the same file gave a bond begin-to-end one way in one process and the
+    # other way in the next -- and after AssignStereochemistryFrom3D a
+    # directional bond came out ENDUPRIGHT here and ENDDOWNRIGHT there. 4HHB's
+    # haem moved two channels of its edge features between runs.
+    for (first, second), order_name in bonds.items():
         left, right = index_of.get(first), index_of.get(second)
         if left is None or right is None:
             report["skipped_bonds"] += 1

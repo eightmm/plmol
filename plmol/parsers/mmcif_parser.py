@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -339,7 +339,7 @@ class MMCIFParser(StructureParser):
         except Exception:
             return None
 
-    def get_component_bonds(self) -> Dict[str, Dict[frozenset, str]]:
+    def get_component_bonds(self) -> Dict[str, Dict[Tuple[str, str], str]]:
         """Bond orders per chemical component, from the file's own table.
 
         A PDBx/mmCIF entry carries ``_chem_comp_bond`` for every component it
@@ -350,13 +350,20 @@ class MMCIFParser(StructureParser):
         alcohol.
 
         Returns:
-            ``{comp_id: {frozenset({atom_name_1, atom_name_2}): order}}`` where
-            order is one of ``"SINGLE"``, ``"DOUBLE"``, ``"TRIPLE"`` or
-            ``"AROMATIC"``. Empty when the file carries no table.
+            ``{comp_id: {(atom_id_1, atom_id_2): order}}`` where order is one of
+            ``"SINGLE"``, ``"DOUBLE"``, ``"TRIPLE"`` or ``"AROMATIC"``. Empty
+            when the file carries no table.
+
+            The pair is in the order the table wrote it. It was a frozenset,
+            and a frozenset of two strings iterates in an order that depends on
+            the interpreter's hash seed -- so the molecule built from this got
+            its bonds begin-to-end one way in one process and the other way in
+            the next, and a directional bond's feature followed. A bond listed
+            twice, either way round, still yields one entry.
         """
         _ORDER = {"sing": "SINGLE", "doub": "DOUBLE", "trip": "TRIPLE",
                   "arom": "AROMATIC", "quad": "QUADRUPLE"}
-        bonds: Dict[str, Dict[frozenset, str]] = {}
+        bonds: Dict[str, Dict[Tuple[str, str], str]] = {}
         block = self._cif_block()
         if block is None:
             return bonds
@@ -371,7 +378,9 @@ class MMCIFParser(StructureParser):
             order = "AROMATIC" if aromatic else _ORDER.get(_unquote(row[3]).lower())
             if order is None:
                 continue
-            bonds.setdefault(comp, {})[frozenset((first, second))] = order
+            table = bonds.setdefault(comp, {})
+            table.pop((second, first), None)
+            table[(first, second)] = order
         return bonds
 
     def get_ligand_residues(self) -> List[Dict[str, str]]:
