@@ -245,6 +245,39 @@ STANDARD_ATOMS_PTM = {
     'FME': ['N', 'CA', 'C', 'O', 'CB', 'CG', 'SD', 'CE', 'CN', 'O1'],  # N-formylmethionine
 }
 
+
+
+#: Where each atom sits inside its own residue: N, CA, C, O, CB, then the side
+#: chain outward. Built from :data:`STANDARD_ATOMS` and
+#: :data:`STANDARD_ATOMS_PTM`, which already list the atoms in that order.
+#:
+#: Code that reads a residue's coordinates positionally -- the CA is row 1, the
+#: side chain starts at row 4 -- needs the rows in this order. A PDB file is
+#: only conventionally written that way; nothing in the format requires it, and
+#: an unstandardised file that lists a residue's atoms in some other order used
+#: to hand those readers the wrong atom.
+RESIDUE_ATOM_ORDER = {
+    (res_name, atom_name): index
+    for table in (STANDARD_ATOMS, STANDARD_ATOMS_PTM)
+    for res_name, atom_names in table.items()
+    for index, atom_name in enumerate(atom_names)
+}
+
+#: Fallback order for a residue name no table knows, and for extras such as OXT
+#: on a residue one does. Anything absent from both trails, in file order.
+BACKBONE_ATOM_ORDER = {name: i for i, name in enumerate(BACKBONE_ATOMS_WITH_CB)}
+
+#: Sort key for an atom whose position in its residue is not known.
+UNORDERED_ATOM_INDEX = 1 << 20
+
+
+def residue_atom_index(res_name: str, atom_name: str) -> int:
+    """Position of ``atom_name`` inside ``res_name``, for ordering its rows."""
+    index = RESIDUE_ATOM_ORDER.get((res_name, atom_name))
+    if index is not None:
+        return index
+    return BACKBONE_ATOM_ORDER.get(atom_name, UNORDERED_ATOM_INDEX)
+
 # =============================================================================
 # Residue Name Normalization Mapping
 # =============================================================================

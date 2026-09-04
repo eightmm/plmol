@@ -44,6 +44,7 @@ from ..constants import (
     NUM_RESIDUE_PROPERTIES,
     RESIDUE_TYPES,
     RESIDUE_MAX_SASA,
+    residue_atom_index,
 )
 
 
@@ -125,12 +126,22 @@ class ResidueFeaturizer:
             # residues in sequence order rather than one pile of atoms.
             res_key = (atom.chain_id, atom.res_num, res_type, atom.insertion_code)
             coord = np.array(atom.coords, dtype=np.float32)
-            residue_atoms[res_key].append(coord)
+            # Everything downstream reads these rows positionally -- the CA is
+            # row 1, the side chain starts at row 4 -- so they are stored in the
+            # residue's own atom order rather than the file's. A PDB is only
+            # conventionally written N, CA, C, O, CB; a file that is not, and
+            # that standardize=False leaves alone, used to put some other atom
+            # where the CA belongs. File position breaks ties, so a canonical
+            # file is unaffected.
+            order = (residue_atom_index(norm_res, atom.atom_name),
+                     len(residue_atoms[res_key]))
+            residue_atoms[res_key].append((order, coord))
             atom_coords[res_key][atom.atom_name] = coord
 
         # Build coordinate caches
         self._coord_cache = {
-            key: np.vstack(coords) for key, coords in residue_atoms.items()
+            key: np.vstack([coord for _, coord in sorted(atoms, key=lambda a: a[0])])
+            for key, atoms in residue_atoms.items()
         }
         self._atom_coords = dict(atom_coords)
         self._residues = sorted(residue_atoms.keys(), key=lambda k: (k[0], k[1], k[3]))

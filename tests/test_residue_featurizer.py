@@ -77,3 +77,73 @@ class TestResidueFeaturizerReal:
         assert isinstance(sasa, np.ndarray)
         assert sasa.ndim == 2
         assert sasa.shape[1] == 11
+
+
+class TestAtomOrderInsideResidue:
+    """A PDB may list a residue's atoms in any order; the features may not move."""
+
+    @staticmethod
+    def _shuffled(source: str, target: str, seed: int = 0) -> str:
+        """Copy ``source`` to ``target`` with each residue's atoms reordered."""
+        import random
+
+        head, body, tail, seen_body = [], [], [], False
+        for line in open(source):
+            line = line.rstrip("\n")
+            if line.startswith(("ATOM  ", "HETATM")):
+                body.append(line)
+                seen_body = True
+            elif seen_body:
+                tail.append(line)
+            else:
+                head.append(line)
+
+        rng = random.Random(seed)
+        out, block, key = [], [], None
+        for line in body + [None]:
+            k = None if line is None else (line[21], line[22:26], line[26])
+            if k != key and block:
+                rng.shuffle(block)
+                out += block
+                block = []
+            key = k
+            if line is not None:
+                block.append(line)
+        out += block
+
+        renumbered = [l[:6] + f"{i + 1:5d}" + l[11:] for i, l in enumerate(out)]
+        with open(target, "w") as fh:
+            fh.write("\n".join(head + renumbered + tail) + "\n")
+        return target
+
+    def test_features_survive_a_shuffled_residue(self, example_pdb, tmp_path):
+        # standardize=False is the path under test: the standardizer rewrites the
+        # atoms into canonical order and would hide this.
+        from plmol import Protein
+
+        PDBParser.clear_cache()
+        shuffled = self._shuffled(example_pdb, str(tmp_path / "shuffled.pdb"))
+
+        reference = Protein.from_pdb(example_pdb, standardize=False).featurize(mode="graph")["graph"]
+        moved = Protein.from_pdb(shuffled, standardize=False).featurize(mode="graph")["graph"]
+
+        assert np.array_equal(reference["coords"], moved["coords"])
+        assert np.array_equal(reference["edge_index"], moved["edge_index"])
+        for a, b in zip(reference["node_features"], moved["node_features"]):
+            assert np.allclose(a, b, equal_nan=True)
+        for a, b in zip(reference["node_vector_features"], moved["node_vector_features"]):
+            assert np.allclose(a, b, equal_nan=True)
+
+    def test_the_ca_row_is_the_ca(self, example_pdb, tmp_path):
+        # coords[:, 0] is documented as the CA; row 1 of the coordinate cache is
+        # what it comes from, so the cache has to be in residue order.
+        from plmol import Protein
+
+        PDBParser.clear_cache()
+        shuffled = self._shuffled(example_pdb, str(tmp_path / "shuffled_ca.pdb"))
+        rf = ResidueFeaturizer(shuffled)
+        for residue in rf.get_residues()[:50]:
+            named = rf._atom_coords[residue].get("CA")
+            if named is None:
+                continue
+            assert np.array_equal(rf.get_residue_coordinates_numpy(residue)[1], named)
