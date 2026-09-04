@@ -682,6 +682,36 @@ class TestAlternateConformations:
         np.fill_diagonal(distances, np.inf)
         assert distances.min() > 0.1, "two conformers of one atom sit almost on top"
 
+    def test_both_parsers_choose_the_same_conformer(self, tmp_path, example_pdb):
+        """The rule is one function, so a structure read as mmCIF keeps what it
+        keeps as PDB. The mmCIF parser used to keep every conformer."""
+        gemmi = pytest.importorskip("gemmi")
+        from plmol.parsers import MMCIFParser, PDBParser
+
+        lines = [l for l in open(example_pdb) if l[:6].strip() in ("ATOM", "HETATM")]
+        altered = tmp_path / "alternates.pdb"
+        with open(altered, "w") as handle:
+            for line in lines:
+                if line[17:20].strip() == "SER" and line[12:16].strip() == "OG":
+                    major = list(line); major[16] = "A"; major[54:60] = list(f"{0.70:6.2f}")
+                    minor = list(line); minor[16] = "B"; minor[54:60] = list(f"{0.30:6.2f}")
+                    minor[38:46] = list(f"{float(line[38:46]) + 1.5:8.3f}")
+                    handle.write("".join(major)); handle.write("".join(minor))
+                else:
+                    handle.write(line)
+            handle.write("END\n")
+
+        structure = gemmi.read_structure(str(altered))
+        structure.setup_entities()
+        cif = tmp_path / "alternates.cif"
+        structure.make_mmcif_document().write_file(str(cif))
+
+        from_pdb = PDBParser(str(altered), skip_cache=True).protein_atoms
+        from_cif = MMCIFParser(str(cif), include_nucleic_acids=False).protein_atoms
+        assert len(from_pdb) == len(from_cif) == 3260
+        key = lambda a: (a.chain_id, a.res_num, a.atom_name, round(a.coords[1], 3))  # noqa: E731
+        assert {key(a) for a in from_pdb} == {key(a) for a in from_cif}
+
     def test_an_atom_without_an_alternate_is_untouched(self, tmp_path):
         """Only atoms carrying a code go through the rule."""
         from plmol.parsers import PDBParser

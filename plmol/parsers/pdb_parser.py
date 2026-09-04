@@ -265,6 +265,37 @@ def normalize_residue_name(res_name: str, atom_name: str = '') -> str:
     return 'UNK'
 
 
+def best_conformers(atoms: "List[ParsedAtom]") -> "List[ParsedAtom]":
+    """One position per atom, for a structure that models some in several.
+
+    A side chain refined at high resolution is written two or three times,
+    tagged A, B, C in the alternate-location field and weighted by occupancy.
+    They are alternatives rather than extra atoms: keeping them all gives a
+    serine two CB atoms two Angstrom apart, which inflates every atom count and
+    occludes the residue against itself when the SASA is sampled.
+
+    The highest occupancy wins and the first seen wins a tie, which is what the
+    PDB's own convention and every other reader do. Atoms with no code are kept
+    untouched. File order is preserved.
+
+    Shared by both parsers, so a structure read as mmCIF and as PDB keeps the
+    same conformer -- the mmCIF one used to keep every one of them.
+    """
+    best = {}
+    for index, atom in enumerate(atoms):
+        if not atom.alt_loc:
+            best[('', index)] = atom
+            continue
+        key = (atom.chain_id, atom.res_num, atom.insertion_code, atom.atom_name)
+        previous = best.get(key)
+        if previous is None or atom.occupancy > previous[1].occupancy:
+            best[key] = (index, atom) if previous is None else (previous[0], atom)
+    ordered = []
+    for key, value in best.items():
+        ordered.append((key[1], value) if key[0] == '' else value)
+    return [atom for _, atom in sorted(ordered, key=lambda pair: pair[0])]
+
+
 def is_protein_atom(atom: ParsedAtom, include_nucleic_acids: bool = False) -> bool:
     """Whether an atom belongs in a parser's ``protein_atoms``.
 
@@ -407,10 +438,6 @@ class PDBParser(StructureParser):
         if not self._lines:
             raise InputError(f"PDB file is empty: {self.pdb_path}")
 
-        # (chain, res_num, insertion_code, atom_name) -> the conformer kept so
-        # far, for structures that model a side chain in more than one place.
-        chosen: Dict[Tuple[str, int, str, str], ParsedAtom] = {}
-
         for line in self._lines:
             # An NMR ensemble stacks its models in one file between MODEL and
             # ENDMDL. They are alternatives, not more structure: reading them
@@ -429,8 +456,6 @@ class PDBParser(StructureParser):
 
             # Filter for protein atoms
             if self._is_protein_atom(atom, line):
-                if not self._accept_conformer(atom, chosen):
-                    continue
                 self._protein_atoms.append(atom)
 
                 # Build residue dictionary. The insertion code is part of the
@@ -451,40 +476,13 @@ class PDBParser(StructureParser):
                     )
                 self._residues[key].atoms.append(atom)
 
+        self._protein_atoms = best_conformers(self._protein_atoms)
+        kept = set(map(id, self._protein_atoms))
+        for residue in self._residues.values():
+            residue.atoms = [a for a in residue.atoms if id(a) in kept]
+
         if not self._protein_atoms:
             logger.warning(f"No protein atoms found in {self.pdb_path}")
-
-    def _accept_conformer(self, atom: ParsedAtom, chosen: Dict) -> bool:
-        """Whether to keep *atom*, given the conformers already accepted.
-
-        A structure refined at high resolution models a side chain in two or
-        three positions, tagged A, B, C in column 17 and weighted by occupancy.
-        They are alternatives, not extra atoms: keeping them all gives a serine
-        two CB atoms two Angstrom apart, which inflates every atom count and
-        occludes the residue against itself when the SASA is computed.
-
-        The highest occupancy wins, and the first one seen wins a tie, which is
-        what the PDB's own convention and every other reader do. plmol used to
-        keep them all here and, after standardisation, whichever came last --
-        conventionally the *minor* conformer, since A precedes B in the file.
-        """
-        if not atom.alt_loc:
-            return True
-        key = (atom.chain_id, atom.res_num, atom.insertion_code, atom.atom_name)
-        previous = chosen.get(key)
-        if previous is None:
-            chosen[key] = atom
-            return True
-        if atom.occupancy > previous.occupancy:
-            # Replace the one already accepted, in place, keeping file order.
-            self._protein_atoms[self._protein_atoms.index(previous)] = atom
-            residue = self._residues.get(
-                (atom.chain_id, atom.res_num, atom.insertion_code)
-            )
-            if residue is not None:
-                residue.atoms[residue.atoms.index(previous)] = atom
-            chosen[key] = atom
-        return False
 
     def _is_protein_atom(self, atom: ParsedAtom, line: str = '') -> bool:
         """Whether *atom* belongs in :attr:`protein_atoms`.

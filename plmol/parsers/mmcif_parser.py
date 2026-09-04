@@ -79,10 +79,10 @@ class MMCIFParser(StructureParser):
         """
         if self._parsed_atoms_cache is not None:
             return self._parsed_atoms_cache
-        from .pdb_parser import is_protein_atom
+        from .pdb_parser import best_conformers, is_protein_atom
 
-        atoms = [atom for atom in self.all_atoms
-                 if is_protein_atom(atom, self.include_nucleic_acids)]
+        atoms = best_conformers([atom for atom in self.all_atoms
+                                 if is_protein_atom(atom, self.include_nucleic_acids)])
         self._parsed_atoms_cache = atoms
         return atoms
 
@@ -116,6 +116,9 @@ class MMCIFParser(StructureParser):
                         element=elem,
                         insertion_code=res.seqid.icode.strip() if res.seqid.icode else "",
                         b_factor=atom.b_iso,
+                        # gemmi writes a NUL byte where a PDB leaves a blank.
+                        alt_loc=atom.altloc.strip("\x00 ") if atom.altloc else "",
+                        occupancy=atom.occ,
                     ))
         self._all_parsed_atoms_cache = atoms
         return atoms
