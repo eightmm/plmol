@@ -448,3 +448,44 @@ class TestTorsionsStopAtAStrandBreak:
         assert torsions[0, 4] != 0.0
         assert torsions[0, 5] != 0.0
         assert torsions[first_b, 4] != 0.0
+
+
+class TestAStructureWithNoNucleicAcid:
+    """A protein-only file says so, the way the protein side already did."""
+
+    def test_it_raises_input_error(self, example_pdb):
+        from plmol import NucleicAcid
+        from plmol.errors import InputError
+        from plmol.parsers.pdb_parser import PDBParser
+
+        PDBParser.clear_cache()
+        with pytest.raises(InputError) as caught:
+            NucleicAcid.from_pdb(example_pdb).featurize(mode="sequence")
+        assert "No nucleic acid residues" in str(caught.value)
+        assert example_pdb in str(caught.value)
+
+    def test_a_chain_that_names_no_strand_raises_too(self, dna_pdb):
+        from plmol import NucleicAcid
+        from plmol.errors import InputError
+        from plmol.parsers.pdb_parser import PDBParser
+
+        PDBParser.clear_cache()
+        with pytest.raises(InputError) as caught:
+            NucleicAcid.from_pdb(dna_pdb, chain_id="Z").featurize(mode="sequence")
+        assert "chain Z" in str(caught.value)
+
+    def test_from_sequence_is_untouched(self):
+        from plmol import NucleicAcid
+
+        result = NucleicAcid.from_sequence("AUGCAUGC", na_type="RNA").featurize(mode="sequence")
+        assert result["sequence"]["tokens"].shape[0] == 8
+
+    def test_every_mode_reports_it_the_same_way(self, example_pdb):
+        from plmol import NucleicAcid
+        from plmol.errors import InputError
+        from plmol.parsers.pdb_parser import PDBParser
+
+        for mode in ("sequence", "graph", "backbone", "atom_graph"):
+            PDBParser.clear_cache()
+            with pytest.raises(InputError):
+                NucleicAcid.from_pdb(example_pdb).featurize(mode=mode)

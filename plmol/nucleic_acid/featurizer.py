@@ -7,6 +7,7 @@ import numpy as np
 
 from ..parsers.pdb_parser import normalize_nucleotide_name
 from ..protein.utils import PDBParser, ParsedAtom
+from ..errors import InputError
 from ..spatial import pairs_within
 from ..utils import (
     PHOSPHODIESTER_BOND_MAX,
@@ -110,6 +111,19 @@ class NucleicFeaturizer:
         for residue in pending_normalisation:
             residue["base"] = normalize_nucleotide_name(
                 residue["res_name"], residue["atoms"].keys()
+            )
+
+        if not residue_map:
+            # A protein-only structure, or a chain_id that names no strand,
+            # parses cleanly and yields nothing. Every mode then returned empty
+            # arrays, which reads as "this molecule has no features" rather
+            # than "you gave me the wrong file"; the protein side raises here.
+            total = len(self._parser.all_atoms)
+            chain = f" in chain {self.chain_id}" if self.chain_id is not None else ""
+            raise InputError(
+                f"No nucleic acid residues{chain} in {self.pdb_path}: "
+                f"{total} atom record{'' if total == 1 else 's'} parsed, none of "
+                "them a nucleotide."
             )
 
         # Sort by (chain, res_num, insertion_code)
