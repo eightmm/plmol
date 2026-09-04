@@ -412,6 +412,14 @@ class PDBParser(StructureParser):
         chosen: Dict[Tuple[str, int, str, str], ParsedAtom] = {}
 
         for line in self._lines:
+            # An NMR ensemble stacks its models in one file between MODEL and
+            # ENDMDL. They are alternatives, not more structure: reading them
+            # all gave every atom once per model, which broke the residue
+            # coordinate array outright and made each atom occlude its own
+            # copies when the SASA was sampled. The first model is what the
+            # PDB nominates and what every other reader takes.
+            if line.startswith('ENDMDL'):
+                break
             # Only process ATOM and HETATM records
             if not (is_atom_record(line) or is_hetatm_record(line)):
                 continue

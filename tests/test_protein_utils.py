@@ -690,3 +690,61 @@ class TestAlternateConformations:
         plain = [a for a in parser.protein_atoms if not a.alt_loc]
         assert len(plain) == 14
         assert all(a.occupancy == 1.0 for a in plain)
+
+
+class TestMultiModelEnsembles:
+    """An NMR file stacks its models between MODEL and ENDMDL.
+
+    They are alternatives, not more structure. plmol read every one: a
+    three-model ensemble gave every atom three times, which piled 21 atoms
+    into a residue array 15 slots wide and raised a bare ValueError with
+    standardize=False, and let each atom occlude its own copies when the SASA
+    was sampled.
+    """
+
+    @staticmethod
+    def _ensemble(tmp_path, example_pdb, offsets=(0.0, 10.0, 20.0)):
+        lines = [l for l in open(example_pdb) if l[:6].strip() in ("ATOM", "HETATM")]
+        path = tmp_path / "ensemble.pdb"
+        with open(path, "w") as handle:
+            for model, dz in enumerate(offsets, 1):
+                handle.write(f"MODEL     {model:4d}\n")
+                handle.writelines(
+                    line[:46] + f"{float(line[46:54]) + dz:8.3f}" + line[54:]
+                    for line in lines
+                )
+                handle.write("ENDMDL\n")
+            handle.write("END\n")
+        return str(path)
+
+    def test_only_the_first_model_is_read(self, tmp_path, example_pdb):
+        from plmol.parsers import PDBParser
+
+        one = PDBParser(example_pdb, skip_cache=True)
+        many = PDBParser(self._ensemble(tmp_path, example_pdb), skip_cache=True)
+        assert len(many.protein_atoms) == len(one.protein_atoms)
+        assert many.get_sequence() == one.get_sequence()
+
+    @pytest.mark.parametrize("standardize", [True, False])
+    def test_featurizing_an_ensemble_gives_the_first_model(
+        self, tmp_path, example_pdb, standardize
+    ):
+        """The models here are shifted in z, so the mean says which one was
+        taken. It has to be the first: that is the one the PDB nominates."""
+        from plmol import Protein
+
+        ensemble = self._ensemble(tmp_path, example_pdb)
+        reference = np.asarray(
+            Protein.from_pdb(example_pdb).featurize(mode="atom_graph")["atom_graph"]["coords"]
+        )
+        got = np.asarray(
+            Protein.from_pdb(ensemble, standardize=standardize)
+            .featurize(mode="atom_graph")["atom_graph"]["coords"]
+        )
+        assert got.shape == reference.shape
+        assert abs(float(got[:, 2].mean()) - float(reference[:, 2].mean())) < 1e-3
+
+    def test_a_file_without_model_records_is_untouched(self, example_pdb):
+        from plmol.parsers import PDBParser
+
+        assert len(PDBParser(example_pdb, skip_cache=True).protein_atoms) == 3260

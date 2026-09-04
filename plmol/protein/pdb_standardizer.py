@@ -163,6 +163,9 @@ class PDBStandardizer:
         hetatm_residues = {}
 
         for line in lines:
+            # First model only, as the parser does -- see PDBParser._parse.
+            if line.startswith('ENDMDL'):
+                break
             if line.startswith('ATOM'):
                 self._process_atom_line(line, protein_residues, hetatm_residues, is_hetatm=False)
             elif line.startswith('HETATM'):
