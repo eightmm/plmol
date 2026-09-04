@@ -21,6 +21,16 @@ from ..constants import (
 )
 
 
+def _occupancy(line: str) -> float:
+    """Occupancy from PDB columns 55-60, or 1.0 when the field is unusable."""
+    if len(line) > 59:
+        try:
+            return float(line[54:60])
+        except ValueError:
+            pass
+    return 1.0
+
+
 class PDBStandardizer:
     """
     A class for standardizing PDB files.
@@ -224,6 +234,14 @@ class PDBStandardizer:
         residue_key = (chain_id, res_num_str, normalized_res_name)
         if residue_key not in target_dict:
             target_dict[residue_key] = {}
+        # An alternate location is a competing position for the same atom, not
+        # an extra one. The highest occupancy wins and the first seen wins a
+        # tie, matching the parser and every other reader. Plain assignment
+        # kept whichever came last, which is conventionally the minor
+        # conformer, since A is written before B.
+        previous = target_dict[residue_key].get(atom_name)
+        if previous is not None and _occupancy(line) <= _occupancy(previous):
+            return
         target_dict[residue_key][atom_name] = line
 
     def _sort_residue_key(self, residue_key: Tuple) -> Tuple:

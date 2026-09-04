@@ -48,6 +48,8 @@ class ParsedAtom:
     element: str            # Element symbol (C, N, O, S, etc.)
     insertion_code: str = '' # Insertion code if any
     b_factor: float = 0.0   # B-factor (temperature factor, PDB columns 61-66)
+    alt_loc: str = ''       # Alternate location indicator (PDB column 17)
+    occupancy: float = 1.0  # Occupancy (PDB columns 55-60)
 
 
 @dataclass
@@ -138,6 +140,15 @@ def parse_pdb_line(line: str) -> ParsedAtom:
         logger.warning("Malformed coordinates in PDB line: %r", line[30:54].strip())
         coords = (0.0, 0.0, 0.0)
 
+    alt_loc = line[16].strip() if len(line) > 16 else ''
+
+    occupancy = 1.0
+    if len(line) > 59:
+        try:
+            occupancy = float(line[54:60])
+        except (ValueError, IndexError):
+            occupancy = 1.0
+
     # Parse B-factor (columns 61-66)
     b_factor = 0.0
     if len(line) > 65:
@@ -157,6 +168,8 @@ def parse_pdb_line(line: str) -> ParsedAtom:
         element=element,
         insertion_code=insertion_code,
         b_factor=b_factor,
+        alt_loc=alt_loc,
+        occupancy=occupancy,
     )
 
 
@@ -394,6 +407,10 @@ class PDBParser(StructureParser):
         if not self._lines:
             raise InputError(f"PDB file is empty: {self.pdb_path}")
 
+        # (chain, res_num, insertion_code, atom_name) -> the conformer kept so
+        # far, for structures that model a side chain in more than one place.
+        chosen: Dict[Tuple[str, int, str, str], ParsedAtom] = {}
+
         for line in self._lines:
             # Only process ATOM and HETATM records
             if not (is_atom_record(line) or is_hetatm_record(line)):
@@ -404,6 +421,8 @@ class PDBParser(StructureParser):
 
             # Filter for protein atoms
             if self._is_protein_atom(atom, line):
+                if not self._accept_conformer(atom, chosen):
+                    continue
                 self._protein_atoms.append(atom)
 
                 # Build residue dictionary. The insertion code is part of the
@@ -426,6 +445,38 @@ class PDBParser(StructureParser):
 
         if not self._protein_atoms:
             logger.warning(f"No protein atoms found in {self.pdb_path}")
+
+    def _accept_conformer(self, atom: ParsedAtom, chosen: Dict) -> bool:
+        """Whether to keep *atom*, given the conformers already accepted.
+
+        A structure refined at high resolution models a side chain in two or
+        three positions, tagged A, B, C in column 17 and weighted by occupancy.
+        They are alternatives, not extra atoms: keeping them all gives a serine
+        two CB atoms two Angstrom apart, which inflates every atom count and
+        occludes the residue against itself when the SASA is computed.
+
+        The highest occupancy wins, and the first one seen wins a tie, which is
+        what the PDB's own convention and every other reader do. plmol used to
+        keep them all here and, after standardisation, whichever came last --
+        conventionally the *minor* conformer, since A precedes B in the file.
+        """
+        if not atom.alt_loc:
+            return True
+        key = (atom.chain_id, atom.res_num, atom.insertion_code, atom.atom_name)
+        previous = chosen.get(key)
+        if previous is None:
+            chosen[key] = atom
+            return True
+        if atom.occupancy > previous.occupancy:
+            # Replace the one already accepted, in place, keeping file order.
+            self._protein_atoms[self._protein_atoms.index(previous)] = atom
+            residue = self._residues.get(
+                (atom.chain_id, atom.res_num, atom.insertion_code)
+            )
+            if residue is not None:
+                residue.atoms[residue.atoms.index(previous)] = atom
+            chosen[key] = atom
+        return False
 
     def _is_protein_atom(self, atom: ParsedAtom, line: str = '') -> bool:
         """Whether *atom* belongs in :attr:`protein_atoms`.

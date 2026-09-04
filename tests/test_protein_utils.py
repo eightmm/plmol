@@ -583,3 +583,110 @@ class TestInsertionCodes:
         featurizer = ResidueFeaturizer(self._structure(tmp_path, self.MIXED))
         codes = [residue[3] for residue in featurizer.get_residues()]
         assert codes == ["", "A", "B", "", ""]
+
+
+class TestAlternateConformations:
+    """An alternate location is a competing position for one atom, not a
+    second atom.
+
+    A structure refined at high resolution models a side chain in two or three
+    places, tagged A/B/C in column 17 and weighted by occupancy. plmol read
+    none of that: the parser kept every one, so a serine had two CB atoms two
+    Angstrom apart, and the standardizer kept whichever came last -- which is
+    the *minor* conformer, since A is written before B.
+    """
+
+    @staticmethod
+    def _structure(tmp_path, occupancies=(0.60, 0.40)):
+        def line(serial, name, altloc, res, resnum, xyz, element, occ):
+            row = list(" " * 80)
+            row[0:6] = "ATOM  "
+            row[6:11] = f"{serial:5d}"
+            row[12:16] = (" " + name).ljust(4)[:4]
+            row[16] = altloc
+            row[17:20] = res.rjust(3)[:3]
+            row[21] = "A"
+            row[22:26] = f"{resnum:4d}"
+            row[30:38] = f"{xyz[0]:8.3f}"
+            row[38:46] = f"{xyz[1]:8.3f}"
+            row[46:54] = f"{xyz[2]:8.3f}"
+            row[54:60] = f"{occ:6.2f}"
+            row[60:66] = "  0.00"
+            row[76:78] = element.rjust(2)
+            return "".join(row).rstrip() + "\n"
+
+        text, serial = "", 1
+        for i, res in enumerate(["ALA", "SER", "ALA"], 1):
+            for j, (name, element) in enumerate(
+                [("N", "N"), ("CA", "C"), ("C", "C"), ("O", "O")]
+            ):
+                text += line(serial, name, " ", res, i,
+                             (i * 3.8 + j * 0.4, 0.0, 0.0), element, 1.0)
+                serial += 1
+            if res == "SER":
+                for altloc, side, occ in (("A", 1.0, occupancies[0]),
+                                          ("B", -1.0, occupancies[1])):
+                    text += line(serial, "CB", altloc, res, i,
+                                 (i * 3.8, side, 0.0), "C", occ); serial += 1
+                    text += line(serial, "OG", altloc, res, i,
+                                 (i * 3.8, side * 2, 0.0), "O", occ); serial += 1
+            else:
+                text += line(serial, "CB", " ", res, i,
+                             (i * 3.8, 1.0, 0.0), "C", 1.0); serial += 1
+        path = tmp_path / "altloc.pdb"
+        path.write_text(text + "END\n")
+        return str(path)
+
+    def test_the_parser_keeps_one_position_per_atom(self, tmp_path):
+        from plmol.parsers import PDBParser
+
+        parser = PDBParser(self._structure(tmp_path), skip_cache=True)
+        assert len(parser.protein_atoms) == 16, "18 lines, two of them alternates"
+        names = [a.atom_name for a in parser.protein_atoms if a.res_num == 2]
+        assert names == ["N", "CA", "C", "O", "CB", "OG"]
+
+    @pytest.mark.parametrize("occupancies,expected_sign",
+                             [((0.60, 0.40), +1.0), ((0.40, 0.60), -1.0)],
+                             ids=["A is major", "B is major"])
+    def test_the_higher_occupancy_wins(self, tmp_path, occupancies, expected_sign):
+        from plmol.parsers import PDBParser
+
+        parser = PDBParser(self._structure(tmp_path, occupancies), skip_cache=True)
+        cb = [a for a in parser.protein_atoms if a.res_num == 2 and a.atom_name == "CB"]
+        assert len(cb) == 1
+        assert np.sign(cb[0].coords[1]) == expected_sign
+
+    @pytest.mark.parametrize("occupancies,expected_sign",
+                             [((0.60, 0.40), +1.0), ((0.40, 0.60), -1.0)],
+                             ids=["A is major", "B is major"])
+    def test_standardizing_keeps_the_same_one(self, tmp_path, occupancies, expected_sign):
+        from plmol.protein.pdb_standardizer import PDBStandardizer
+
+        source = self._structure(tmp_path, occupancies)
+        out = str(tmp_path / "standardized.pdb")
+        PDBStandardizer().standardize(source, out)
+        ys = [float(line[38:46]) for line in open(out)
+              if line.startswith("ATOM") and line[17:20].strip() == "SER"
+              and line[12:16].strip() == "CB"]
+        assert len(ys) == 1
+        assert np.sign(ys[0]) == expected_sign
+
+    def test_the_atom_graph_has_no_duplicate_atom(self, tmp_path):
+        from plmol import Protein
+
+        atom_graph = Protein.from_pdb(self._structure(tmp_path)).featurize(
+            mode="atom_graph")["atom_graph"]
+        coords = np.asarray(atom_graph["coords"])
+        assert coords.shape[0] == 16
+        distances = np.linalg.norm(coords[:, None] - coords[None], axis=-1)
+        np.fill_diagonal(distances, np.inf)
+        assert distances.min() > 0.1, "two conformers of one atom sit almost on top"
+
+    def test_an_atom_without_an_alternate_is_untouched(self, tmp_path):
+        """Only atoms carrying a code go through the rule."""
+        from plmol.parsers import PDBParser
+
+        parser = PDBParser(self._structure(tmp_path), skip_cache=True)
+        plain = [a for a in parser.protein_atoms if not a.alt_loc]
+        assert len(plain) == 14
+        assert all(a.occupancy == 1.0 for a in plain)
