@@ -21,7 +21,7 @@ import threading
 from collections import OrderedDict
 from dataclasses import dataclass
 from hashlib import blake2b
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -183,7 +183,7 @@ class NativeSasaStructure:
         self,
         atom_names: Sequence[str],
         residue_names: Sequence[str],
-        residue_numbers: Sequence[int],
+        residue_numbers: Sequence[Union[int, str]],
         chain_labels: Sequence[str],
         radii: np.ndarray,
     ):
@@ -326,7 +326,11 @@ def native_structure_result(
     structure = NativeSasaStructure(
         atom_names=[atom.atom_name for atom in atoms],
         residue_names=[atom.res_name for atom in atoms],
-        residue_numbers=[atom.res_num for atom in atoms],
+        # Number and insertion code together, the way a PDB writes them and
+        # the way freesasa's residueNumber reported them: 100, 100A and 100B
+        # are three residues, and grouping on the number alone piled their
+        # areas into one.
+        residue_numbers=[f"{atom.res_num}{atom.insertion_code}" for atom in atoms],
         chain_labels=[atom.chain_id for atom in atoms],
         radii=radii,
     )

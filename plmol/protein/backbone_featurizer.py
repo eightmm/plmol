@@ -228,7 +228,8 @@ def compute_backbone_features(
 
     # Build chain_indices: chain_id -> list of residue indices
     chain_indices: Dict[str, list] = {}
-    for idx, (chain, res_num, res_type) in enumerate(residues):
+    for idx, residue in enumerate(residues):
+        chain, res_num, res_type = residue[0], residue[1], residue[2]
         if chain not in chain_indices:
             chain_indices[chain] = []
         chain_indices[chain].append(idx)

@@ -99,9 +99,10 @@ class ResidueFeaturizer:
         Initialize internal data structures from PDBParser.
 
         Builds two lookup structures directly (no pandas):
-        - _coord_cache: (chain, res_num, res_type) → np.ndarray of all atom coords
-        - _atom_coords:  (chain, res_num, res_type) → {atom_name: np.ndarray}
-        - _residues: sorted list of unique (chain, res_num, res_type) tuples
+        - _coord_cache: (chain, res_num, res_type, icode) → np.ndarray of all atom coords
+        - _atom_coords:  (chain, res_num, res_type, icode) → {atom_name: np.ndarray}
+        - _residues: sorted list of unique (chain, res_num, res_type, icode) tuples,
+          ordered by (chain, res_num, icode) so 100, 100A, 100B follow each other
 
         Args:
             pdb_parser: Pre-initialized PDBParser instance
@@ -118,7 +119,11 @@ class ResidueFeaturizer:
                 if atom.atom_name not in ['N', 'CA', 'C', 'O', 'CB']:
                     continue
 
-            res_key = (atom.chain_id, atom.res_num, res_type)
+            # res_type stays at index 2: callers read residue[2] and
+            # np.array(residues)[:, 2] for it. The insertion code goes last and
+            # the sort below uses it explicitly, so 100, 100A and 100B are three
+            # residues in sequence order rather than one pile of atoms.
+            res_key = (atom.chain_id, atom.res_num, res_type, atom.insertion_code)
             coord = np.array(atom.coords, dtype=np.float32)
             residue_atoms[res_key].append(coord)
             atom_coords[res_key][atom.atom_name] = coord
@@ -128,7 +133,7 @@ class ResidueFeaturizer:
             key: np.vstack(coords) for key, coords in residue_atoms.items()
         }
         self._atom_coords = dict(atom_coords)
-        self._residues = sorted(residue_atoms.keys())
+        self._residues = sorted(residue_atoms.keys(), key=lambda k: (k[0], k[1], k[3]))
 
     @classmethod
     def from_parser(cls, pdb_parser: 'PDBParser', pdb_file: str = None) -> 'ResidueFeaturizer':
@@ -174,7 +179,7 @@ class ResidueFeaturizer:
         # Reverse mapping from int to 3-letter code
         int_to_3letter = {v: k for k, v in AMINO_ACID_3_TO_INT.items()}
 
-        for chain, res_num, res_type in residues:
+        for chain, res_num, res_type, _icode in residues:
             if chain not in sequences_by_chain:
                 sequences_by_chain[chain] = []
 
@@ -258,7 +263,8 @@ class ResidueFeaturizer:
         num_residues = len(residues)
 
         chain_indices = {}
-        for idx, (chain, num, res) in enumerate(residues):
+        for idx, residue in enumerate(residues):
+            chain = residue[0]
             if chain not in chain_indices:
                 chain_indices[chain] = []
             chain_indices[chain].append(idx)
@@ -325,7 +331,7 @@ class ResidueFeaturizer:
                 for residue, values in residues.items():
                     # Look up per-residue max SASA for normalization
                     if residue_idx < num_residues:
-                        _, _, res_type_int = self._residues[residue_idx]
+                        res_type_int = self._residues[residue_idx][2]
                         res_name_3 = int_to_3letter.get(res_type_int, 'UNK')
                         max_sasa = RESIDUE_MAX_SASA.get(res_name_3, 200.0)
                     else:
@@ -357,7 +363,7 @@ class ResidueFeaturizer:
             if sasa_tensor.shape[0] != num_residues:
                 logger.warning(
                     f"SASA residue count ({sasa_tensor.shape[0]}) != structure residue count ({num_residues}). "
-                    f"This may indicate parsing differences between FreeSASA and internal parser."
+                    "This means two residues were grouped as one."
                 )
                 # Adjust to match expected dimensions
                 if sasa_tensor.shape[0] > num_residues:

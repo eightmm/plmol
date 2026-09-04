@@ -483,7 +483,7 @@ class HierarchicalFeaturizer:
         residue_ids = []
         _int_to_3letter = {i: r for i, r in enumerate(RESIDUE_TYPES[:20])}
         _int_to_3letter[20] = 'UNK'
-        for chain, resnum, restype in residues:
+        for chain, resnum, restype, _icode in residues:
             residue_names.append(_int_to_3letter.get(restype, 'UNK'))
             residue_ids.append((chain, resnum))
 
@@ -604,7 +604,7 @@ class HierarchicalFeaturizer:
             - elements: [N_atom] element type indices
             - residue_tokens: [N_atom] residue type for each atom
             - atom_names: List[str] atom names
-            - residue_keys: List[(chain, resnum)] for mapping
+            - residue_keys: List[(chain, resnum, insertion_code)] for mapping
         """
         elements = []
         residue_tokens = []
@@ -630,7 +630,7 @@ class HierarchicalFeaturizer:
             elements.append(elem_idx)
             residue_tokens.append(res_tok)
             atom_names.append(atom.atom_name)
-            residue_keys.append((atom.chain_id, atom.res_num))
+            residue_keys.append((atom.chain_id, atom.res_num, atom.insertion_code))
 
         return {
             'elements': np.array(elements, dtype=INT),
@@ -641,21 +641,25 @@ class HierarchicalFeaturizer:
 
     def _build_mapping(
         self,
-        atom_residue_keys: List[Tuple[str, int]],
+        atom_residue_keys: List[Tuple[str, int, str]],
         residues: List[Tuple],
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Build atom-residue mapping tensors.
 
         Args:
-            atom_residue_keys: List of (chain, resnum) for each atom
-            residues: List of (chain, resnum, restype) tuples
+            atom_residue_keys: List of (chain, resnum, insertion_code) per atom
+            residues: List of (chain, resnum, restype, insertion_code) tuples
 
         Returns:
             Tuple of (atom_to_residue, residue_atom_indices, residue_atom_mask, num_atoms_per_residue)
         """
         # Build residue key to index mapping
-        residue_to_idx = {(chain, resnum): i for i, (chain, resnum, _) in enumerate(residues)}
+        # Keyed on the insertion code too: 100, 100A and 100B are three
+        # residues, and without it every atom of the three maps to the first.
+        residue_to_idx = {
+            (residue[0], residue[1], residue[3]): i for i, residue in enumerate(residues)
+        }
 
         num_atoms = len(atom_residue_keys)
         num_residues = len(residues)
@@ -664,8 +668,7 @@ class HierarchicalFeaturizer:
         atom_to_residue_list = []
         residue_to_atoms = defaultdict(list)
 
-        for atom_idx, (chain, resnum) in enumerate(atom_residue_keys):
-            key = (chain, resnum)
+        for atom_idx, key in enumerate(atom_residue_keys):
             res_idx = residue_to_idx.get(key, 0)  # default to first residue if not found
             atom_to_residue_list.append(res_idx)
             residue_to_atoms[res_idx].append(atom_idx)

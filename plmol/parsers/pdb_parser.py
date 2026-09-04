@@ -57,6 +57,7 @@ class ParsedResidue:
     res_num: int
     res_name: str
     res_type_int: int       # Integer code for residue type
+    insertion_code: str = ''  # Distinguishes 100, 100A, 100B
     atoms: List[ParsedAtom] = field(default_factory=list)
 
 
@@ -405,8 +406,10 @@ class PDBParser(StructureParser):
             if self._is_protein_atom(atom, line):
                 self._protein_atoms.append(atom)
 
-                # Build residue dictionary
-                key = (atom.chain_id, atom.res_num)
+                # Build residue dictionary. The insertion code is part of the
+                # identity: an antibody numbered the Kabat way has 100, 100A and
+                # 100B side by side, and without it they collapse into one.
+                key = (atom.chain_id, atom.res_num, atom.insertion_code)
                 if key not in self._residues:
                     res_type_int = AMINO_ACID_3_TO_INT.get(
                         normalize_residue_name(atom.res_name, atom.atom_name),
@@ -417,6 +420,7 @@ class PDBParser(StructureParser):
                         res_num=atom.res_num,
                         res_name=atom.res_name,
                         res_type_int=res_type_int,
+                        insertion_code=atom.insertion_code,
                     )
                 self._residues[key].atoms.append(atom)
 
@@ -464,7 +468,7 @@ class PDBParser(StructureParser):
         Metal ions are already excluded during parsing (see _is_protein_atom).
         """
         residue_list = []
-        for (chain, resnum), residue in sorted(self._residues.items()):
+        for (chain, resnum, _icode), residue in sorted(self._residues.items()):
             res_type = AMINO_ACID_3_TO_INT.get(
                 normalize_residue_name(residue.res_name),
                 20  # UNK
@@ -492,7 +496,7 @@ class PDBParser(StructureParser):
             if chain_id and atom.chain_id != chain_id:
                 continue
 
-            key = (atom.chain_id, atom.res_num)
+            key = (atom.chain_id, atom.res_num, atom.insertion_code)
             if key in seen_residues:
                 continue
             seen_residues.add(key)

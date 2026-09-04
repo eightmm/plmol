@@ -495,3 +495,91 @@ class TestPDBParser:
         assert parser.get_num_atoms() > 0
         seq = parser.get_sequence()
         assert len(seq) > 0
+
+
+class TestInsertionCodes:
+    """100, 100A and 100B are three residues.
+
+    Every antibody numbered the Kabat or Chothia way has them -- 52A in CDR-L2,
+    82A/B/C in the heavy framework, 100A through 100K in CDR-H3. plmol keyed
+    residues on chain and number alone in four places, so the three collapsed
+    into one: the parser reported three residues where the file has five and
+    dropped two letters from the sequence, and the SASA grouping piled their
+    areas together and warned about it.
+    """
+
+    @staticmethod
+    def _structure(tmp_path, residue_names):
+        def line(serial, name, res, resnum, icode, xyz, element):
+            row = list(" " * 80)
+            row[0:6] = "ATOM  "
+            row[6:11] = f"{serial:5d}"
+            row[12:16] = (" " + name).ljust(4)[:4]
+            row[17:20] = res.rjust(3)[:3]
+            row[21] = "A"
+            row[22:26] = f"{resnum:4d}"
+            row[26] = icode
+            row[30:38] = f"{xyz[0]:8.3f}"
+            row[38:46] = f"{xyz[1]:8.3f}"
+            row[46:54] = f"{xyz[2]:8.3f}"
+            row[54:60] = "  1.00"
+            row[60:66] = "  0.00"
+            row[76:78] = element.rjust(2)
+            return "".join(row).rstrip() + "\n"
+
+        backbone = [("N", "N"), ("CA", "C"), ("C", "C"), ("O", "O"), ("CB", "C")]
+        numbering = [(100, " "), (100, "A"), (100, "B"), (101, " "), (102, " ")]
+        text, serial = "", 1
+        for k, ((num, icode), res) in enumerate(zip(numbering, residue_names)):
+            for j, (atom_name, element) in enumerate(backbone):
+                if res == "GLY" and atom_name == "CB":
+                    continue
+                text += line(serial, atom_name, res, num, icode,
+                             (k * 3.8 + j * 0.4, 0.0, 0.0), element)
+                serial += 1
+        path = tmp_path / "insertion.pdb"
+        path.write_text(text + "END\n")
+        return str(path)
+
+    #: The hard case is three residues of the *same* type: without the code
+    #: they are indistinguishable, so nothing downstream can separate them.
+    SAME = ["SER", "SER", "SER", "VAL", "LEU"]
+    MIXED = ["ALA", "GLY", "SER", "VAL", "LEU"]
+
+    @pytest.mark.parametrize("names,sequence",
+                             [(SAME, "SSSVL"), (MIXED, "AGSVL")],
+                             ids=["same residue type", "different types"])
+    def test_the_parser_counts_them_separately(self, tmp_path, names, sequence):
+        from plmol.parsers import PDBParser
+
+        parser = PDBParser(self._structure(tmp_path, names), skip_cache=True)
+        assert len(parser.residues) == 5
+        assert parser.get_sequence() == sequence
+        assert len(parser.get_residue_list()) == 5
+
+    @pytest.mark.parametrize("standardize", [True, False])
+    @pytest.mark.parametrize("names,sequence",
+                             [(SAME, "SSSVL"), (MIXED, "AGSVL")],
+                             ids=["same residue type", "different types"])
+    def test_the_residue_graph_keeps_all_five(self, tmp_path, standardize, names, sequence):
+        from plmol import Protein
+
+        protein = Protein.from_pdb(self._structure(tmp_path, names), standardize=standardize)
+        assert np.asarray(protein.featurize(mode="graph")["graph"]["coords"]).shape[0] == 5
+        assert protein.featurize(mode="sequence")["sequence"] == sequence
+
+    def test_the_sasa_grouping_separates_them(self, tmp_path):
+        """A mismatch here used to fire a warning and truncate the block."""
+        from plmol.sasa import native_structure_result
+
+        _, result = native_structure_result(self._structure(tmp_path, self.SAME))
+        per_residue = [v for chain in result.residueAreas().values() for v in chain.values()]
+        assert len(per_residue) == 5
+
+    def test_they_come_out_in_sequence_order(self, tmp_path):
+        """100 before 100A before 100B, not sorted by residue type."""
+        from plmol.protein.residue_featurizer import ResidueFeaturizer
+
+        featurizer = ResidueFeaturizer(self._structure(tmp_path, self.MIXED))
+        codes = [residue[3] for residue in featurizer.get_residues()]
+        assert codes == ["", "A", "B", "", ""]
