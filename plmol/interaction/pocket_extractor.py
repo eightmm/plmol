@@ -10,7 +10,12 @@ from dataclasses import dataclass, field
 import numpy as np
 from rdkit import Chem
 from ..constants import METAL_ELEMENTS, POCKET_MAX_ATOMS_PER_RESIDUE
-from ..parsers.pdb_parser import element_symbol, is_hydrogen
+from ..parsers.pdb_parser import (
+    best_conformers,
+    element_symbol,
+    is_hydrogen,
+    parse_pdb_line,
+)
 from ..rdkit_utils import has_3d
 from ..errors import InputError
 
@@ -332,14 +337,31 @@ class PocketExtractor:
                 icode = line[26] if len(line) > 26 and line[26] != ' ' else ''
                 key = (chain, resnum, resname, icode)
 
+                # Collected whole, then thinned below. Capping here kept the
+                # first MAX_ATOMS_PER_RESIDUE lines, which for a residue
+                # refined in two conformations meant both copies of its first
+                # few atoms and none of its last few.
                 if key not in residue_coords:
                     residue_coords[key] = []
                     residue_lines[key] = []
+                residue_coords[key].append([x, y, z])
+                residue_lines[key].append(line)
 
-                # Limit atoms per residue
-                if len(residue_coords[key]) < MAX_ATOMS_PER_RESIDUE:
-                    residue_coords[key].append([x, y, z])
-                    residue_lines[key].append(line)
+        # One position per atom. A side chain modelled in alternate locations is
+        # written two or three times, and the parser's rule -- highest
+        # occupancy, first seen breaks a tie -- is the one applied here too. A
+        # tryptophan with an A and a B side chain used to reach the cap on
+        # NE1 and lose CE2, CE3, CZ2, CZ3 and CH2 outright.
+        for key in list(residue_lines):
+            atoms = [parse_pdb_line(text) for text in residue_lines[key]]
+            keep = {id(atom) for atom in best_conformers(atoms)}
+            kept = [
+                (text, coord)
+                for text, coord, atom in zip(residue_lines[key], residue_coords[key], atoms)
+                if id(atom) in keep
+            ][:MAX_ATOMS_PER_RESIDUE]
+            residue_lines[key] = [text for text, _ in kept]
+            residue_coords[key] = [coord for _, coord in kept]
 
         # Sort residue keys for consistent ordering
         self._residue_keys = sorted(residue_coords.keys())

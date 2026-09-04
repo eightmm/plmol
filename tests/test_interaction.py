@@ -403,6 +403,38 @@ class TestPocketKeepsInsertionCodedResidues:
         kept = (~np.isnan(extractor._residue_coords[:, :, 0])).sum()
         assert kept == 42, "three tryptophans, fourteen heavy atoms each"
 
+    def test_an_alternate_conformation_is_not_an_extra_atom(self, tmp_path):
+        # A side chain refined in two conformations is written twice. Both
+        # copies used to count toward the fourteen-atom cap, so a tryptophan
+        # reached it on NE1 and lost the rest of its indole ring.
+        from plmol.interaction.pocket_extractor import PocketExtractor
+
+        names = ["N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "NE1",
+                 "CE2", "CE3", "CZ2", "CZ3", "CH2"]
+        lines = []
+        for i, name in enumerate(names):
+            if i < 4:
+                lines.append(
+                    f"ATOM      1 {name:^4s} TRP A 100    "
+                    f"{i * 0.4:8.3f}{0.0:8.3f}{0.0:8.3f}  1.00 20.00           {name[0]}"
+                )
+                continue
+            for alt, occupancy, z in (("A", 0.60, 0.0), ("B", 0.40, 2.0)):
+                lines.append(
+                    f"ATOM      1 {name:^4s}{alt}TRP A 100    "
+                    f"{i * 0.4:8.3f}{0.0:8.3f}{z:8.3f}  {occupancy:4.2f} 20.00           {name[0]}"
+                )
+        path = tmp_path / "altloc.pdb"
+        path.write_text("\n".join(l[:6] + f"{i + 1:5d}" + l[11:]
+                                  for i, l in enumerate(lines)) + "\nEND\n")
+
+        extractor = PocketExtractor.from_protein(str(path))
+        kept = [l[12:16].strip() for l in extractor._residue_lines[0]]
+        assert kept == names
+        assert (~np.isnan(extractor._residue_coords[0, :, 0])).sum() == 14
+        # The A conformer wins on occupancy, so z stays 0 for the side chain.
+        assert np.allclose(extractor._residue_coords[0, 4:, 2], 0.0)
+
     def test_the_public_triple_is_unchanged_and_the_code_rides_beside_it(self, tmp_path):
         from plmol.interaction.pocket_extractor import PocketExtractor
 
