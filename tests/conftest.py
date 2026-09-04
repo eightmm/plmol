@@ -135,3 +135,72 @@ def dna_pdb(tmp_path) -> str:
     path = tmp_path / "dna.pdb"
     path.write_text(DNA_PDB)
     return str(path)
+
+MINI_COMPLEX_CIF = """data_TEST
+#
+loop_
+_chem_comp_bond.comp_id
+_chem_comp_bond.atom_id_1
+_chem_comp_bond.atom_id_2
+_chem_comp_bond.value_order
+_chem_comp_bond.pdbx_aromatic_flag
+_chem_comp_bond.pdbx_stereo_config
+_chem_comp_bond.pdbx_ordinal
+BNZ C1 C2 arom Y N 1
+BNZ C2 C3 arom Y N 2
+BNZ C3 C4 arom Y N 3
+BNZ C4 C5 arom Y N 4
+BNZ C5 C6 arom Y N 5
+BNZ C6 C1 arom Y N 6
+#
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_alt_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_entity_id
+_atom_site.label_seq_id
+_atom_site.pdbx_PDB_ins_code
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.occupancy
+_atom_site.B_iso_or_equiv
+_atom_site.pdbx_formal_charge
+_atom_site.auth_seq_id
+_atom_site.auth_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_atom_id
+_atom_site.pdbx_PDB_model_num
+ATOM 1 N N . GLY A 1 1 ? 0.000 0.000 0.000 1.00 20.00 ? 1 GLY A N 1
+ATOM 2 C CA . GLY A 1 1 ? 1.450 0.000 0.000 1.00 20.00 ? 1 GLY A CA 1
+ATOM 3 C C . GLY A 1 1 ? 2.400 1.000 0.000 1.00 20.00 ? 1 GLY A C 1
+ATOM 4 O O . GLY A 1 1 ? 2.400 2.200 0.000 1.00 20.00 ? 1 GLY A O 1
+ATOM 5 N N . GLY A 1 2 ? 0.000 3.800 0.000 1.00 20.00 ? 2 GLY A N 1
+ATOM 6 C CA . GLY A 1 2 ? 1.450 3.800 0.000 1.00 20.00 ? 2 GLY A CA 1
+ATOM 7 C C . GLY A 1 2 ? 2.400 4.800 0.000 1.00 20.00 ? 2 GLY A C 1
+ATOM 8 O O . GLY A 1 2 ? 2.400 6.000 0.000 1.00 20.00 ? 2 GLY A O 1
+ATOM 9 N N . GLY A 1 3 ? 0.000 7.600 0.000 1.00 20.00 ? 3 GLY A N 1
+ATOM 10 C CA . GLY A 1 3 ? 1.450 7.600 0.000 1.00 20.00 ? 3 GLY A CA 1
+ATOM 11 C C . GLY A 1 3 ? 2.400 8.600 0.000 1.00 20.00 ? 3 GLY A C 1
+ATOM 12 O O . GLY A 1 3 ? 2.400 9.800 0.000 1.00 20.00 ? 3 GLY A O 1
+HETATM 13 C C1 . BNZ A 1 101 ? 5.400 3.800 0.000 1.00 20.00 ? 101 BNZ A C1 1
+HETATM 14 C C2 . BNZ A 1 101 ? 4.700 5.012 0.000 1.00 20.00 ? 101 BNZ A C2 1
+HETATM 15 C C3 . BNZ A 1 101 ? 3.300 5.012 0.000 1.00 20.00 ? 101 BNZ A C3 1
+HETATM 16 C C4 . BNZ A 1 101 ? 2.600 3.800 0.000 1.00 20.00 ? 101 BNZ A C4 1
+HETATM 17 C C5 . BNZ A 1 101 ? 3.300 2.588 0.000 1.00 20.00 ? 101 BNZ A C5 1
+HETATM 18 C C6 . BNZ A 1 101 ? 4.700 2.588 0.000 1.00 20.00 ? 101 BNZ A C6 1
+HETATM 19 O O . HOH A 1 201 ? 20.000 20.000 20.000 1.00 20.00 ? 201 HOH A O 1
+#
+"""
+
+
+@pytest.fixture
+def mini_complex_cif(tmp_path) -> str:
+    """A tiny mmCIF holding protein, a benzene ligand with its bond table, and a water."""
+    path = tmp_path / "mini_complex.cif"
+    path.write_text(MINI_COMPLEX_CIF)
+    return str(path)

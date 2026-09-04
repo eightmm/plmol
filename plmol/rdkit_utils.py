@@ -142,3 +142,64 @@ def substructure_matches(mol: Chem.Mol, pattern: Chem.Mol) -> tuple:
     molecule can be larger than a small ligand.
     """
     return mol.GetSubstructMatches(pattern, _MATCH_PARAMS)
+
+
+_BOND_ORDERS = {
+    "SINGLE": Chem.BondType.SINGLE,
+    "DOUBLE": Chem.BondType.DOUBLE,
+    "TRIPLE": Chem.BondType.TRIPLE,
+    "QUADRUPLE": Chem.BondType.QUADRUPLE,
+    "AROMATIC": Chem.BondType.AROMATIC,
+}
+
+
+def apply_component_bond_orders(mol: Chem.Mol, bonds: dict) -> Chem.Mol:
+    """Set a PDB-derived molecule's bond orders from a component bond table.
+
+    Coordinates say which atoms are close enough to be bonded; they do not say
+    whether a bond is single, double or aromatic. A ligand read from HETATM
+    records alone therefore comes back entirely single-bonded, which turns a
+    benzene ring into a cyclohexane and a carbonyl into an alcohol, and every
+    feature drawn from the molecule with it.
+
+    *bonds* maps ``frozenset({atom_name_1, atom_name_2})`` to an order name, as
+    :meth:`plmol.parsers.mmcif_parser.MMCIFParser.get_component_bonds` returns
+    it. Atoms are matched by their PDB name, so the table and the molecule need
+    not agree on order or on which hydrogens are present.
+
+    Returns the molecule unchanged if it carries no PDB atom names, if the
+    table is empty, or if the result will not sanitize -- a wrong answer that
+    parses is worse than the flat one it replaced.
+    """
+    if not bonds or mol is None or mol.GetNumBonds() == 0:
+        return mol
+
+    names = {}
+    for atom in mol.GetAtoms():
+        info = atom.GetPDBResidueInfo()
+        if info is None:
+            return mol
+        names[atom.GetIdx()] = info.GetName().strip()
+
+    editable = Chem.RWMol(mol)
+    applied = 0
+    for bond in editable.GetBonds():
+        key = frozenset((names[bond.GetBeginAtomIdx()], names[bond.GetEndAtomIdx()]))
+        order = _BOND_ORDERS.get(bonds.get(key, ""))
+        if order is None:
+            continue
+        bond.SetBondType(order)
+        bond.SetIsAromatic(order == Chem.BondType.AROMATIC)
+        applied += 1
+    if not applied:
+        return mol
+
+    for atom in editable.GetAtoms():
+        atom.SetIsAromatic(any(b.GetIsAromatic() for b in atom.GetBonds()))
+
+    result = editable.GetMol()
+    try:
+        Chem.SanitizeMol(result)
+    except Exception:
+        return mol
+    return result

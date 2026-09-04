@@ -23,6 +23,14 @@ except ImportError:  # pragma: no cover
     _GEMMI_AVAILABLE = False
 
 
+def _unquote(value: str) -> str:
+    """A CIF value with its quoting removed. gemmi returns raw tokens."""
+    text = str(value).strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+        return text[1:-1]
+    return text
+
+
 def _require_gemmi() -> None:
     if not _GEMMI_AVAILABLE:
         raise DependencyError(
@@ -55,6 +63,7 @@ class MMCIFParser(StructureParser):
             raise FileNotFoundError(f"mmCIF file not found: {self.mmcif_path}")
 
         self._structure: "gemmi.Structure" = gemmi.read_structure(self.mmcif_path)
+        self._cif_document = None
         self._atom_cache: Optional[List[Dict[str, Any]]] = None
         self._parsed_atoms_cache: Optional[List["ParsedAtom"]] = None
         self._all_parsed_atoms_cache: Optional[List["ParsedAtom"]] = None
@@ -317,6 +326,47 @@ class MMCIFParser(StructureParser):
                     result.append(chain.name)
                     break
         return result
+
+    def get_component_bonds(self) -> Dict[str, Dict[frozenset, str]]:
+        """Bond orders per chemical component, from the file's own table.
+
+        A PDBx/mmCIF entry carries ``_chem_comp_bond`` for every component it
+        contains, ligands included: which two atom names are bonded, the order,
+        and whether the bond is aromatic. An HETATM block on its own has none of
+        that, so a ligand read from coordinates alone comes back with every bond
+        single -- two benzene rings as cyclohexanes and every carbonyl as an
+        alcohol.
+
+        Returns:
+            ``{comp_id: {frozenset({atom_name_1, atom_name_2}): order}}`` where
+            order is one of ``"SINGLE"``, ``"DOUBLE"``, ``"TRIPLE"`` or
+            ``"AROMATIC"``. Empty when the file carries no table.
+        """
+        _ORDER = {"sing": "SINGLE", "doub": "DOUBLE", "trip": "TRIPLE",
+                  "arom": "AROMATIC", "quad": "QUADRUPLE"}
+        bonds: Dict[str, Dict[frozenset, str]] = {}
+        if self._cif_document is None:
+            try:
+                self._cif_document = gemmi.cif.read(self.mmcif_path)
+            except Exception:
+                return bonds
+        try:
+            block = self._cif_document.sole_block()
+        except Exception:
+            return bonds
+        rows = block.find("_chem_comp_bond.", [
+            "comp_id", "atom_id_1", "atom_id_2", "value_order",
+            "pdbx_aromatic_flag",
+        ])
+        for row in rows:
+            comp = _unquote(row[0])
+            first, second = _unquote(row[1]), _unquote(row[2])
+            aromatic = _unquote(row[4]).upper() == "Y"
+            order = "AROMATIC" if aromatic else _ORDER.get(_unquote(row[3]).lower())
+            if order is None:
+                continue
+            bonds.setdefault(comp, {})[frozenset((first, second))] = order
+        return bonds
 
     def get_ligand_residues(self) -> List[Dict[str, str]]:
         """

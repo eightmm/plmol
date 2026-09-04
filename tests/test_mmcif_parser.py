@@ -470,3 +470,77 @@ class TestFromPdbRejectsMmcif:
         with pytest.raises(InputError) as caught:
             Protein.from_pdb(cif)
         assert "from_mmcif" in str(caught.value)
+
+
+class TestOneCifGivesBothMolecules:
+    """A PDBx entry holds the protein and its ligand; both come out featurizable."""
+
+    def test_the_ligand_keeps_its_bond_orders(self, mini_complex_cif):
+        from rdkit import Chem
+        from plmol.complex import MolecularComplex
+
+        complex_ = MolecularComplex.from_mmcif(mini_complex_cif, standardize=False)
+        assert set(complex_.molecules) == {"protein", "ligand"}
+
+        ligand = complex_.molecules["ligand"]
+        # Coordinates say which atoms are bonded, not which bonds are aromatic.
+        # Without the file's own _chem_comp_bond table this benzene came back as
+        # cyclohexane.
+        assert Chem.MolToSmiles(ligand._rdmol) == "c1ccccc1"
+        assert ligand.metadata["bond_orders_from_file"] is True
+
+    def test_a_file_without_the_table_still_loads(self, mini_complex_cif, tmp_path):
+        from rdkit import Chem
+        from plmol.complex import MolecularComplex
+
+        text = open(mini_complex_cif).read()
+        stripped = text[:text.index("loop_")] + text[text.index("loop_\n_atom_site."):]
+        path = tmp_path / "no_table.cif"
+        path.write_text(stripped)
+
+        ligand = MolecularComplex.from_mmcif(str(path), standardize=False).molecules["ligand"]
+        assert ligand.metadata["bond_orders_from_file"] is False
+        assert Chem.MolToSmiles(ligand._rdmol) == "C1CCCCC1"
+
+    def test_both_sides_featurize(self, mini_complex_cif):
+        from plmol.complex import MolecularComplex
+
+        result = MolecularComplex.from_mmcif(
+            mini_complex_cif, standardize=False
+        ).featurize(requests=["protein", "ligand"])
+        assert np.asarray(result["protein"]["graph"]["coords"]).shape[0] == 3
+        assert np.asarray(result["ligand"]["graph"]["node_features"]).shape[0] == 6
+
+    def test_the_component_bond_table_is_read(self, mini_complex_cif):
+        from plmol.parsers.mmcif_parser import MMCIFParser
+
+        bonds = MMCIFParser(mini_complex_cif).get_component_bonds()
+        assert set(bonds) == {"BNZ"}
+        assert len(bonds["BNZ"]) == 6
+        assert set(bonds["BNZ"].values()) == {"AROMATIC"}
+
+
+class TestTheProteinSideExcludesTheLigand:
+    """A whole entry read as one file put the ligand inside the protein."""
+
+    def test_the_ligand_is_not_its_own_neighbour(self, mini_complex_cif):
+        from rdkit import Chem
+        from plmol.interaction.pli_featurizer import _without_solvent
+
+        mol = Chem.MolFromPDBBlock(
+            "\n".join([
+                "ATOM      1  N   GLY A   1       0.000   0.000   0.000  1.00 20.00           N",
+                "ATOM      2  CA  GLY A   1       1.450   0.000   0.000  1.00 20.00           C",
+                "HETATM    3  C1  BNZ A 101       5.400   3.800   0.000  1.00 20.00           C",
+                "HETATM    4 ZN    ZN A 301       8.000   8.000   8.000  1.00 20.00          ZN",
+                "HETATM    5  O   HOH A 201      20.000  20.000  20.000  1.00 20.00           O",
+                "END",
+            ]),
+            removeHs=False, sanitize=False, proximityBonding=False,
+        )
+        kept = {
+            atom.GetPDBResidueInfo().GetResidueName().strip()
+            for atom in _without_solvent(mol).GetAtoms()
+        }
+        # The metal stays: coordination is one of the interactions detected.
+        assert kept == {"GLY", "ZN"}

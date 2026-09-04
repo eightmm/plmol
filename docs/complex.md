@@ -27,6 +27,28 @@ cx = MolecularComplex.from_mmcif(
     ligand_resname=None,
     ligand_chain=None,
 )
+```
+
+One mmCIF entry is enough for the whole complex: `from_mmcif` reads the protein
+chains into a `Protein`, the nucleic acid chains into a `NucleicAcid`, and every
+non-water HETATM residue into a `Ligand`, so `featurize(requests="all")` returns
+the protein, ligand and interaction blocks from a single file.
+
+> **The ligand's bond orders come from the file's `_chem_comp_bond` table.** An
+> HETATM record says where an atom is, not whether a bond is double or aromatic;
+> read from coordinates alone a ligand comes back entirely single-bonded, its
+> benzene rings as cyclohexanes and its carbonyls as alcohols. A PDBx/mmCIF entry
+> from the PDB carries the table that says, and it is applied on load —
+> `ligand.metadata["bond_orders_from_file"]` reports whether it was there. A file
+> written without one (many conversion tools omit it) yields the flat molecule,
+> and the bond orders should be supplied another way, e.g.
+> `AllChem.AssignBondOrdersFromTemplate(Chem.MolFromSmiles(reference), mol)`.
+
+More than one ligand residue gives `ligand`, `ligand_2`, `ligand_3`, …; a whole
+entry usually holds buffer and cryoprotectant molecules alongside the one of
+interest, so pass `ligand_resname="VWW"` or `ligand_chain=` to pick it out.
+
+```python
 
 # Arbitrary molecule combinations
 cx = MolecularComplex(molecules={

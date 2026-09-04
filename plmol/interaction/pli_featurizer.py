@@ -21,7 +21,10 @@ from rdkit.Chem import AllChem
 from ..rdkit_utils import has_3d
 
 from ..constants import (
+    AMINO_ACID_3TO1,
     BACKBONE_ATOM_SET,
+    METAL_ELEMENTS,
+    NUCLEIC_ACID_RESIDUES,
     PHARMACOPHORE_SMARTS,
     PHARMACOPHORE_IDX,
     NUM_PHARMACOPHORE_TYPES,
@@ -78,14 +81,33 @@ class Interaction:
 _SOLVENT_RESIDUES = frozenset({"HOH", "WAT", "DOD", "SOL"})
 
 
-def _without_solvent(mol: "Chem.Mol") -> "Chem.Mol":
-    """*mol* with its crystallographic waters removed.
+def _is_protein_side(residue_name: str, element: str) -> bool:
+    """Whether a residue belongs on the protein side of the interaction.
 
-    ``Chem.MolFromPDBFile`` keeps them, so a protein read straight from a PDB
-    arrives here with its solvent shell attached -- 169 waters on the 3260-atom
-    example, 11 of them within 4.5 A of the ligand. They inflate every index
-    this class reports and they are counted as protein neighbours by the
-    cross-contact density, which moved on 16 of 33 ligand atoms.
+    Amino acids, nucleotides and metal ions do; water, buffer and the ligand
+    itself do not.
+    """
+    name = residue_name.strip().upper()
+    if name in _SOLVENT_RESIDUES:
+        return False
+    if name in AMINO_ACID_3TO1 or name in NUCLEIC_ACID_RESIDUES:
+        return True
+    return element.strip().upper() in METAL_ELEMENTS
+
+
+def _without_solvent(mol: "Chem.Mol") -> "Chem.Mol":
+    """*mol* with everything that is not the protein removed.
+
+    ``Chem.MolFromPDBFile`` keeps every record, so a protein read straight from
+    a structure file arrives here with its solvent shell attached -- 169 waters
+    on the 3260-atom example, 11 of them within 4.5 A of the ligand -- and,
+    when the file is a whole entry rather than a stripped protein, with the
+    ligands too. Reading 10GS as mmCIF put both copies of the ligand and a
+    molecule of buffer inside the protein: the ligand was measured against a
+    copy of itself and the contacts went from 53 to 233.
+
+    Metals stay. They are part of the site, and metal coordination is one of
+    the interactions this class detects.
     """
     if mol is None:
         return mol
@@ -93,7 +115,7 @@ def _without_solvent(mol: "Chem.Mol") -> "Chem.Mol":
         atom.GetIdx()
         for atom in mol.GetAtoms()
         if (info := atom.GetPDBResidueInfo()) is not None
-        and info.GetResidueName().strip().upper() in _SOLVENT_RESIDUES
+        and not _is_protein_side(info.GetResidueName(), atom.GetSymbol())
     ]
     if not waters:
         return mol

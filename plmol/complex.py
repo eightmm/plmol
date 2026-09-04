@@ -19,6 +19,7 @@ from .interaction import (
 )
 from .io import load_ligand_input, load_protein_input
 from .ligand.core import Ligand
+from .rdkit_utils import apply_component_bond_orders
 from .protein.core import Protein
 from .specs import FEATURE_SPECS, is_all_mode, normalize_modes, normalize_requests
 
@@ -203,6 +204,11 @@ class MolecularComplex(TempFileOwner):
                     if r["chain_id"] == ligand_chain
                 ]
             atom_data = parser.get_atom_data()
+            # An HETATM block says which atoms are where, not which bonds are
+            # double or aromatic; read from coordinates alone a ligand comes
+            # back entirely single-bonded. A PDBx/mmCIF entry carries the table
+            # that says, so the ligand is corrected with the file's own answer.
+            component_bonds = parser.get_component_bonds()
             loaded_ligands = []
             for ligand_info in ligand_residues:
                 pdb_block = cls._ligand_pdb_block_from_atom_data(atom_data, ligand_info)
@@ -223,9 +229,13 @@ class MolecularComplex(TempFileOwner):
                     )
                 if mol is None or mol.GetNumAtoms() == 0:
                     continue
+                table = component_bonds.get(ligand_info["res_name"], {})
+                if table:
+                    mol = apply_component_bond_orders(mol, table)
                 ligand = Ligand(mol)
                 ligand.metadata["source"] = path
                 ligand.metadata["mmcif_ligand"] = ligand_info
+                ligand.metadata["bond_orders_from_file"] = bool(table)
                 loaded_ligands.append(ligand)
 
             for idx, ligand in enumerate(loaded_ligands):
