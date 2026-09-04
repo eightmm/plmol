@@ -42,7 +42,7 @@ from ..constants import (
     DEGREE_SCALE,
     NUM_HS_SCALE,
 )
-from ..rdkit_utils import has_3d, get_positions
+from ..rdkit_utils import has_3d, get_positions, substructure_matches
 from ..errors import InputError
 
 _BACKBONE_ATOM_NAMES = BACKBONE_ATOM_SET  # the shared set, not a second copy
@@ -318,7 +318,7 @@ class PLInteractionFeaturizer:
         matched = set()
         if pattern_name in self._patterns:
             pattern = self._patterns[pattern_name]
-            for match in mol.GetSubstructMatches(pattern):
+            for match in substructure_matches(mol, pattern):
                 for full_idx in match:
                     if full_idx in full_to_heavy:  # Only heavy atoms
                         matched.add(full_to_heavy[full_idx])

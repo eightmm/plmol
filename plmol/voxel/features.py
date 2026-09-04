@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 from rdkit import Chem
 from rdkit.Chem import AllChem, Crippen, Lipinski
 
+from ..rdkit_utils import substructure_matches
+
 from ..errors import InputError
 
 from ..constants import (
@@ -241,11 +243,11 @@ def compute_ligand_channels(
         features[i, 8] = logp
 
     # 9: HBD
-    for match in mol.GetSubstructMatches(Lipinski.HDonorSmarts):
+    for match in substructure_matches(mol, Lipinski.HDonorSmarts):
         features[match[0], 9] = 1.0
 
     # 10: HBA
-    for match in mol.GetSubstructMatches(Lipinski.HAcceptorSmarts):
+    for match in substructure_matches(mol, Lipinski.HAcceptorSmarts):
         features[match[0], 10] = 1.0
 
     # 11: Aromaticity
@@ -257,14 +259,14 @@ def compute_ligand_channels(
     pos_smarts = Chem.MolFromSmarts(
         "[+1,+2,$([NH2]-C(=N)N),$([NH]=C(N)N),$([nH]1ccnc1)]"
     )
-    for match in mol.GetSubstructMatches(pos_smarts):
+    for match in substructure_matches(mol, pos_smarts):
         features[match[0], 12] = 1.0
 
     # 13: Negative ionizable
     neg_smarts = Chem.MolFromSmarts(
         "[-1,-2,$([CX3](=O)[OH]),$([CX3](=O)[O-]),$([SX4](=O)(=O)[OH])]"
     )
-    for match in mol.GetSubstructMatches(neg_smarts):
+    for match in substructure_matches(mol, neg_smarts):
         features[match[0], 13] = 1.0
 
     # 14: Hybridization (normalized: sp=0.33, sp2=0.67, sp3=1.0)

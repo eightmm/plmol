@@ -9,6 +9,8 @@ import numpy as np
 from rdkit import Chem
 from rdkit.Chem import AllChem, Crippen, Lipinski
 
+from ..rdkit_utils import substructure_matches
+
 from ..constants import (
     AROMATIC_RING_ATOMS,
     ATOMIC_MOLAR_REFRACTIVITY,
@@ -129,11 +131,11 @@ def compute_chemical_features(
         mr_contribs = np.array([c[1] for c in contribs], dtype=np.float32)
 
         hbd_atoms = np.zeros(mol.GetNumAtoms(), dtype=np.float32)
-        for match in mol.GetSubstructMatches(Lipinski.HDonorSmarts):
+        for match in substructure_matches(mol, Lipinski.HDonorSmarts):
             hbd_atoms[match[0]] = 1.0
 
         hba_atoms = np.zeros(mol.GetNumAtoms(), dtype=np.float32)
-        for match in mol.GetSubstructMatches(Lipinski.HAcceptorSmarts):
+        for match in substructure_matches(mol, Lipinski.HAcceptorSmarts):
             hba_atoms[match[0]] = 1.0
 
         aromaticity_atoms = np.array(
@@ -143,12 +145,12 @@ def compute_chemical_features(
 
         pos_smarts = Chem.MolFromSmarts("[+1,+2,$([NH2]-C(=N)N),$([NH]=C(N)N),$([nH]1ccnc1)]")
         pos_atoms = np.zeros(mol.GetNumAtoms(), dtype=np.float32)
-        for match in mol.GetSubstructMatches(pos_smarts):
+        for match in substructure_matches(mol, pos_smarts):
             pos_atoms[match[0]] = 1.0
 
         neg_smarts = Chem.MolFromSmarts("[-1,-2,$([CX3](=O)[OH]),$([CX3](=O)[O-]),$([SX4](=O)(=O)[OH])]")
         neg_atoms = np.zeros(mol.GetNumAtoms(), dtype=np.float32)
-        for match in mol.GetSubstructMatches(neg_smarts):
+        for match in substructure_matches(mol, neg_smarts):
             neg_atoms[match[0]] = 1.0
     else:
         logp_contribs = np.zeros(mol.GetNumAtoms(), dtype=np.float32)

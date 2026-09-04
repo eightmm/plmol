@@ -32,6 +32,7 @@ from ..rdkit_utils import (
     prepare_mol,
     ensure_3d_conformer,
     has_3d,
+    substructure_matches,
 )
 
 # Compiled once; SMARTS parsing is not free at descriptor-call rates.
@@ -427,7 +428,7 @@ class MoleculeFeaturizer:
         features['brenk_alert_count'] = min(len(brenk_cat.GetMatches(mol)) / 5.0, 1.0)
 
         # --- Structural complexity (4) ---
-        n_amides = len(mol.GetSubstructMatches(_AMIDE_PATTERN)) if _AMIDE_PATTERN else 0
+        n_amides = len(substructure_matches(mol, _AMIDE_PATTERN)) if _AMIDE_PATTERN else 0
         features['num_amide_bonds'] = min(n_amides / 10.0, 1.0)
         features['num_stereocenters'] = min(
             rdMolDescriptors.CalcNumAtomStereoCenters(mol) / 10.0, 1.0
@@ -528,7 +529,7 @@ class MoleculeFeaturizer:
                     continue
 
                 # Find matches
-                matches = mol.GetSubstructMatches(smart_mol)
+                matches = substructure_matches(mol, smart_mol)
 
                 # Mark matched atoms
                 for match in matches:

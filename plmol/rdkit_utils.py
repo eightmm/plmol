@@ -116,3 +116,29 @@ def get_positions(mol: Chem.Mol) -> np.ndarray:
         raise ValueError("Molecule has no conformer")
     conf = mol.GetConformer(0)
     return np.asarray(conf.GetPositions(), dtype=np.float64).reshape(-1, 3)
+
+
+#: RDKit stops at 1000 matches and 1000 recursive sub-matches unless told
+#: otherwise, and returns what it found without a word. On a whole protein that
+#: silently truncates: the hydrophobic pharmacophore matches 1594 atoms in the
+#: example structure and the default hands back 1000 of them, whichever 1000
+#: come first in the file. Reversing the two chains of that structure changed
+#: the detected protein-ligand interactions from 53 to 45.
+#:
+#: The recursive limit matters on its own. Patterns here exclude with
+#: ``!$(...)``, and an exclusion that runs out of budget stops excluding: the
+#: h_acceptor pattern accepted two atoms it should not, and the positive one
+#: rejected seventeen it should have kept.
+_MATCH_PARAMS = Chem.SubstructMatchParameters()
+_MATCH_PARAMS.maxMatches = 10 ** 8
+_MATCH_PARAMS.maxRecursiveMatches = 10 ** 8
+_MATCH_PARAMS.uniquify = True
+
+
+def substructure_matches(mol: Chem.Mol, pattern: Chem.Mol) -> tuple:
+    """Every match of ``pattern`` in ``mol``, with no silent cap.
+
+    Use this rather than ``mol.GetSubstructMatches(pattern)`` anywhere the
+    molecule can be larger than a small ligand.
+    """
+    return mol.GetSubstructMatches(pattern, _MATCH_PARAMS)

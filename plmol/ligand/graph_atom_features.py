@@ -24,7 +24,7 @@ from ..constants import (
     DEFAULT_POLARIZABILITY, DEFAULT_VALENCE_ELECTRONS, DEFAULT_ELECTRONEGATIVITY,
     NORM_CONSTANTS,
 )
-from ..rdkit_utils import ensure_3d_conformer, has_3d
+from ..rdkit_utils import ensure_3d_conformer, has_3d, substructure_matches
 
 logger = logging.getLogger(__name__)
 
@@ -618,7 +618,7 @@ class AtomFeatureMixin:
         for i, (name, pattern) in enumerate(self._smarts_patterns.items()):
             if pattern is None:
                 continue
-            matches = mol.GetSubstructMatches(pattern)
+            matches = substructure_matches(mol, pattern)
             if matches:
                 matched_atoms = set(sum(matches, ()))
                 for atom_idx in matched_atoms:

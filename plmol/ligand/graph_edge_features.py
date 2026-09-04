@@ -17,6 +17,7 @@ from ..constants import (
     NORM_CONSTANTS,
 )
 from ..arrays import FLOAT, INT, pairwise_distances
+from ..rdkit_utils import substructure_matches
 
 
 #: Width of the bond block at the front of the dense adjacency.
@@ -88,7 +89,7 @@ class EdgeFeatureMixin:
         # Precompute rotatable bonds
         rotatable_bonds = set()
         if self._rotatable_pattern:
-            matches = mol.GetSubstructMatches(self._rotatable_pattern)
+            matches = substructure_matches(mol, self._rotatable_pattern)
             for match in matches:
                 if len(match) >= 2:
                     pair = tuple(sorted((match[0], match[1])))

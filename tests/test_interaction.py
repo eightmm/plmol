@@ -302,3 +302,71 @@ class TestWhatDistanceCutoffActuallyBounds:
         assert ranges["hydrogen_bond"] == 3.5
         assert ranges["cation_pi"] == 6.0
         assert len(set(ranges.values())) > 1, "one range for all types would make the parameter honest"
+
+
+class TestSubstructureMatchesAreNotCapped:
+    """RDKit stops at 1000 matches by default and says nothing."""
+
+    def test_the_helper_finds_what_the_default_truncates(self, example_pdb):
+        from plmol.constants import PHARMACOPHORE_SMARTS
+        from plmol.rdkit_utils import substructure_matches
+
+        mol = Chem.MolFromPDBFile(example_pdb, removeHs=False)
+        pattern = Chem.MolFromSmarts(PHARMACOPHORE_SMARTS["hydrophobic"])
+
+        capped = mol.GetSubstructMatches(pattern)
+        uncapped = substructure_matches(mol, pattern)
+        assert len(capped) == 1000, "the default cap is what this guards against"
+        assert len(uncapped) > 1000
+        assert set(capped).issubset(set(uncapped))
+
+    def test_the_recursive_cap_too(self, example_pdb):
+        # An exclusion written !$(...) stops excluding once it runs out of
+        # recursion budget, so the default both admits and drops atoms.
+        from plmol.constants import PHARMACOPHORE_SMARTS
+        from plmol.rdkit_utils import substructure_matches
+
+        mol = Chem.MolFromPDBFile(example_pdb, removeHs=False)
+        pattern = Chem.MolFromSmarts(PHARMACOPHORE_SMARTS["positive"])
+        assert len(mol.GetSubstructMatches(pattern)) < len(substructure_matches(mol, pattern))
+
+
+class TestInteractionsDoNotDependOnFileOrder:
+    """The same complex, written with its chains the other way round."""
+
+    @staticmethod
+    def _chains_reversed(source: str, target) -> str:
+        head, body, tail, seen = [], [], [], False
+        for line in open(source):
+            line = line.rstrip("\n")
+            if line.startswith(("ATOM  ", "HETATM")):
+                body.append(line)
+                seen = True
+            elif seen:
+                tail.append(line)
+            else:
+                head.append(line)
+        by_chain: dict = {}
+        for line in body:
+            by_chain.setdefault(line[21], []).append(line)
+        out = [l for chain in reversed(list(by_chain)) for l in by_chain[chain]]
+        renumbered = [l[:6] + f"{i + 1:5d}" + l[11:] for i, l in enumerate(out)]
+        target.write_text("\n".join(head + renumbered + tail) + "\nEND\n")
+        return str(target)
+
+    def test_the_same_interactions_are_found(self, example_pdb, example_sdf, tmp_path):
+        from plmol import Ligand, Protein
+        from plmol.complex import MolecularComplex
+        from plmol.parsers.pdb_parser import PDBParser
+
+        reordered = self._chains_reversed(example_pdb, tmp_path / "b_first.pdb")
+
+        def counts(path):
+            PDBParser.clear_cache()
+            complex_ = MolecularComplex(molecules={
+                "protein": Protein.from_pdb(path),
+                "ligand": Ligand.from_sdf(example_sdf),
+            })
+            return complex_.featurize(requests=["interaction"])["interaction"]["interaction_counts"]
+
+        assert counts(example_pdb) == counts(reordered)

@@ -7,6 +7,7 @@ from rdkit import Chem
 from rdkit.Chem import BRICS
 
 from ..constants import ROTATABLE_BOND_SMARTS
+from ..rdkit_utils import substructure_matches
 from .descriptors import MoleculeFeaturizer
 
 _ROTATABLE_PATTERN = Chem.MolFromSmarts(ROTATABLE_BOND_SMARTS)
@@ -31,7 +32,7 @@ def fragment_on_rotatable_bonds(
         Dict with keys: fragment_smiles, atom_to_fragment, fragment_adjacency,
         cleaved_bond_atoms, num_fragments, num_rotatable_bonds.
     """
-    matches = mol.GetSubstructMatches(_ROTATABLE_PATTERN)
+    matches = substructure_matches(mol, _ROTATABLE_PATTERN)
     bond_atom_pairs: List[Tuple[int, int]] = []
     for a, b in matches:
         bond_atom_pairs.append((a, b))
