@@ -171,10 +171,20 @@ def detect_cavities(
     if not cavity_mask.any():
         return []
 
-    labels, count = _connected_components(cavity_mask)
+    cells, labels, count = _connected_components(cavity_mask)
+    # Grouped by label in one pass. Reading a component out with
+    # `labels == label` swept the whole grid once per component, and a protein
+    # has a hundred-odd of them, nearly all too small to survive min_points --
+    # a hundred sweeps of a million cells to find a few thousand.
+    #
+    # The sort must be stable. Within a component the points then keep the C
+    # order the cells were found in, which is the order the centre, the extent
+    # and the reported point cloud were all built from.
+    order = np.argsort(labels, kind="stable")
+    bounds = np.searchsorted(labels[order], np.arange(count + 1))
     cavities = []
     for label in range(count):
-        indices = np.argwhere(labels == label + 1)
+        indices = cells[order[bounds[label]:bounds[label + 1]]]
         if len(indices) < min_points:
             continue
         points = origin + indices.astype(FLOAT) * resolution
@@ -274,7 +284,12 @@ def _shift(grid: np.ndarray, offset: np.ndarray) -> np.ndarray:
 
 
 def _connected_components(mask: np.ndarray):
-    """Label 26-connected groups of True cells, 1-based; 0 is background.
+    """Label 26-connected groups of True cells.
+
+    Returns the True cells in C order, a 0-based component label for each of
+    them, and the number of components. Cells rather than a labelled grid:
+    what the caller wants is each component's cells, and a grid would have to
+    be searched to get them back.
 
     Union-find over the True cells only. A flood fill on the full grid would
     touch far more cells than a cavity ever occupies, and the labelling in
@@ -282,7 +297,7 @@ def _connected_components(mask: np.ndarray):
     """
     cells = np.argwhere(mask)
     if len(cells) == 0:
-        return np.zeros(mask.shape, dtype=INT), 0
+        return cells, np.zeros(0, dtype=INT), 0
 
     dims = np.array(mask.shape, dtype=INT)
     flat = (cells[:, 0] * dims[1] + cells[:, 1]) * dims[2] + cells[:, 2]
@@ -311,9 +326,8 @@ def _connected_components(mask: np.ndarray):
 
     roots = np.array([find(i) for i in range(len(cells))], dtype=INT)
     _, labels = np.unique(roots, return_inverse=True)
-    out = np.zeros(mask.shape, dtype=INT)
-    out[cells[:, 0], cells[:, 1], cells[:, 2]] = labels + 1
-    return out, int(labels.max()) + 1
+    labels = labels.reshape(-1).astype(INT)
+    return cells, labels, int(labels.max()) + 1
 
 
 def _describe(points, indices, enclosed, coords, reach,

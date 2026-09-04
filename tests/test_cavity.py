@@ -12,7 +12,12 @@ import numpy as np
 import pytest
 
 from plmol import InputError
-from plmol.cavity import Cavity, detect_cavities, element_vdw_radii
+from plmol.cavity import (
+    Cavity,
+    _connected_components,
+    detect_cavities,
+    element_vdw_radii,
+)
 from plmol.surface.point_cloud import _fibonacci_sphere
 
 PROBE = 1.4
@@ -158,6 +163,53 @@ class TestOnARealStructure:
         radii = element_vdw_radii([atom.element for atom in atoms])
         volumes = [cavity.volume for cavity in detect_cavities(coords, radii)]
         assert volumes == sorted(volumes, reverse=True)
+
+
+class TestComponents:
+    """The grouping detect_cavities does over _connected_components' output.
+
+    Components are read out by sorting the cells by label rather than by
+    sweeping the grid once per label. The two must agree exactly, points and
+    their order both, because the order decides the reported point cloud.
+    """
+
+    @staticmethod
+    def scattered_mask() -> np.ndarray:
+        """A grid with several separated blobs of different sizes."""
+        mask = np.zeros((14, 15, 16), dtype=bool)
+        mask[1:5, 1:4, 1:3] = True          # a slab
+        mask[8, 9, 9] = True                # a single cell
+        mask[10:13, 2:5, 11:15] = True      # a box
+        mask[6, 6, 6] = mask[7, 7, 7] = True  # two cells, diagonally adjacent
+        return mask
+
+    def test_grouping_matches_a_per_label_sweep(self):
+        mask = self.scattered_mask()
+        cells, labels, count = _connected_components(mask)
+
+        grid = np.zeros(mask.shape, dtype=labels.dtype)
+        grid[cells[:, 0], cells[:, 1], cells[:, 2]] = labels + 1
+
+        order = np.argsort(labels, kind="stable")
+        bounds = np.searchsorted(labels[order], np.arange(count + 1))
+        assert count == 4
+        for label in range(count):
+            grouped = cells[order[bounds[label]:bounds[label + 1]]]
+            assert np.array_equal(grouped, np.argwhere(grid == label + 1))
+
+    def test_every_true_cell_lands_in_exactly_one_component(self):
+        mask = self.scattered_mask()
+        cells, labels, count = _connected_components(mask)
+        assert len(cells) == int(mask.sum())
+        assert np.array_equal(cells, np.argwhere(mask))
+        assert set(labels.tolist()) == set(range(count))
+        # The blobs as built: 4x3x2, 3x3x4, the diagonal pair, the lone cell.
+        assert sorted(np.bincount(labels, minlength=count).tolist()) == [1, 2, 24, 36]
+
+    def test_an_empty_mask_has_no_components(self):
+        cells, labels, count = _connected_components(np.zeros((4, 4, 4), dtype=bool))
+        assert count == 0
+        assert len(cells) == 0 and len(labels) == 0
 
 
 class TestContract:
