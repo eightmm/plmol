@@ -631,6 +631,94 @@ class TestTheProteinSideExcludesTheLigand:
         # The metal stays: coordination is one of the interactions detected.
         assert kept == {"GLY", "ZN"}
 
+    @staticmethod
+    def crowded_block() -> str:
+        """A glycine with waters either side of it, so removal has to skip
+        about rather than trim one end."""
+        lines = []
+        serial = 0
+        for residue in range(1, 5):
+            for water in range(2):
+                serial += 1
+                lines.append(
+                    f"HETATM{serial:5d}  O   HOH A{200 + serial:4d}    "
+                    f"{water * 3.0:8.3f}{residue * 9.0:8.3f}{0.0:8.3f}"
+                    "  1.00 20.00           O"
+                )
+            for name, element, offset in (("N", "N", 0.0), ("CA", "C", 1.45)):
+                serial += 1
+                lines.append(
+                    f"ATOM  {serial:5d}  {name:<3s} GLY A{residue:4d}    "
+                    f"{offset:8.3f}{residue * 9.0:8.3f}{4.0:8.3f}"
+                    "  1.00 20.00           {0:>2s}".format(element)
+                )
+        return "\n".join(lines) + "\nEND"
+
+    @staticmethod
+    def surviving_atoms(mol) -> list:
+        return [
+            (
+                atom.GetPDBResidueInfo().GetResidueName().strip(),
+                atom.GetPDBResidueInfo().GetResidueNumber(),
+                atom.GetPDBResidueInfo().GetName().strip(),
+            )
+            for atom in mol.GetAtoms()
+        ]
+
+    def test_the_atoms_that_stay_keep_their_order(self):
+        """The removal is batched where RDKit supports it. What the batch must
+        preserve is which atoms survive and the order they are in, because
+        every downstream index is a position in this list."""
+        from rdkit import Chem
+        from plmol.interaction.pli_featurizer import _without_solvent
+
+        mol = Chem.MolFromPDBBlock(
+            self.crowded_block(), removeHs=False, sanitize=False,
+            proximityBonding=False,
+        )
+        before = self.surviving_atoms(mol)
+        kept = self.surviving_atoms(_without_solvent(mol))
+        assert kept == [atom for atom in before if atom[0] != "HOH"]
+        assert len(kept) == 8
+
+    def test_the_removal_agrees_with_rdkits_older_one_at_a_time_route(
+        self, monkeypatch
+    ):
+        """BeginBatchEdit arrived in RDKit 2021.03 and the package accepts
+        2020.09, so the loop it replaces is still live code for those."""
+        import types
+
+        from rdkit import Chem
+        from plmol.interaction import pli_featurizer
+        from plmol.interaction.pli_featurizer import _without_solvent
+
+        class WithoutBatchEdit:
+            """An RWMol that does not admit to having BeginBatchEdit."""
+
+            def __init__(self, mol):
+                self._editable = Chem.RWMol(mol)
+
+            def __getattr__(self, name):
+                if name == "BeginBatchEdit":
+                    raise AttributeError(name)
+                return getattr(self._editable, name)
+
+        mol = Chem.MolFromPDBBlock(
+            self.crowded_block(), removeHs=False, sanitize=False,
+            proximityBonding=False,
+        )
+        batched = self.surviving_atoms(_without_solvent(mol))
+
+        # _without_solvent reads Chem out of its own module globals, so this
+        # reaches it.
+        monkeypatch.setattr(
+            pli_featurizer, "Chem",
+            types.SimpleNamespace(RWMol=WithoutBatchEdit, Mol=Chem.Mol),
+        )
+        one_at_a_time = self.surviving_atoms(_without_solvent(mol))
+        assert one_at_a_time == batched
+        assert len(one_at_a_time) == 8
+
 
 class TestALenientReadForAnAwkwardStructure:
     """MolFromPDBFile refuses a whole file over one bond it should not have made."""
