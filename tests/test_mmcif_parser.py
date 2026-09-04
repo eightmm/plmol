@@ -413,3 +413,60 @@ def test_dependency_error_without_gemmi(monkeypatch):
     with pytest.raises(Exception):  # DependencyError subclasses PlmolError
         MMCIFParser.__new__(MMCIFParser)
         mod._require_gemmi()
+
+
+gemmi = pytest.importorskip("gemmi", reason="mmCIF support needs the gemmi extra")
+
+
+class TestMmcifAndPdbAgree:
+    """The same structure, read either way, must featurize to the same numbers."""
+
+    @staticmethod
+    def _as_mmcif(pdb_path: str, target) -> str:
+        structure = gemmi.read_structure(pdb_path)
+        structure.setup_entities()
+        structure.make_mmcif_document().write_file(str(target))
+        return str(target)
+
+    @pytest.mark.parametrize("standardize", [True, False])
+    @pytest.mark.parametrize("mode", ["sequence", "graph", "atom_graph", "backbone"])
+    def test_every_mode_matches(self, example_pdb, tmp_path, mode, standardize):
+        from plmol import Protein
+        from plmol.parsers.pdb_parser import PDBParser
+
+        cif = self._as_mmcif(example_pdb, tmp_path / "converted.cif")
+        PDBParser.clear_cache()
+        from_pdb = Protein.from_pdb(example_pdb, standardize=standardize).featurize(mode=mode)[mode]
+        from_cif = Protein.from_structure(cif, standardize=standardize).featurize(mode=mode)[mode]
+
+        if isinstance(from_pdb, (str, dict)) and not isinstance(from_pdb, dict):
+            assert from_pdb == from_cif
+            return
+        if all(isinstance(v, str) for v in from_pdb.values()):
+            assert from_pdb == from_cif
+            return
+        for key, left in from_pdb.items():
+            right = from_cif[key]
+            pairs = list(zip(left, right)) if isinstance(left, tuple) else [(left, right)]
+            for index, (a, b) in enumerate(pairs):
+                if isinstance(a, (list, dict, str)):
+                    # Ragged groupings such as residue_atom_indices, and the
+                    # metadata dict: compare them as they are.
+                    assert a == b, f"{key}[{index}]"
+                    continue
+                a, b = np.asarray(a), np.asarray(b)
+                if a.dtype.kind in "OU" or a.ndim == 0:
+                    continue
+                assert a.shape == b.shape, f"{key}[{index}]"
+                assert np.allclose(a, b, atol=1e-5, equal_nan=True), f"{key}[{index}]"
+
+
+class TestFromPdbRejectsMmcif:
+    def test_it_names_the_reader_to_use(self, example_pdb, tmp_path):
+        from plmol import Protein
+        from plmol.errors import InputError
+
+        cif = TestMmcifAndPdbAgree._as_mmcif(example_pdb, tmp_path / "wrong_reader.cif")
+        with pytest.raises(InputError) as caught:
+            Protein.from_pdb(cif)
+        assert "from_mmcif" in str(caught.value)

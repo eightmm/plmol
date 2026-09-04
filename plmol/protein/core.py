@@ -57,6 +57,14 @@ class Protein(BaseMolecule):
         keep_hydrogens: bool = False,
     ) -> "Protein":
         """Load protein from a PDB file."""
+        if str(path).lower().endswith(('.cif', '.mmcif')):
+            # The PDB reader would take the file as fixed-column text, log a
+            # line of "malformed" warnings per atom, and find no protein.
+            raise InputError(
+                f"{path} is an mmCIF file, not a PDB one. Use "
+                "Protein.from_mmcif(path), or Protein.from_structure(path), "
+                "which picks the reader from the extension."
+            )
         obj = cls(
             pdb_path=path,
             standardize=standardize,
