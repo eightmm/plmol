@@ -90,9 +90,13 @@ class ProteinFeaturizer:
 
             standardizer = PDBStandardizer(remove_hydrogens=not keep_hydrogens)
             standardizer.standardize(pdb_file, self.tmp_pdb)
+            # The standardized file is renumbered from 1 per chain, so this is
+            # the only place the input's own labels survive.
+            self._standardized_labels = standardizer.residue_labels
             pdb_to_process = self.tmp_pdb
         else:
             self.tmp_pdb = None
+            self._standardized_labels = None
             pdb_to_process = pdb_file
 
         # Parse PDB once
@@ -102,6 +106,19 @@ class ProteinFeaturizer:
         # Cache for computed features
         self._cache = {}
         self._atom_featurizer_cache: Dict[str, Any] = {}
+
+    def residue_labels(self) -> "list[tuple[str, int, str]]":
+        """(chain, residue number, insertion code) as the input file wrote them.
+
+        One entry per row of the residue graph, in the same order, so a feature
+        can be traced back to the residue it describes. With standardize=True
+        the parsed structure is renumbered from 1 per chain and this is the
+        only record of the original labels; with standardize=False it is the
+        parsed keys themselves.
+        """
+        if self._standardized_labels is not None:
+            return list(self._standardized_labels)
+        return [(key[0], key[1], key[3]) for key in self.residues]
 
     def _parse_structure(self):
         """Parse structure and cache basic data."""

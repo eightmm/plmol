@@ -179,3 +179,68 @@ class TestAtomGraphMode:
         from plmol.specs import PROTEIN_SPEC
 
         assert "atom_graph" in PROTEIN_SPEC.allowed_modes
+
+
+class TestResidueLabels:
+    """Standardisation renumbers from 1; the file's own labels stay reachable."""
+
+    @staticmethod
+    def _tryptophans(path, numbering):
+        names = ["N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "NE1",
+                 "CE2", "CE3", "CZ2", "CZ3", "CH2"]
+        lines = []
+        for step, (number, icode) in enumerate(numbering):
+            for i, name in enumerate(names):
+                lines.append(
+                    f"ATOM      1 {name:^4s} TRP A{number:4d}{icode:1s}   "
+                    f"{i * 0.4:8.3f}{step * 3.0:8.3f}{0.0:8.3f}  1.00 20.00           {name[0]}"
+                )
+        path.write_text("\n".join(l[:6] + f"{i + 1:5d}" + l[11:]
+                                 for i, l in enumerate(lines)) + "\nEND\n")
+        return str(path)
+
+    def test_the_example_keeps_its_own_numbering(self, example_pdb):
+        from plmol import Protein
+        from plmol.parsers.pdb_parser import PDBParser
+
+        PDBParser.clear_cache()
+        labels = Protein.from_pdb(example_pdb).residue_labels()
+        # The file numbers both chains 2..209; standardising renumbers 1..208.
+        assert labels[0] == ("A", 2, "")
+        assert labels[-1] == ("B", 209, "")
+        assert len(labels) == 416
+
+    def test_both_standardize_settings_agree(self, example_pdb):
+        from plmol import Protein
+        from plmol.parsers.pdb_parser import PDBParser
+
+        PDBParser.clear_cache()
+        standardized = Protein.from_pdb(example_pdb, standardize=True).residue_labels()
+        raw = Protein.from_pdb(example_pdb, standardize=False).residue_labels()
+        assert standardized == raw
+
+    def test_insertion_codes_survive_renumbering(self, tmp_path):
+        from plmol import Protein
+        from plmol.parsers.pdb_parser import PDBParser
+
+        PDBParser.clear_cache()
+        path = self._tryptophans(tmp_path / "icodes.pdb",
+                                 [(99, " "), (100, " "), (100, "A"), (100, "B"), (101, " ")])
+        protein = Protein.from_pdb(path, standardize=True)
+        graph = protein.featurize(mode="atom_graph")["atom_graph"]
+
+        # The standardized structure counts 1..5 and carries no insertion code.
+        assert sorted(set(np.asarray(graph["residue_number"]).tolist())) == [1, 2, 3, 4, 5]
+        assert protein.residue_labels() == [
+            ("A", 99, ""), ("A", 100, ""), ("A", 100, "A"),
+            ("A", 100, "B"), ("A", 101, ""),
+        ]
+
+    def test_one_label_per_graph_row(self, example_pdb):
+        from plmol import Protein
+        from plmol.parsers.pdb_parser import PDBParser
+
+        PDBParser.clear_cache()
+        protein = Protein.from_pdb(example_pdb)
+        graph = protein.featurize(mode="graph")["graph"]
+        assert len(protein.residue_labels()) == np.asarray(graph["coords"]).shape[0]

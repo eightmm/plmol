@@ -16,6 +16,7 @@ from ..parsers.pdb_parser import (
     format_pdb_line,
     is_hydrogen,
     parse_pdb_line,
+    residue_label_parts,
 )
 from ..constants import (
     STANDARD_ATOMS,
@@ -83,6 +84,9 @@ class PDBStandardizer:
                                    compatibility.
         """
         self.remove_hydrogens = remove_hydrogens
+        #: (chain, number, insertion code) as the input file wrote them, in the
+        #: order the output renumbers them. Populated by standardize().
+        self.residue_labels: List[Tuple[str, int, str]] = []
         self.ptm_handling = ptm_handling
         self.include_nucleic_acids = include_nucleic_acids
 
@@ -147,6 +151,8 @@ class PDBStandardizer:
         output_dir = os.path.dirname(output_pdb_path)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
+
+        self.residue_labels = []
 
         # Read and parse PDB file
         protein_residues, hetatm_residues = self._parse_pdb(input_pdb_path)
@@ -328,6 +334,16 @@ class PDBStandardizer:
             for residue_key in sorted_residues:
                 chain_id, res_num_str, res_name = residue_key
                 residue_atoms = protein_residues[residue_key]
+
+                # The output is renumbered from 1 per chain, which is what the
+                # written file needs but leaves a caller unable to say which
+                # residue of their own structure a feature row came from. The
+                # original label is kept here so ProteinFeaturizer can hand it
+                # back; see Protein.residue_labels().
+                original_number, original_icode = residue_label_parts(res_num_str)
+                self.residue_labels.append(
+                    (chain_id, original_number, original_icode)
+                )
 
                 # Template atoms first, in the residue's own order. The
                 # template is also the filter that converts a modified residue

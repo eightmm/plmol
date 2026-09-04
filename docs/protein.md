@@ -21,7 +21,17 @@ protein = Protein.from_structure("protein.cif", chain_id="A")
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `standardize` | `bool` | `True` | Standardize PDB (remove non-standard, fix naming) |
-| `keep_hydrogens` | `bool` | `False` | Keep hydrogen atoms |
+| `keep_hydrogens` | `bool` | `False` | Keep hydrogens in the standardized structure. The graphs, surface and voxel are heavy-atom-only regardless |
+| `sasa_points` | `int` | `100` | Shrake-Rupley sample points per atom, behind every SASA-derived column |
+
+> **Standardising renumbers the residues 1..N per chain, and drops insertion
+> codes.** `residue_number` in the feature dictionaries counts from 1, not from
+> whatever the file said, and a CDR numbered 100, 100A, 100B becomes 3, 4, 5.
+> `Protein.residue_labels()` gives back `(chain, number, insertion code)` as the
+> file wrote them, one entry per residue-graph row and reachable from the atom
+> graph through `atom_to_residue`. With `standardize=False` the parsed numbering
+> is the file's already, and `residue_labels()` returns the same thing either
+> way.
 
 ## SASA
 

@@ -206,6 +206,17 @@ class Protein(BaseMolecule):
             raise InputError("Protein has no sequence to embed.")
         return embed_sequence(sequence, model=model, device=device)
 
+    def residue_labels(self) -> "list[tuple[str, int, str]]":
+        """(chain, residue number, insertion code) as the PDB file wrote them.
+
+        One entry per row of the residue graph, in the same order, and reachable
+        from the atom graph through ``atom_to_residue``. Standardisation
+        renumbers the parsed structure from 1 per chain, so ``residue_number``
+        in the feature dictionaries counts from 1 rather than following the
+        file; this is how a row is traced back to the residue it came from.
+        """
+        return self._get_featurizer().residue_labels()
+
     def _get_featurizer(self) -> ProteinFeaturizer:
         if self._pdb_path is None:
             raise InputError("Protein has no PDB path. Initialize from PDB first.")
