@@ -63,7 +63,9 @@ class ProteinFeaturizer:
         Args:
             pdb_file: Path to PDB file
             standardize: Whether to standardize the PDB first
-            keep_hydrogens: Whether to keep hydrogens during standardization
+            keep_hydrogens: Whether the standardized structure keeps hydrogens. The graphs, the
+                surface and the voxel are heavy-atom-only whatever this says;
+                what it changes is the structure the standardizer writes.
         """
         self.input_file = pdb_file
         self.standardize = standardize

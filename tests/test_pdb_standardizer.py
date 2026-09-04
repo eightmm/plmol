@@ -284,3 +284,60 @@ class TestPdbLineRoundTrip:
             assert getattr(before, field) == getattr(after, field), field
         assert before.occupancy == after.occupancy
         assert before.b_factor == after.b_factor
+
+
+class TestHydrogensAreKeptWhenAsked:
+    """remove_hydrogens=False used to remove them anyway."""
+
+    STRUCTURE = (
+        "ATOM      1  N   LEU A   1       0.000   0.000   0.000  1.00 20.00           N\n"
+        "ATOM      2  CA  LEU A   1       1.450   0.000   0.000  1.00 20.00           C\n"
+        "ATOM      3  C   LEU A   1       2.400   1.000   0.000  1.00 20.00           C\n"
+        "ATOM      4  O   LEU A   1       2.400   2.200   0.000  1.00 20.00           O\n"
+        "ATOM      5  CB  LEU A   1       2.000  -1.200   0.000  1.00 20.00           C\n"
+        "ATOM      6 HD11 LEU A   1       4.900  -2.900   0.100  1.00 20.00           H\n"
+        "ATOM      7 1HB  LEU A   1       1.500  -2.000   0.500  1.00 20.00           H\n"
+        "END\n"
+    )
+
+    def _names(self, tmp_path, remove_hydrogens):
+        from plmol.protein.pdb_standardizer import PDBStandardizer
+
+        source = tmp_path / f"h_{remove_hydrogens}.pdb"
+        source.write_text(self.STRUCTURE)
+        target = tmp_path / f"h_{remove_hydrogens}_std.pdb"
+        PDBStandardizer(remove_hydrogens=remove_hydrogens).standardize(str(source), str(target))
+        return [l[12:16].strip() for l in open(target) if l.startswith("ATOM  ")]
+
+    def test_they_are_removed_by_default(self, tmp_path):
+        assert self._names(tmp_path, True) == ["N", "CA", "C", "O", "CB"]
+
+    def test_they_are_kept_when_not(self, tmp_path):
+        # Hydrogens are in no residue template, including the pre-2007 spelling
+        # 1HB, so the template-ordered write dropped them both.
+        names = self._names(tmp_path, False)
+        assert names[:5] == ["N", "CA", "C", "O", "CB"]
+        assert set(names[5:]) == {"HD11", "1HB"}
+
+    def test_a_modification_is_still_converted_to_its_parent(self, tmp_path):
+        # The template is also the filter that maps PTR onto TYR; keeping
+        # hydrogens must not start carrying the phosphate across with it.
+        from plmol.parsers.pdb_parser import parse_pdb_line
+        from plmol.protein.pdb_standardizer import PDBStandardizer
+
+        source = tmp_path / "ptr.pdb"
+        source.write_text(
+            "ATOM      1  N   PTR A   1       0.000   0.000   0.000  1.00 20.00           N\n"
+            "ATOM      2  CA  PTR A   1       1.450   0.000   0.000  1.00 20.00           C\n"
+            "ATOM      3  C   PTR A   1       2.400   1.000   0.000  1.00 20.00           C\n"
+            "ATOM      4  O   PTR A   1       2.400   2.200   0.000  1.00 20.00           O\n"
+            "ATOM      5  P   PTR A   1       8.000   8.000   8.000  1.00 20.00           P\n"
+            "ATOM      6  HA  PTR A   1       1.500  -1.000   0.000  1.00 20.00           H\n"
+            "END\n"
+        )
+        target = tmp_path / "ptr_std.pdb"
+        PDBStandardizer(remove_hydrogens=False).standardize(str(source), str(target))
+        atoms = [parse_pdb_line(l) for l in open(target) if l.startswith("ATOM  ")]
+        assert {a.res_name for a in atoms} == {"TYR"}
+        assert "P" not in {a.atom_name for a in atoms}
+        assert "HA" in {a.atom_name for a in atoms}

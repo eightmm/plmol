@@ -90,7 +90,9 @@ class Protein(BaseMolecule):
             path: Path to .cif or .mmcif file
             chain_id: If given, restrict to this chain (written to PDB tmp file)
             standardize: Whether to standardize the resulting PDB
-            keep_hydrogens: Whether to keep hydrogen atoms
+            keep_hydrogens: Whether the standardized structure keeps hydrogens. The graphs, the
+                surface and the voxel are heavy-atom-only whatever this says;
+                what it changes is the structure the standardizer writes.
         """
         from ..parsers.mmcif_parser import MMCIFParser
         import tempfile

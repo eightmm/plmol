@@ -61,7 +61,9 @@ class PDBStandardizer:
         Initialize the PDB standardizer.
 
         Args:
-            remove_hydrogens: Whether to remove hydrogen atoms from the PDB
+            remove_hydrogens: Whether to drop hydrogens. False keeps them:
+                they are in no residue template, and writing only template
+                atoms used to drop them whatever this said.
             ptm_handling: How to handle post-translational modifications (PTMs)
                 - 'base_aa': Convert PTMs to their base amino acids (default)
                              SEP→SER, PTR→TYR, MSE→MET, etc.
@@ -327,24 +329,32 @@ class PDBStandardizer:
                 chain_id, res_num_str, res_name = residue_key
                 residue_atoms = protein_residues[residue_key]
 
-                # Write atoms in standard order if possible
-                if res_name in self.standard_atoms:
-                    for standard_atom in self.standard_atoms[res_name]:
-                        if standard_atom in residue_atoms:
-                            line = self._format_atom_line(
-                                residue_atoms[standard_atom],
-                                atom_counter, res_counter, chain_id, res_name
-                            )
-                            lines.append(line)
-                            atom_counter += 1
+                # Template atoms first, in the residue's own order. The
+                # template is also the filter that converts a modified residue
+                # to its parent: a PTR written as TYR keeps TYR's atoms and
+                # drops the phosphate, which is what ptm_handling='base_aa'
+                # asks for.
+                #
+                # Hydrogens are the exception. They are in no template, so
+                # writing template atoms alone dropped every one of them and
+                # remove_hydrogens=False did nothing whatsoever.
+                template = self.standard_atoms.get(res_name)
+                if template is None:
+                    order = list(residue_atoms)
                 else:
-                    # Non-standard residue - write all atoms
-                    for atom_name, atom_line in residue_atoms.items():
-                        line = self._format_atom_line(
-                            atom_line, atom_counter, res_counter, chain_id, res_name
-                        )
-                        lines.append(line)
-                        atom_counter += 1
+                    order = [name for name in template if name in residue_atoms]
+                    if not self.remove_hydrogens:
+                        order += [
+                            name for name, line in residue_atoms.items()
+                            if name not in template and is_hydrogen(line)
+                        ]
+                for atom_name in order:
+                    line = self._format_atom_line(
+                        residue_atoms[atom_name],
+                        atom_counter, res_counter, chain_id, res_name
+                    )
+                    lines.append(line)
+                    atom_counter += 1
 
                 res_counter += 1
 
