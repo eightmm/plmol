@@ -133,3 +133,40 @@ def test_hierarchical_residue_width_matches_the_residue_graph(example_pdb):
     assert data.residue_features.shape[1] == sum(
         block.shape[-1] for block in graph["node_features"]
     )
+
+
+class TestAStructureWithNoProtein:
+    """A file that parses cleanly and holds no protein says so."""
+
+    LIGAND_ONLY = (
+        "HETATM    1 ZN    ZN A 301       8.000   8.000   8.000  1.00 20.00          ZN\n"
+        "HETATM    2  C1  LIG A 401       5.000   5.000   5.000  1.00 20.00           C\n"
+        "HETATM    3  O   HOH A 501      12.000  12.000  12.000  1.00 20.00           O\n"
+        "END\n"
+    )
+
+    def test_it_raises_input_error_not_index_error(self, tmp_path):
+        from plmol import Protein
+        from plmol.errors import InputError
+        from plmol.parsers.pdb_parser import PDBParser
+
+        PDBParser.clear_cache()
+        path = tmp_path / "ligand_only.pdb"
+        path.write_text(self.LIGAND_ONLY)
+
+        with pytest.raises(InputError) as caught:
+            Protein.from_pdb(str(path), standardize=False).featurize(mode="graph")
+        assert "No protein residues" in str(caught.value)
+        assert str(path) in str(caught.value)
+
+    def test_every_mode_reports_it_the_same_way(self, tmp_path):
+        from plmol import Protein
+        from plmol.errors import InputError
+        from plmol.parsers.pdb_parser import PDBParser
+
+        path = tmp_path / "ligand_only_modes.pdb"
+        path.write_text(self.LIGAND_ONLY)
+        for mode in ("sequence", "graph", "atom_graph", "backbone", "surface", "voxel"):
+            PDBParser.clear_cache()
+            with pytest.raises(InputError):
+                Protein.from_pdb(str(path), standardize=False).featurize(mode=mode)

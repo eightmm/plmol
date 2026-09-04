@@ -40,6 +40,7 @@ from ..spatial import NeighbourIndex, pairs_within
 from ..utils import dense_to_edges
 from ..voxel import build_protein_voxel
 from .utils import PDBParser
+from ..errors import InputError
 
 
 class ProteinFeaturizer:
@@ -97,6 +98,21 @@ class ProteinFeaturizer:
         # Get residues
         self.residues = self._featurizer.get_residues()
         self.num_residues = len(self.residues)
+
+        if self.num_residues == 0:
+            # A file of nothing but HETATM -- a ligand, a metal, a solvent box --
+            # parses cleanly and yields no residue. Every mode then indexed an
+            # empty array and the caller got "too many indices for array: array
+            # is 1-dimensional, but 2 were indexed", which names neither the
+            # file nor the reason.
+            parser = PDBParser(self._featurizer.pdb_file)
+            found = len(parser.all_atoms)
+            raise InputError(
+                f"No protein residues in {self.input_file}: "
+                f"{found} atom record{'' if found == 1 else 's'} parsed, none of "
+                "them a protein atom. A structure of ligands, metals or solvent "
+                "alone has nothing for the protein modes to featurize."
+            )
 
         # Build coordinate tensor
         self.coords = np.zeros((self.num_residues, MAX_ATOMS_PER_RESIDUE, 3), dtype=FLOAT)
