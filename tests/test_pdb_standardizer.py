@@ -225,3 +225,62 @@ class TestResidueOrdering:
         assert key(("A", "-1", "ALA")) < key(("A", "0", "ALA")) < key(("A", "1", "ALA"))
         assert key(("A", "100A", "ALA")) == ("A", 100, "A")
         assert key(("A", "100", "ALA")) < key(("A", "100A", "ALA"))
+
+
+class TestFourCharacterAtomNames:
+    """The atom name field is columns 13-16, and a four-character name uses all of it."""
+
+    STRUCTURE = (
+        "ATOM      1  N   LEU A   1       0.000   0.000   0.000  1.00 20.00           N\n"
+        "ATOM      2  CA  LEU A   1       1.450   0.000   0.000  1.00 20.00           C\n"
+        "ATOM      3  C   LEU A   1       2.400   1.000   0.000  1.00 20.00           C\n"
+        "ATOM      4  O   LEU A   1       2.400   2.200   0.000  1.00 20.00           O\n"
+        "HETATM    5 CL21 LIG A 401       9.000   9.000   9.000  1.00 20.00          CL\n"
+        "HETATM    6 FE   HEM A 402       5.000   5.000   5.000  1.00 20.00          FE\n"
+        "END\n"
+    )
+
+    def test_the_name_survives_standardisation(self, tmp_path):
+        from plmol.parsers.pdb_parser import parse_pdb_line
+        from plmol.protein.pdb_standardizer import PDBStandardizer
+
+        source = tmp_path / "fourchar.pdb"
+        source.write_text(self.STRUCTURE)
+        target = tmp_path / "fourchar_std.pdb"
+        PDBStandardizer().standardize(str(source), str(target))
+
+        written = {}
+        for line in open(target):
+            if line.startswith(("ATOM  ", "HETATM")):
+                atom = parse_pdb_line(line)
+                written[atom.atom_name] = atom
+
+        assert "CL21" in written, "a four-character name used to come back as CL2"
+        assert written["CL21"].alt_loc == "", "and its fourth character as an alternate location"
+        assert written["CL21"].element == "CL"
+        assert written["FE"].element == "FE"
+
+
+class TestPdbLineRoundTrip:
+    """format_pdb_line is the inverse of parse_pdb_line, column for column."""
+
+    LINES = [
+        "ATOM      1  N   LEU A   1       0.000   0.000   0.000  1.00 20.00           N",
+        "ATOM      2  CA BLEU A 100A      1.450  -2.000   3.000  0.60 20.00           C",
+        "HETATM    5 CL21 LIG A 401       9.000   9.000   9.000  1.00 20.00          CL",
+        "ATOM      9 HD11 LEU A   1       4.900  -2.900   0.100  1.00 20.00           H",
+        "HETATM    7 FE   HEM A 402       5.000   5.000   5.000  1.00 20.00          FE",
+        "ATOM     11  O5' DA  B  -2      -1.000   2.000   3.000  1.00 20.00           O",
+    ]
+
+    @pytest.mark.parametrize("line", LINES)
+    def test_every_field_comes_back(self, line):
+        from plmol.parsers.pdb_parser import format_pdb_line, parse_pdb_line
+
+        before = parse_pdb_line(line)
+        after = parse_pdb_line(format_pdb_line(before, serial=1).rstrip("\n"))
+        for field in ("record_type", "atom_name", "res_name", "res_num", "chain_id",
+                      "element", "insertion_code", "alt_loc", "coords"):
+            assert getattr(before, field) == getattr(after, field), field
+        assert before.occupancy == after.occupancy
+        assert before.b_factor == after.b_factor

@@ -9,7 +9,14 @@ import os
 import re
 from typing import Dict, List, Tuple, Optional
 
-from ..parsers.pdb_parser import element_symbol, is_hydrogen
+from dataclasses import replace
+
+from ..parsers.pdb_parser import (
+    element_symbol,
+    format_pdb_line,
+    is_hydrogen,
+    parse_pdb_line,
+)
 from ..constants import (
     STANDARD_ATOMS,
     STANDARD_ATOMS_PTM,
@@ -376,37 +383,39 @@ class PDBStandardizer:
 
         return lines, atom_counter
 
+    def _renumbered(self, original_line: str, record_type: str, serial: int,
+                    res_counter: int, chain_id: str, res_name: str) -> str:
+        """One standardized record: the parsed atom, renumbered and rewritten.
+
+        Both parsing and formatting are the package's own, so a name the
+        parser can read is a name this writes back. The hand-rolled format
+        string this replaced put the name one column right of where the format
+        says: it survived every three-character name and broke on the fourth,
+        writing ``CL21`` so that it read back as ``CL2`` with an alternate
+        location of ``1``.
+        """
+        atom = replace(
+            parse_pdb_line(original_line),
+            record_type=record_type,
+            res_name=res_name,
+            chain_id=chain_id,
+            res_num=res_counter,
+            # The output is renumbered from 1, so an insertion code has nothing
+            # left to disambiguate; residue_key kept them apart on the way in.
+            insertion_code='',
+            alt_loc='',
+        )
+        return format_pdb_line(atom, serial)
+
     def _format_atom_line(self, original_line: str, atom_counter: int,
                          res_counter: int, chain_id: str, res_name: str) -> str:
-        """
-        Format an ATOM line in standardized PDB format.
-        """
-        atom_name = original_line[12:16].strip()
-        x = float(original_line[30:38])
-        y = float(original_line[38:46])
-        z = float(original_line[46:54])
-        occupancy = original_line[54:60].strip() if len(original_line) > 54 else "1.00"
-        temp_factor = original_line[60:66].strip() if len(original_line) > 60 else "0.00"
-        element = element_symbol(original_line)
-
-        return f"ATOM  {atom_counter:5d}  {atom_name:<4s}{res_name:3s} {chain_id}{res_counter:>4d}    " \
-               f"{x:8.3f}{y:8.3f}{z:8.3f}{occupancy:>6s}{temp_factor:>6s}          {element:>2s}\n"
+        """Format an ATOM line in standardized PDB format."""
+        return self._renumbered(original_line, 'ATOM', atom_counter, res_counter, chain_id, res_name)
 
     def _format_hetatm_line(self, original_line: str, atom_counter: int,
                            hetatm_counter: int, res_name: str, chain_id: str) -> str:
-        """
-        Format a HETATM line in standardized PDB format.
-        """
-        atom_name = original_line[12:16].strip()
-        x = float(original_line[30:38])
-        y = float(original_line[38:46])
-        z = float(original_line[46:54])
-        occupancy = original_line[54:60].strip() if len(original_line) > 54 else "1.00"
-        temp_factor = original_line[60:66].strip() if len(original_line) > 60 else "0.00"
-        element = element_symbol(original_line)
-
-        return f"HETATM{atom_counter:5d}  {atom_name:<4s}{res_name:3s} {chain_id}{hetatm_counter:>4d}    " \
-               f"{x:8.3f}{y:8.3f}{z:8.3f}{occupancy:>6s}{temp_factor:>6s}          {element:>2s}\n"
+        """Format a HETATM line in standardized PDB format."""
+        return self._renumbered(original_line, 'HETATM', atom_counter, hetatm_counter, chain_id, res_name)
 
 
 def standardize_pdb(input_pdb_path: str, output_pdb_path: str,

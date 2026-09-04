@@ -177,6 +177,51 @@ def parse_pdb_line(line: str) -> ParsedAtom:
     )
 
 
+def format_pdb_line(atom: ParsedAtom, serial: int = 1) -> str:
+    """A :class:`ParsedAtom` written back as a fixed-column PDB record.
+
+    The inverse of :func:`parse_pdb_line`, column for column, so that anything
+    plmol writes reads back as the atom it started from.
+
+    The atom-name field is the one that repays care. It is columns 13-16, and
+    where the name starts inside it is what tells a reader how long the element
+    is: a one-letter element is right-justified into column 14, a two-letter one
+    starts in column 13, and a name that needs all four characters starts there
+    too. Writing every name left-justified from column 14, as the standardizer
+    used to, pushed the fourth character of ``CL21`` into column 17 -- the
+    alternate-location field -- so the atom came back named ``CL2`` with an
+    alternate location of ``1``.
+
+    Args:
+        atom: The atom to write.
+        serial: Atom serial number for columns 7-11.
+
+    Returns:
+        One record, newline included.
+    """
+    name = atom.atom_name.strip()
+    if len(name) >= 4:
+        name_field = name[:4]
+    elif len(atom.element.strip()) >= 2:
+        name_field = f"{name:<4s}"
+    else:
+        name_field = f" {name:<3s}"
+
+    return (
+        f"{atom.record_type:<6s}"
+        f"{serial:5d} "
+        f"{name_field}"
+        f"{(atom.alt_loc or ' '):1s}"
+        f"{atom.res_name:>3s} "
+        f"{(atom.chain_id or ' '):1s}"
+        f"{atom.res_num:4d}"
+        f"{(atom.insertion_code or ' '):1s}   "
+        f"{atom.coords[0]:8.3f}{atom.coords[1]:8.3f}{atom.coords[2]:8.3f}"
+        f"{atom.occupancy:6.2f}{atom.b_factor:6.2f}"
+        f"          {atom.element.strip().upper():>2s}\n"
+    )
+
+
 #: Hydrogen and its heavy isotope, which a neutron structure writes as D.
 HYDROGEN_ELEMENTS = frozenset({'H', 'D'})
 
