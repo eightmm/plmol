@@ -162,6 +162,12 @@ The 7 backbone torsion angles (in radians) are:
 | 5 | zeta (ζ) | C3'(i) - O3'(i) - P(i+1) - O5'(i+1) | Phosphodiester linkage torsion (next) |
 | 6 | chi (χ) | O4'(i) - C1'(i) - N9/N1(i) - C4/C2(i) | Glycosidic bond (base rotation) |
 
+> **alpha, epsilon and zeta span two nucleotides, and only count when those
+> two are linked.** They are zero when the O3'-P bond they cross is absent —
+> the last nucleotide of one strand and the first of the next, or the two
+> sides of a disordered stretch. beta, gamma, delta and chi are inside one
+> nucleotide and are unaffected.
+
 **Sugar pucker determination**: Inferred from delta torsion:
 - **C3'-endo** (1.0): delta ≈ 85° (commonly found in A-form DNA/RNA)
 - **C2'-endo** (0.0): delta ≈ 145° (commonly found in B-form DNA)

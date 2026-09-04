@@ -33,6 +33,19 @@ def _vec(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return v / n if n > 1e-8 else v
 
 
+#: Longest O3'-P distance still counted as a phosphodiester bond, in Angstrom.
+#: A real one is about 1.6; the slack covers a low-resolution model without
+#: admitting the several-Angstrom jump a second strand or a missing stretch
+#: leaves behind. The protein side has the same rule under PEPTIDE_BOND_MAX.
+PHOSPHODIESTER_BOND_MAX = 2.2
+
+
+def _linked(o3_prime: np.ndarray, phosphorus: np.ndarray) -> bool:
+    """Whether two nucleotides are joined by the phosphodiester bond between them."""
+    delta = np.asarray(o3_prime, dtype=np.float64) - np.asarray(phosphorus, dtype=np.float64)
+    return bool(np.dot(delta, delta) <= PHOSPHODIESTER_BOND_MAX ** 2)
+
+
 def _dihedral(p0: np.ndarray, p1: np.ndarray,
               p2: np.ndarray, p3: np.ndarray) -> float:
     """Dihedral angle (radians) defined by four points."""
@@ -179,8 +192,12 @@ class NucleicFeaturizer:
             return self._coord(res, name)
 
         for i, res in enumerate(residues):
-            prev = residues[i - 1] if i > 0 else None
-            nxt = residues[i + 1] if i < n - 1 else None
+            # Neighbouring rows in a sorted residue list are not neighbouring
+            # nucleotides. A duplex has two strands, and a structure with a
+            # disordered stretch jumps over it; alpha, epsilon and zeta all
+            # read across the join, so each checks the O3'-P bond it spans.
+            prev = residues[i - 1] if i > 0 and residues[i - 1]["chain_id"] == res["chain_id"] else None
+            nxt = residues[i + 1] if i < n - 1 and residues[i + 1]["chain_id"] == res["chain_id"] else None
 
             # alpha: O3'(i-1) - P(i) - O5'(i) - C5'(i)
             if prev is not None:
@@ -188,7 +205,7 @@ class NucleicFeaturizer:
                 p1 = c(res, "P")
                 p2 = c(res, "O5'")
                 p3 = c(res, "C5'")
-                if all(x is not None for x in [p0, p1, p2, p3]):
+                if all(x is not None for x in [p0, p1, p2, p3]) and _linked(p0, p1):
                     torsions[i, 0] = _dihedral(p0, p1, p2, p3)
 
             # beta: P - O5' - C5' - C4'
@@ -209,13 +226,13 @@ class NucleicFeaturizer:
             # epsilon: C4' - C3' - O3' - P(i+1)
             if nxt is not None:
                 p0 = c(res, "C4'"); p1 = c(res, "C3'"); p2 = c(res, "O3'"); p3 = c(nxt, "P")
-                if all(x is not None for x in [p0, p1, p2, p3]):
+                if all(x is not None for x in [p0, p1, p2, p3]) and _linked(p2, p3):
                     torsions[i, 4] = _dihedral(p0, p1, p2, p3)
 
             # zeta: C3' - O3' - P(i+1) - O5'(i+1)
             if nxt is not None:
                 p0 = c(res, "C3'"); p1 = c(res, "O3'"); p2 = c(nxt, "P"); p3 = c(nxt, "O5'")
-                if all(x is not None for x in [p0, p1, p2, p3]):
+                if all(x is not None for x in [p0, p1, p2, p3]) and _linked(p1, p2):
                     torsions[i, 5] = _dihedral(p0, p1, p2, p3)
 
             # chi (glycosidic): O4' - C1' - N9/N1 - C4(purine) or C2(pyrimidine)

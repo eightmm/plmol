@@ -406,3 +406,45 @@ class TestNucleotideNameNormalization:
         assert len(residues["res_names"]) == len(plain["res_names"]), "still there"
         assert residues["res_names"][0] == "1MA", "reported as the file names it"
         assert residues["tokens"][0] == NUCLEOTIDE_TOKEN["A"], "counted as an adenosine"
+
+
+class TestTorsionsStopAtAStrandBreak:
+    """alpha, epsilon and zeta span two nucleotides; the span has to be a bond."""
+
+    @staticmethod
+    def _two_strands(source_text: str, path) -> str:
+        """The same strand twice, as chains A and B, 20 A apart."""
+        lines = [l for l in source_text.splitlines() if l.startswith(("ATOM  ", "HETATM"))]
+        out = []
+        for chain, shift in (("A", 0.0), ("B", 20.0)):
+            for line in lines:
+                x = float(line[30:38]) + shift
+                out.append(line[:21] + chain + line[22:30] + f"{x:8.3f}" + line[38:])
+        numbered = [l[:6] + f"{i + 1:5d}" + l[11:] for i, l in enumerate(out)]
+        path.write_text("\n".join(numbered) + "\nEND\n")
+        return str(path)
+
+    def test_a_second_strand_does_not_continue_the_first(self, dna_pdb, tmp_path):
+        from plmol.nucleic_acid.featurizer import NucleicFeaturizer
+
+        path = self._two_strands(open(dna_pdb).read(), tmp_path / "duplex.pdb")
+        featurizer = NucleicFeaturizer(path)
+        residues = featurizer._get_na_residues()
+        torsions = featurizer._compute_torsions(residues)
+
+        chains = [r["chain_id"] for r in residues]
+        assert set(chains) == {"A", "B"}
+        first_b = chains.index("B")
+        last_a = first_b - 1
+
+        # alpha of B's first nucleotide would come from A's last O3'.
+        assert torsions[first_b, 0] == 0.0
+        # epsilon and zeta of A's last would come from B's first P.
+        assert torsions[last_a, 4] == 0.0
+        assert torsions[last_a, 5] == 0.0
+        # Inside a strand they survive. (alpha is zero throughout this fixture:
+        # its four nucleotides are stacked on collinear points, so the O3'-P-O5'
+        # -C5' dihedral is degenerate. epsilon and zeta are not.)
+        assert torsions[0, 4] != 0.0
+        assert torsions[0, 5] != 0.0
+        assert torsions[first_b, 4] != 0.0
