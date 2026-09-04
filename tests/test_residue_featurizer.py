@@ -197,3 +197,68 @@ class TestSasaRowAlignment:
         assert np.allclose(sasa[:, 0] + sasa[:, 1], sasa[:, 4], atol=1e-4)
         assert np.allclose(sasa[:, 2] + sasa[:, 3], sasa[:, 4], atol=1e-4)
         assert np.allclose(sasa[:, 9], 1.0 - sasa[:, 4], atol=1e-5)
+
+
+class TestDihedralsStopAtABreak:
+    """The residue rows are a sorted list, not a chain."""
+
+    @staticmethod
+    def _angles(node_scalar, row):
+        """phi, psi, omega in degrees from the cos/sin pairs of degree_feature."""
+        import math
+
+        degree = node_scalar[3][row]
+        return [math.degrees(math.atan2(degree[10 + i], degree[i])) for i in range(3)]
+
+    def test_two_chains_are_not_one(self, example_pdb):
+        # Chain A ends 46 A from where chain B begins. psi and omega of A's last
+        # residue and phi of B's first used to be measured across that.
+        PDBParser.clear_cache()
+        rf = ResidueFeaturizer(example_pdb)
+        residues = rf.get_residues()
+        node, _ = rf.get_features()
+        scalar = node["node_scalar_features"]
+
+        last_a = max(i for i, r in enumerate(residues) if r[0] == "A")
+        first_b = min(i for i, r in enumerate(residues) if r[0] == "B")
+        assert first_b == last_a + 1, "the two chains have to be adjacent rows"
+
+        _, psi, omega = self._angles(scalar, last_a)
+        phi, _, _ = self._angles(scalar, first_b)
+        assert (psi, omega, phi) == (0.0, 0.0, 0.0)
+
+    def test_a_missing_loop_is_not_a_peptide_bond(self, example_pdb, tmp_path):
+        # Residues 101-110 of chain A removed: 100 and 111 become adjacent rows
+        # 13.5 A apart. The omega across that pair used to read 4 degrees, which
+        # says cis peptide bond.
+        PDBParser.clear_cache()
+        kept = [
+            line.rstrip("\n")
+            for line in open(example_pdb)
+            if line.startswith(("ATOM  ", "HETATM"))
+            and not (line[21] == "A" and 101 <= int(line[22:26]) <= 110)
+        ]
+        path = tmp_path / "loop_gap.pdb"
+        path.write_text("\n".join(kept) + "\nEND\n")
+
+        rf = ResidueFeaturizer(str(path))
+        residues = rf.get_residues()
+        node, _ = rf.get_features()
+        scalar = node["node_scalar_features"]
+
+        before = [i for i, r in enumerate(residues) if r[:2] == ("A", 100)][0]
+        after = [i for i, r in enumerate(residues) if r[:2] == ("A", 111)][0]
+        assert after == before + 1
+
+        _, psi, omega = self._angles(scalar, before)
+        phi, _, _ = self._angles(scalar, after)
+        assert (psi, omega, phi) == (0.0, 0.0, 0.0)
+
+    def test_an_intact_chain_keeps_its_angles(self, example_pdb):
+        # The mask must only fire at real breaks: everything interior to a chain
+        # still has a phi, a psi and an omega.
+        PDBParser.clear_cache()
+        rf = ResidueFeaturizer(example_pdb)
+        breaks = rf._residue_breaks()
+        assert breaks.sum() == 1, "10gs has two chains and no gaps"
+        assert breaks.shape == (len(rf.get_residues()) - 1,)

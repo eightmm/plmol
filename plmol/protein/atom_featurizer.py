@@ -28,19 +28,8 @@ from ..constants import (
     BACKBONE_ATOM_SET,
 )
 from ..utils import dihedral_angles, sasa_structure_result
+from .geometry import peptide_bonded
 from ..sasa import is_polar_element
-
-
-#: Longest C-N distance still counted as a peptide bond, in Angstrom. A real one
-#: is about 1.33; the slack covers a low-resolution model without admitting the
-#: several-Angstrom jump a missing loop leaves behind.
-PEPTIDE_BOND_MAX = 2.0
-
-
-def _is_peptide_bond(c_coords, n_coords) -> bool:
-    """Whether the C of one residue and the N of the next are actually bonded."""
-    delta = np.asarray(c_coords, dtype=np.float64) - np.asarray(n_coords, dtype=np.float64)
-    return bool(np.dot(delta, delta) <= PEPTIDE_BOND_MAX ** 2)
 
 
 def _residue_number(label: str) -> int:
@@ -396,8 +385,8 @@ class AtomFeaturizer:
             # structure with a disordered loop jumps from residue 50 to 60, and
             # phi and psi measured across that jump describe a bond that is not
             # there.
-            if not (_is_peptide_bond(prev_bb['C'], curr_bb['N'])
-                    and _is_peptide_bond(curr_bb['C'], next_bb['N'])):
+            if not (peptide_bonded(prev_bb['C'], curr_bb['N'])
+                    and peptide_bonded(curr_bb['C'], next_bb['N'])):
                 continue
             phi_quads.append((prev_bb['C'], curr_bb['N'], curr_bb['CA'], curr_bb['C']))
             psi_quads.append((curr_bb['N'], curr_bb['CA'], curr_bb['C'], next_bb['N']))

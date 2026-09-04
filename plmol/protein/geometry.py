@@ -19,7 +19,29 @@ _OFF_DIAGONAL = np.array(
 )
 
 
-def calculate_dihedral(coords: np.ndarray, eps: float = 1e-8) -> np.ndarray:
+#: Longest C-N distance still counted as a peptide bond, in Angstrom. A real one
+#: is about 1.33; the slack covers a low-resolution model without admitting the
+#: several-Angstrom jump a missing loop leaves behind.
+PEPTIDE_BOND_MAX = 2.0
+
+
+def peptide_bonded(c_coords, n_coords) -> np.ndarray:
+    """Whether the C of one residue and the N of the next are actually bonded.
+
+    Accepts single points or batches; returns a bool of the matching shape.
+    Adjacent in a file, or adjacent in a sorted residue list, is not the same
+    as bonded: a crystal structure jumps over a disordered loop, and two chains
+    sit side by side.
+    """
+    delta = np.asarray(c_coords, dtype=np.float64) - np.asarray(n_coords, dtype=np.float64)
+    return np.sum(delta * delta, axis=-1) <= PEPTIDE_BOND_MAX ** 2
+
+
+def calculate_dihedral(
+    coords: np.ndarray,
+    eps: float = 1e-8,
+    breaks: np.ndarray = None,
+) -> np.ndarray:
     """Dihedral angles along a chain of residue coordinates.
 
     The chain is the coordinates read in order, so consecutive quadruples of
@@ -31,6 +53,13 @@ def calculate_dihedral(coords: np.ndarray, eps: float = 1e-8) -> np.ndarray:
             of residues and M is the number of atoms per residue.
         eps: Accepted for callers written against 0.4.x. The angle no longer
             comes from an arc cosine, so there is nothing to clamp.
+        breaks: Optional ``(N - 1,)`` bool marking residue pairs that are *not*
+            bonded -- a chain boundary, or the two sides of a missing loop.
+            Three angles read across each such pair and come back as zero: the
+            two at the end of row ``i`` and the first of row ``i + 1``. For the
+            backbone, with M = 3, that is psi and omega of ``i`` and phi of
+            ``i + 1``. Without this the reader treats the rows as one
+            continuous chain, which for a deposited structure they are not.
 
     Returns:
         Dihedral angles array of shape (N, M).
@@ -47,8 +76,17 @@ def calculate_dihedral(coords: np.ndarray, eps: float = 1e-8) -> np.ndarray:
     # the arc cosine was off by up to 3.0e-5 rad against 2.7e-6 here.
     angles = dihedral_angles(chain[:-3], chain[1:-2], chain[2:-1], chain[3:])
     angles = pad_last(angles, 1, 2)
+    angles = angles.reshape((angles.shape[0] // shape[1], shape[1]))
 
-    return angles.reshape((angles.shape[0] // shape[1], shape[1]))
+    if breaks is not None:
+        broken = np.flatnonzero(np.asarray(breaks, dtype=bool))
+        if broken.size:
+            n_atoms = shape[1]
+            angles[broken, n_atoms - 2] = 0.0
+            angles[broken, n_atoms - 1] = 0.0
+            angles[broken + 1, 0] = 0.0
+
+    return angles
 
 
 def calculate_local_frames(coords: np.ndarray, eps: float = 1e-8) -> np.ndarray:

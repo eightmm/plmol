@@ -21,6 +21,7 @@ from .geometry import (
     calculate_backbone_curvature,
     calculate_backbone_torsion,
     calculate_self_distances_vectors,
+    peptide_bonded,
 )
 # Import unified PDB parsing utilities from canonical location
 from .utils import (
@@ -394,6 +395,27 @@ class ResidueFeaturizer:
             logger.warning(f"FreeSASA calculation failed: {e}. Returning zeros for SASA features.")
             return np.zeros((num_residues, sasa_dim), dtype=FLOAT)
 
+    def _residue_breaks(self) -> np.ndarray:
+        """``(L - 1,)`` bool: residue pairs that are not joined by a peptide bond.
+
+        A chain boundary is always a break, and so is a gap in the numbering
+        that a disordered loop left behind. In the example protein, chain A
+        ends 46 A from where chain B starts, and until 0.4.x the two were read
+        as consecutive.
+        """
+        residues = self.get_residues()
+        breaks = np.ones(max(len(residues) - 1, 0), dtype=bool)
+        for index in range(len(residues) - 1):
+            current, following = residues[index], residues[index + 1]
+            if current[0] != following[0]:
+                continue
+            c_atom = self._atom_coords.get(current, {}).get('C')
+            n_atom = self._atom_coords.get(following, {}).get('N')
+            if c_atom is None or n_atom is None:
+                continue
+            breaks[index] = not bool(peptide_bonded(c_atom, n_atom))
+        return breaks
+
     def get_dihedral_angles(self, coords: np.ndarray, res_types: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
         Calculate backbone and sidechain dihedral angles.
@@ -414,9 +436,11 @@ class ResidueFeaturizer:
             for i in range(1, 6)
         ], axis=1)
 
-        # Backbone dihedrals
+        # Backbone dihedrals. The rows are a sorted residue list, not a chain:
+        # psi and omega of a residue and phi of the next one read across the
+        # join, and the join is only a peptide bond when the structure says so.
         N_CA_C = coords[:, :3, :]
-        backbone_dihedrals = calculate_dihedral(N_CA_C)
+        backbone_dihedrals = calculate_dihedral(N_CA_C, breaks=self._residue_breaks())
 
         # Sidechain dihedrals
         N_A_B_G_D_E_Z_ILE = np.concatenate([coords[:, :2, :], coords[:, 4:6, :], coords[:, 7:11, :]], axis=1) * is_ILE

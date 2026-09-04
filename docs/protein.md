@@ -169,7 +169,7 @@ Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA,
 | `[0:21]` | residue_one_hot | 21 | One-hot: 20 amino acids + UNK |
 | `[21:23]` | terminal_flags | 2 | is_N_terminal, is_C_terminal |
 | `[23:33]` | self_distance | 10 | Intra-residue pairwise distances among N, CA, C, O, SC (upper triangle) |
-| `[33:53]` | degree_feature | 20 | cos/sin of 10 angles: phi, psi, omega, chi1-chi5, backbone_curvature, backbone_torsion |
+| `[33:53]` | degree_feature | 20 | cos/sin of 10 angles: phi, psi, omega, chi1-chi5, backbone_curvature, backbone_torsion. An angle that would span two residues no peptide bond joins — a chain boundary, or the two sides of a missing loop — is zero, the same encoding the first and last residue already carry |
 | `[53:58]` | has_chi_angles | 5 | Binary flags: has chi1, chi2, chi3, chi4, chi5 |
 | `[58:69]` | sasa | 11 | polar, apolar, mainchain, sidechain over `RESIDUE_MAX_SASA` (what fraction of the residue's surface each class is); relativeTotal, relativePolar, relativeApolar, relativeMainChain, relativeSideChain over `RESIDUE_MAX_CLASS_SASA` (how exposed each class is against how exposed it could be); burial_index (1.0 - relativeTotal); polar_apolar_ratio |
 | `[69:77]` | rf_distance | 8 | Forward/reverse neighbor distances: fwd(CA-CA, SC-SC, CA-SC, SC-CA) + rev(same) |

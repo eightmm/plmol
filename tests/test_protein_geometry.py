@@ -10,6 +10,7 @@ from plmol.protein.geometry import (
     calculate_backbone_torsion,
     calculate_virtual_cb,
     calculate_self_distances_vectors,
+    peptide_bonded,
     rbf_encode,
 )
 
@@ -276,3 +277,42 @@ class TestShortChains:
         for mode in ("sequence", "graph", "atom_graph", "backbone", "surface", "voxel"):
             result = Protein.from_pdb(str(path)).featurize(mode=mode)[mode]
             assert result is not None, mode
+
+
+class TestDihedralBreaks:
+    """calculate_dihedral can be told which residue pairs are not bonded."""
+
+    def test_a_break_zeroes_three_angles(self):
+        coords = np.random.default_rng(0).normal(size=(5, 3, 3))
+        intact = calculate_dihedral(coords)
+        broken = calculate_dihedral(coords, breaks=np.array([0, 1, 0, 0], dtype=bool))
+
+        changed = {tuple(cell) for cell in np.argwhere(intact != broken)}
+        # A break between rows 1 and 2 takes psi and omega of 1 and phi of 2.
+        assert changed == {(1, 1), (1, 2), (2, 0)}
+        assert broken[1, 1] == 0.0 and broken[1, 2] == 0.0 and broken[2, 0] == 0.0
+
+    def test_the_break_columns_follow_the_atom_count(self):
+        # The two that cross into the next row are the last two, whatever M is.
+        coords = np.random.default_rng(1).normal(size=(4, 8, 3))
+        broken = calculate_dihedral(coords, breaks=np.array([0, 1, 0], dtype=bool))
+        intact = calculate_dihedral(coords)
+        changed = {tuple(cell) for cell in np.argwhere(intact != broken)}
+        assert changed == {(1, 6), (1, 7), (2, 0)}
+
+    def test_no_breaks_is_the_old_behaviour(self):
+        coords = np.random.default_rng(2).normal(size=(6, 3, 3))
+        assert np.array_equal(
+            calculate_dihedral(coords), calculate_dihedral(coords, breaks=None)
+        )
+
+
+class TestPeptideBonded:
+    def test_a_real_bond_and_a_gap(self):
+        assert peptide_bonded([0.0, 0.0, 0.0], [1.33, 0.0, 0.0])
+        assert not peptide_bonded([0.0, 0.0, 0.0], [13.5, 0.0, 0.0])
+
+    def test_it_takes_batches(self):
+        c = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        n = np.array([[1.33, 0.0, 0.0], [5.0, 0.0, 0.0]])
+        assert peptide_bonded(c, n).tolist() == [True, False]
