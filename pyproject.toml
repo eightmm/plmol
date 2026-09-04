@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plmol"
-version = "0.2.1"
+# Read from plmol/__init__.py rather than repeated here: the two said 0.2.1
+# and 0.4.0 at the same time, so `pip show` and `plmol.__version__` disagreed.
+dynamic = ["version"]
 description = "Unified biomolecular feature extraction for protein, ligand, nucleic acid, and complex modeling"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -88,6 +90,9 @@ Issues = "https://github.com/eightmm/plmol/issues"
 
 [tool.setuptools]
 include-package-data = true
+
+[tool.setuptools.dynamic]
+version = { attr = "plmol.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["plmol*"]

@@ -2942,7 +2942,6 @@ wheels = [
 
 [[package]]
 name = "plmol"
-version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "numpy", version = "2.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },

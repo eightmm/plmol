@@ -7,6 +7,8 @@ featurization behaviour, which the per-module test files own.
 
 import dataclasses
 
+from pathlib import Path
+
 import pytest
 import torch
 
@@ -177,3 +179,15 @@ class TestHierarchicalDataSerialization:
         as_dict = data.to_dict()
         assert set(as_dict) == set(data.__dataclass_fields__)
         assert as_dict["esmc_embeddings"] is None
+
+
+def test_the_version_is_declared_once():
+    """pyproject.toml said 0.2.1 while plmol.__version__ said 0.4.0, so
+    `pip show plmol` and the package disagreed. The build now reads the
+    package's own value, and this asserts the two cannot drift apart again."""
+    from setuptools.config.pyprojecttoml import read_configuration
+
+    import plmol
+
+    config = read_configuration(str(Path(__file__).resolve().parent.parent / "pyproject.toml"))
+    assert config["project"]["version"] == plmol.__version__
