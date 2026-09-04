@@ -286,6 +286,7 @@ pocket_list = extract_pocket(
 for pocket_info in pocket_list:
     pocket_mol = pocket_info.pocket_mol    # RDKit Mol of pocket residues + nearby metals
     residues = pocket_info.pocket_residues # List of (chain, resnum, resname) tuples
+    codes = pocket_info.insertion_codes    # Insertion code per entry, aligned with it
     metals = pocket_info.metal_records     # List of metal HETATM records within cutoff
     num_atoms = pocket_info.num_atoms
     num_residues = pocket_info.num_residues

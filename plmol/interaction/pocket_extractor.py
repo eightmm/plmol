@@ -6,7 +6,7 @@ Uses fast PDB line-based parsing with vectorized distance calculation.
 """
 
 from typing import Sequence, Dict, List, Tuple, Optional, Union
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 from rdkit import Chem
 from ..constants import METAL_ELEMENTS, POCKET_MAX_ATOMS_PER_RESIDUE
@@ -32,6 +32,12 @@ class PocketInfo:
     num_atoms: int
     num_residues: int
     distance_cutoff: float
+    #: Insertion code per entry of ``pocket_residues``, aligned with it. A PDB
+    #: numbers an insertion 100, 100A, 100B; those are three residues sharing a
+    #: number, so three entries here read ``''``, ``'A'``, ``'B'`` while
+    #: ``pocket_residues`` shows the same triple three times. The triple is
+    #: unchanged from 0.4.x, which is why the code lives beside it.
+    insertion_codes: List[str] = field(default_factory=list)
 
 
 def extract_pocket(
@@ -271,7 +277,7 @@ class PocketExtractor:
         Creates:
             - _residue_coords: [num_residue, MAX_ATOMS_PER_RESIDUE, 3] coordinate tensor
             - _residue_lines: List of PDB lines for each residue
-            - _residue_keys: List of (chain, resnum, resname) tuples
+            - _residue_keys: List of (chain, resnum, resname, insertion_code) tuples
         """
         residue_coords: Dict[Tuple, List[List[float]]] = {}
         residue_lines: Dict[Tuple, List[str]] = {}
@@ -319,7 +325,12 @@ class PocketExtractor:
                 except ValueError:
                     continue
 
-                key = (chain, resnum, resname)
+                # The insertion code is part of what makes a residue. Without
+                # it 100 and 100A were one key, and since only the first
+                # MAX_ATOMS_PER_RESIDUE atoms of a key are kept, a tryptophan
+                # at 100A lost all fourteen of its atoms to the one at 100.
+                icode = line[26] if len(line) > 26 and line[26] != ' ' else ''
+                key = (chain, resnum, resname, icode)
 
                 if key not in residue_coords:
                     residue_coords[key] = []
@@ -421,7 +432,7 @@ class PocketExtractor:
         wanted = {(str(chain), int(number)) for chain, number, *_ in residues}
         mask = np.array(
             [(str(chain), int(number)) in wanted
-             for chain, number, _ in self._residue_keys],
+             for chain, number, _, _ in self._residue_keys],
             dtype=bool,
         )
         return self._extract_pocket_from_mask(mask, distance_cutoff=0.0)
@@ -446,11 +457,14 @@ class PocketExtractor:
         # Collect PDB lines for pocket residues
         pocket_lines: List[str] = []
         pocket_residues: List[Tuple[str, int, str]] = []
+        insertion_codes: List[str] = []
 
         for i, is_pocket in enumerate(pocket_mask):
             if is_pocket:
                 pocket_lines.extend(self._residue_lines[i])
-                pocket_residues.append(self._residue_keys[i])
+                chain, number, name, icode = self._residue_keys[i]
+                pocket_residues.append((chain, number, name))
+                insertion_codes.append(icode)
 
         # Include nearby metal HETATM lines
         if ligand_coords is not None and len(self._metal_coords) > 0:
@@ -474,6 +488,7 @@ class PocketExtractor:
             num_atoms=num_atoms,
             num_residues=len(pocket_residues),
             distance_cutoff=distance_cutoff,
+            insertion_codes=insertion_codes,
         )
 
     def extract(self, distance_cutoff: Optional[float] = None) -> PocketInfo:

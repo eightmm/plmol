@@ -370,3 +370,46 @@ class TestInteractionsDoNotDependOnFileOrder:
             return complex_.featurize(requests=["interaction"])["interaction"]["interaction_counts"]
 
         assert counts(example_pdb) == counts(reordered)
+
+
+class TestPocketKeepsInsertionCodedResidues:
+    """100 and 100A are two residues; the pocket used to keep only the first."""
+
+    @staticmethod
+    def _tryptophans(path, numbering):
+        names = ["N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "NE1",
+                 "CE2", "CE3", "CZ2", "CZ3", "CH2"]
+        lines = []
+        for step, (number, icode) in enumerate(numbering):
+            for i, name in enumerate(names):
+                x, y, z = i * 0.4, step * 3.0, 0.0
+                lines.append(
+                    f"ATOM      1 {name:^4s} TRP A{number:4d}{icode:1s}   "
+                    f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00 20.00           {name[0]}"
+                )
+        renumbered = [l[:6] + f"{i + 1:5d}" + l[11:] for i, l in enumerate(lines)]
+        path.write_text("\n".join(renumbered) + "\nEND\n")
+        return str(path)
+
+    def test_no_residue_swallows_another(self, tmp_path):
+        from plmol.interaction.pocket_extractor import PocketExtractor
+
+        path = self._tryptophans(tmp_path / "icodes.pdb",
+                                 [(100, " "), (100, "A"), (101, " ")])
+        extractor = PocketExtractor.from_protein(path)
+
+        assert len(extractor._residue_keys) == 3
+        assert [key[3] for key in extractor._residue_keys] == ["", "A", ""]
+        kept = (~np.isnan(extractor._residue_coords[:, :, 0])).sum()
+        assert kept == 42, "three tryptophans, fourteen heavy atoms each"
+
+    def test_the_public_triple_is_unchanged_and_the_code_rides_beside_it(self, tmp_path):
+        from plmol.interaction.pocket_extractor import PocketExtractor
+
+        path = self._tryptophans(tmp_path / "icodes_public.pdb",
+                                 [(100, " "), (100, "A")])
+        pocket = PocketExtractor.from_protein(path).extract_for_residues(
+            [("A", 100)]
+        )
+        assert pocket.pocket_residues == [("A", 100, "TRP"), ("A", 100, "TRP")]
+        assert pocket.insertion_codes == ["", "A"]
