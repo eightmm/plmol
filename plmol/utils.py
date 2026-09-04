@@ -8,18 +8,22 @@ from typing import Optional
 
 import numpy as np
 
+from .sasa import DEFAULT_SASA_POINTS
+
 logger = logging.getLogger(__name__)
 
 
-def sasa_structure_result(pdb_file: str):
+def sasa_structure_result(pdb_file: str, n_points: int = DEFAULT_SASA_POINTS):
     """A ``(structure, result)`` SASA pair for a PDB path.
 
     See :mod:`plmol.sasa`. The areas are cached on the atom coordinates, so
-    several featurizers over one structure compute them once.
+    several featurizers over one structure compute them once. *n_points* is the
+    Shrake-Rupley sample count; raising it narrows the orientation dependence
+    documented on :func:`plmol.sasa.shrake_rupley` at proportional cost.
     """
     from .sasa import native_structure_result
 
-    return native_structure_result(pdb_file)
+    return native_structure_result(pdb_file, n_points=n_points)
 
 
 def atom_sasa_features(
@@ -28,6 +32,7 @@ def atom_sasa_features(
     atom_names: list,
     max_sasa: Optional[dict] = None,
     default_max_sasa: float = 200.0,
+    n_points: int = DEFAULT_SASA_POINTS,
 ) -> dict:
     """Per-atom SASA, its relative form, burial index and polarity.
 
@@ -49,7 +54,8 @@ def atom_sasa_features(
     n_atoms = len(atom_names)
     elements = [_element_from_atom_name(name) for name in atom_names]
     radii = np.array([element_radius(e) for e in elements], dtype=np.float32)
-    areas = shrake_rupley(np.asarray(atom_positions, dtype=np.float32), radii)
+    areas = shrake_rupley(np.asarray(atom_positions, dtype=np.float32), radii,
+                          n_points=n_points)
     reference = np.array(
         [max_sasa.get(res_names[i], default_max_sasa) or default_max_sasa
          for i in range(n_atoms)],
@@ -70,9 +76,12 @@ def _burial_index_native(
     res_names: list,
     atom_names: list,
     n_atoms: int,
+    n_points: int = DEFAULT_SASA_POINTS,
 ) -> np.ndarray:
     """Burial index from Shrake-Rupley over the coordinates given."""
-    return atom_sasa_features(atom_positions, res_names, atom_names)["burial_index"]
+    return atom_sasa_features(
+        atom_positions, res_names, atom_names, n_points=n_points
+    )["burial_index"]
 
 
 def _element_from_atom_name(atom_name: str) -> str:
@@ -89,6 +98,7 @@ def compute_burial_index(
     atom_names: list,
     n_atoms: int,
     pdb_file: Optional[str] = None,
+    n_points: int = DEFAULT_SASA_POINTS,
 ) -> np.ndarray:
     """Per-atom burial index from SASA.
 
@@ -109,7 +119,9 @@ def compute_burial_index(
     """
     if atom_positions is None or n_atoms == 0:
         return np.full(n_atoms, 0.5, dtype=np.float32)
-    return _burial_index_native(atom_positions, res_names, atom_names, n_atoms)
+    return _burial_index_native(
+        atom_positions, res_names, atom_names, n_atoms, n_points=n_points
+    )
 
 
 def dihedral_angles(

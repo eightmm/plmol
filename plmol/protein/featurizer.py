@@ -37,7 +37,7 @@ from ..constants import (
 from ..surface import build_protein_surface
 from ..arrays import FLOAT, INT, one_hot
 from ..spatial import NeighbourIndex, pairs_within
-from ..utils import dense_to_edges
+from ..utils import DEFAULT_SASA_POINTS, dense_to_edges
 from ..voxel import build_protein_voxel
 from .utils import PDBParser
 from ..errors import InputError
@@ -56,7 +56,8 @@ class ProteinFeaturizer:
     """
 
     def __init__(self, pdb_file: str, standardize: bool = True,
-                 keep_hydrogens: bool = False):
+                 keep_hydrogens: bool = False,
+                 sasa_points: int = DEFAULT_SASA_POINTS):
         """
         Initialize and parse PDB file once.
 
@@ -66,10 +67,17 @@ class ProteinFeaturizer:
             keep_hydrogens: Whether the standardized structure keeps hydrogens. The graphs, the
                 surface and the voxel are heavy-atom-only whatever this says;
                 what it changes is the structure the standardizer writes.
+            sasa_points: Shrake-Rupley sample points per atom, behind every
+                SASA-derived column. Raising it narrows the orientation
+                dependence documented on :func:`plmol.sasa.shrake_rupley`, at
+                proportional cost. It is fixed for the featurizer's lifetime,
+                so the caches below cannot serve one count's areas to a request
+                that asked for another.
         """
         self.input_file = pdb_file
         self.standardize = standardize
         self.keep_hydrogens = keep_hydrogens
+        self.sasa_points = sasa_points
 
         # Check if file exists
         if not os.path.exists(pdb_file):
@@ -88,7 +96,7 @@ class ProteinFeaturizer:
             pdb_to_process = pdb_file
 
         # Parse PDB once
-        self._featurizer = ResidueFeaturizer(pdb_to_process)
+        self._featurizer = ResidueFeaturizer(pdb_to_process, sasa_points=sasa_points)
         self._parse_structure()
 
         # Cache for computed features
@@ -460,6 +468,7 @@ class ProteinFeaturizer:
             n_points_per_atom=n_points_per_atom,
             probe_radius=probe_radius,
             pdb_file=pdb_to_use,
+            sasa_points=self.sasa_points,
         )
         if surface is None:
             self._cache[cache_key] = None
@@ -543,6 +552,7 @@ class ProteinFeaturizer:
             sigma_scale=sigma_scale,
             cutoff_sigma=cutoff_sigma,
             pdb_file=pdb_to_use,
+            sasa_points=self.sasa_points,
         )
 
         self._cache[cache_key] = voxel
@@ -559,7 +569,9 @@ class ProteinFeaturizer:
 
         pdb_to_use = self.tmp_pdb if self.tmp_pdb else self.input_file
         if pdb_to_use not in self._atom_featurizer_cache:
-            self._atom_featurizer_cache[pdb_to_use] = AtomFeaturizer()
+            self._atom_featurizer_cache[pdb_to_use] = AtomFeaturizer(
+                sasa_points=self.sasa_points
+            )
         return self._atom_featurizer_cache[pdb_to_use]
 
     def get_cavities(self, **kwargs):

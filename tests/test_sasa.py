@@ -292,3 +292,68 @@ class TestHowTheAnswerDependsOnOrientation:
         ])
         swing = ratios.max(0) - ratios.min(0)
         assert swing.max() > 0.9, "a residue swinging the full range is the point"
+
+
+class TestSasaPointsReachesTheFeaturizers:
+    """The sample count was only reachable on plmol.sasa's own functions."""
+
+    def test_every_sasa_derived_output_follows_it(self, example_pdb):
+        from plmol import Protein
+        from plmol.parsers.pdb_parser import PDBParser
+
+        def outputs(points):
+            PDBParser.clear_cache()
+            protein = Protein.from_pdb(example_pdb, sasa_points=points)
+            surface = protein.featurize(mode="surface")["surface"]
+            burial_column = surface["feature_names"].index("burial_index")
+            return {
+                "residue graph": np.asarray(
+                    protein.featurize(mode="graph")["graph"]["node_features"][5]
+                ),
+                "atom graph": np.asarray(
+                    protein.featurize(mode="atom_graph")["atom_graph"]["burial_index"]
+                ),
+                "surface": np.asarray(surface["features"])[:, burial_column],
+                "voxel": np.asarray(protein.featurize(mode="voxel")["voxel"]["voxel"])[15],
+            }
+
+        coarse, fine = outputs(100), outputs(400)
+        for name in coarse:
+            assert not np.allclose(coarse[name], fine[name]), name
+
+    def test_the_default_is_unchanged(self, example_pdb):
+        from plmol import Protein
+        from plmol.parsers.pdb_parser import PDBParser
+        from plmol.sasa import DEFAULT_SASA_POINTS
+
+        PDBParser.clear_cache()
+        default = Protein.from_pdb(example_pdb).featurize(mode="graph")["graph"]
+        PDBParser.clear_cache()
+        explicit = Protein.from_pdb(
+            example_pdb, sasa_points=DEFAULT_SASA_POINTS
+        ).featurize(mode="graph")["graph"]
+        for a, b in zip(default["node_features"], explicit["node_features"]):
+            assert np.array_equal(np.asarray(a), np.asarray(b))
+
+    def test_a_new_count_is_not_served_from_the_old_cache(self, example_pdb):
+        # sasa_points is fixed per featurizer rather than per call, so asking
+        # for a different count rebuilds it instead of hitting a cache keyed
+        # without it.
+        from plmol import Protein
+        from plmol.parsers.pdb_parser import PDBParser
+
+        PDBParser.clear_cache()
+        protein = Protein.from_pdb(example_pdb)
+        coarse = np.asarray(protein.featurize(mode="graph")["graph"]["node_features"][5])
+        protein._sasa_points = 400
+        fine = np.asarray(protein.featurize(mode="graph")["graph"]["node_features"][5])
+        assert not np.allclose(coarse, fine)
+
+    def test_the_nucleic_side_too(self, dna_pdb):
+        from plmol import NucleicAcid
+        from plmol.parsers.pdb_parser import PDBParser
+
+        PDBParser.clear_cache()
+        coarse = NucleicAcid.from_pdb(dna_pdb).featurize(mode="atom_graph")["atom_graph"]
+        fine = NucleicAcid.from_pdb(dna_pdb, sasa_points=1000).featurize(mode="atom_graph")["atom_graph"]
+        assert not np.allclose(np.asarray(coarse["sasa"]), np.asarray(fine["sasa"]))

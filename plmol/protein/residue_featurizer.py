@@ -32,6 +32,7 @@ from .utils import (
 
 from ..arrays import FLOAT, INT, one_hot, pairwise_distances, sanitized
 from ..utils import (
+    DEFAULT_SASA_POINTS,
     PEPTIDE_BOND_MAX,
     dense_to_edges,
     knn_mask,
@@ -86,17 +87,23 @@ class ResidueFeaturizer:
         by PDBParser. This class focuses only on feature extraction.
     """
 
-    def __init__(self, pdb_file: str):
+    def __init__(self, pdb_file: str, sasa_points: int = DEFAULT_SASA_POINTS):
         """
         Initialize the featurizer with a PDB file.
 
         Args:
             pdb_file: Path to the PDB file
+            sasa_points: Shrake-Rupley sample points per atom. Raising it
+                narrows the orientation dependence documented on
+                :func:`plmol.sasa.shrake_rupley`, at proportional cost. It is
+                fixed per featurizer rather than per call, so a cached area is
+                never served to a request that asked for a different count.
 
         Note:
             Uses PDBParser internally for consistent preprocessing.
         """
         self.pdb_file = pdb_file
+        self.sasa_points = sasa_points
 
         # Use PDBParser for consistent preprocessing (metal/water/hydrogen exclusion)
         parser = PDBParser(pdb_file)
@@ -154,7 +161,8 @@ class ResidueFeaturizer:
         self._residues = sorted(residue_atoms.keys(), key=lambda k: (k[0], k[1], k[3]))
 
     @classmethod
-    def from_parser(cls, pdb_parser: 'PDBParser', pdb_file: str = None) -> 'ResidueFeaturizer':
+    def from_parser(cls, pdb_parser: 'PDBParser', pdb_file: str = None,
+                    sasa_points: int = DEFAULT_SASA_POINTS) -> 'ResidueFeaturizer':
         """
         Create ResidueFeaturizer from pre-parsed PDBParser data.
 
@@ -172,6 +180,7 @@ class ResidueFeaturizer:
         """
         instance = cls.__new__(cls)
         instance.pdb_file = pdb_file or pdb_parser.pdb_path
+        instance.sasa_points = sasa_points
         instance._init_from_parser(pdb_parser)
         return instance
 
@@ -340,7 +349,7 @@ class ResidueFeaturizer:
         int_to_3letter = {v: k for k, v in AMINO_ACID_3_TO_INT.items()}
 
         try:
-            _, result = sasa_structure_result(self.pdb_file)
+            _, result = sasa_structure_result(self.pdb_file, n_points=self.sasa_points)
             residue_areas = result.residueAreas()
 
             # residueAreas() comes back in the order the file lists residues;

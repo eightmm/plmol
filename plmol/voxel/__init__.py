@@ -16,6 +16,7 @@ from .features import (
     LIGAND_CHANNEL_NAMES,
     PROTEIN_CHANNEL_NAMES,
 )
+from ..utils import DEFAULT_SASA_POINTS
 from ..constants import (
     VOXEL_DEFAULT_RESOLUTION,
     VOXEL_DEFAULT_BOX_SIZE,
@@ -73,6 +74,7 @@ def build_protein_voxel(
     sigma_scale: float = VOXEL_DEFAULT_SIGMA_SCALE,
     cutoff_sigma: float = VOXEL_DEFAULT_CUTOFF_SIGMA,
     pdb_file: Optional[str] = None,
+    sasa_points: int = DEFAULT_SASA_POINTS,
 ) -> Optional[Dict[str, np.ndarray]]:
     """Create protein voxel representation.
 
@@ -101,6 +103,7 @@ def build_protein_voxel(
         sigma_scale=sigma_scale,
         cutoff_sigma=cutoff_sigma,
         pdb_file=pdb_file,
+        sasa_points=sasa_points,
     )
 
 

@@ -9,6 +9,7 @@ import numpy as np
 from .point_cloud import create_surface_points, build_surface_dict
 from .geometry import compute_pointcloud_geometry
 from .chemical import compute_chemical_features
+from ..utils import DEFAULT_SASA_POINTS
 from .type_features import compute_ligand_type_features, compute_protein_type_features
 from .orchestrator import (
     compute_all_vertex_features,
@@ -88,6 +89,7 @@ def build_protein_surface(
     probe_radius: float = SURFACE_DEFAULT_PROBE_RADIUS,
     extra_atom_features: Optional[Dict[str, np.ndarray]] = None,
     pdb_file: Optional[str] = None,
+    sasa_points: int = DEFAULT_SASA_POINTS,
 ) -> Optional[Dict[str, np.ndarray]]:
     """Create protein surface point cloud and optional vertex features.
 
@@ -125,6 +127,7 @@ def build_protein_surface(
                 normals=normals,
                 extra_atom_features=extra_atom_features,
                 pdb_file=pdb_file,
+                sasa_points=sasa_points,
             )
         )
     return surface

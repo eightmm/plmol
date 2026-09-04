@@ -10,6 +10,7 @@ import numpy as np
 
 from .featurizer import ProteinFeaturizer
 from ..errors import InputError, DependencyError
+from ..utils import DEFAULT_SASA_POINTS
 from ..specs import PROTEIN_SPEC, is_all_mode, normalize_modes
 from ..constants import (
     DEFAULT_ATOM_GRAPH_DISTANCE_CUTOFF,
@@ -35,12 +36,14 @@ class Protein(BaseMolecule):
         pdb_path: Optional[str] = None,
         standardize: bool = True,
         keep_hydrogens: bool = False,
+        sasa_points: int = DEFAULT_SASA_POINTS,
     ):
         super().__init__()
         self.pdb_id = pdb_id
         self._pdb_path = pdb_path
         self._standardize = standardize
         self._keep_hydrogens = keep_hydrogens
+        self._sasa_points = sasa_points
         self._residues = []
         self._chains = []
         self._sequence_by_chain: Optional[Dict[str, str]] = None
@@ -55,6 +58,7 @@ class Protein(BaseMolecule):
         path: str,
         standardize: bool = True,
         keep_hydrogens: bool = False,
+        sasa_points: int = DEFAULT_SASA_POINTS,
     ) -> "Protein":
         """Load protein from a PDB file."""
         if str(path).lower().endswith(('.cif', '.mmcif')):
@@ -69,6 +73,7 @@ class Protein(BaseMolecule):
             pdb_path=path,
             standardize=standardize,
             keep_hydrogens=keep_hydrogens,
+            sasa_points=sasa_points,
         )
         obj.metadata["source"] = path
         return obj
@@ -80,6 +85,7 @@ class Protein(BaseMolecule):
         chain_id: Optional[str] = None,
         standardize: bool = True,
         keep_hydrogens: bool = False,
+        sasa_points: int = DEFAULT_SASA_POINTS,
     ) -> "Protein":
         """
         Load protein from an mmCIF/PDBx file.
@@ -93,6 +99,9 @@ class Protein(BaseMolecule):
             keep_hydrogens: Whether the standardized structure keeps hydrogens. The graphs, the
                 surface and the voxel are heavy-atom-only whatever this says;
                 what it changes is the structure the standardizer writes.
+            sasa_points: Shrake-Rupley sample points per atom behind every SASA-derived
+                column; see plmol.sasa.shrake_rupley. Default 100, as in
+                freesasa, Biopython and MDTraj.
         """
         from ..parsers.mmcif_parser import MMCIFParser
         import tempfile
@@ -106,6 +115,7 @@ class Protein(BaseMolecule):
             pdb_path=tmp_path,
             standardize=standardize,
             keep_hydrogens=keep_hydrogens,
+            sasa_points=sasa_points,
         )
         obj.metadata["source"] = path
         obj.metadata["mmcif_chain_id"] = chain_id
@@ -119,14 +129,17 @@ class Protein(BaseMolecule):
         chain_id: Optional[str] = None,
         standardize: bool = True,
         keep_hydrogens: bool = False,
+        sasa_points: int = DEFAULT_SASA_POINTS,
     ) -> "Protein":
         """Load protein from any supported structure file (PDB or mmCIF).
 
         Auto-detects format from file extension.
         """
         if path.endswith(('.cif', '.mmcif')):
-            return cls.from_mmcif(path, chain_id=chain_id, standardize=standardize, keep_hydrogens=keep_hydrogens)
-        return cls.from_pdb(path, standardize=standardize, keep_hydrogens=keep_hydrogens)
+            return cls.from_mmcif(path, chain_id=chain_id, standardize=standardize,
+                                  keep_hydrogens=keep_hydrogens, sasa_points=sasa_points)
+        return cls.from_pdb(path, standardize=standardize, keep_hydrogens=keep_hydrogens,
+                            sasa_points=sasa_points)
 
     @classmethod
     def from_sequence(cls, sequence: str) -> "Protein":
@@ -202,11 +215,13 @@ class Protein(BaseMolecule):
             or self._featurizer_path != self._pdb_path
             or self._featurizer.standardize != self._standardize
             or self._featurizer.keep_hydrogens != self._keep_hydrogens
+            or self._featurizer.sasa_points != self._sasa_points
         ):
             self._featurizer = ProteinFeaturizer(
                 self._pdb_path,
                 standardize=self._standardize,
                 keep_hydrogens=self._keep_hydrogens,
+                sasa_points=self._sasa_points,
             )
             self._featurizer_path = self._pdb_path
 

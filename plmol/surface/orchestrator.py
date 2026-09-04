@@ -20,6 +20,7 @@ from .mapping import (
     _knn_map_scalar,
     _normalize_to_range,
 )
+from ..utils import DEFAULT_SASA_POINTS
 from .type_features import compute_ligand_type_features, compute_protein_type_features
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,7 @@ def compute_all_vertex_features(
     extra_atom_features: Optional[dict[str, np.ndarray]] = None,
     charge_method: str = "gasteiger",
     pdb_file: Optional[str] = None,
+    sasa_points: int = DEFAULT_SASA_POINTS,
 ) -> dict:
     """Compute dMaSIF-inspired surface features at each vertex.
 
@@ -147,7 +149,7 @@ def compute_all_vertex_features(
     else:
         type_feat = compute_protein_type_features(
             verts, atom_positions, mol, knn_atoms, verbose,
-            _knn_data=knn_data, pdb_file=pdb_file,
+            _knn_data=knn_data, pdb_file=pdb_file, sasa_points=sasa_points,
         )
         type_feat['atom_type'] = np.zeros((n_verts, 6), dtype=np.float32)
         type_feat['hybridization'] = np.zeros(n_verts, dtype=np.float32)
@@ -287,6 +289,7 @@ def compute_protein_surface_features(
     normals: Optional[np.ndarray] = None,
     extra_atom_features: Optional[dict[str, np.ndarray]] = None,
     pdb_file: Optional[str] = None,
+    sasa_points: int = DEFAULT_SASA_POINTS,
 ) -> dict:
     """Compute protein-specific surface features (residue/patch scale).
 
@@ -307,6 +310,7 @@ def compute_protein_surface_features(
         normals=normals,
         extra_atom_features=extra_atom_features,
         pdb_file=pdb_file,
+        sasa_points=sasa_points,
     )
 
     feature_keys = [

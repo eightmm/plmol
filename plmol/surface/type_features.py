@@ -13,7 +13,7 @@ from ..constants import (
     ATOM_TYPE_MAP,
     BACKBONE_ATOM_SET,
 )
-from ..utils import compute_burial_index
+from ..utils import DEFAULT_SASA_POINTS, compute_burial_index
 from .mapping import (
     SURFACE_KNN_ATOMS,
     _build_knn_weights,
@@ -115,6 +115,7 @@ def compute_protein_type_features(
     verbose: bool = False,
     _knn_data: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]] = None,
     pdb_file: Optional[str] = None,
+    sasa_points: int = DEFAULT_SASA_POINTS,
 ) -> dict:
     """Compute protein-specific type features mapped to surface vertices.
 
@@ -157,7 +158,8 @@ def compute_protein_type_features(
 
     # Burial index: 1.0 - relative_sasa (clamped to [0, 1])
     burial = compute_burial_index(
-        atom_positions, res_names, atom_names, n_prot_atoms, pdb_file=pdb_file
+        atom_positions, res_names, atom_names, n_prot_atoms, pdb_file=pdb_file,
+        n_points=sasa_points,
     )
 
     # Residue type one-hot (20 amino acids)

@@ -10,6 +10,7 @@ from ..protein.utils import PDBParser, ParsedAtom
 from ..errors import InputError
 from ..spatial import pairs_within
 from ..utils import (
+    DEFAULT_SASA_POINTS,
     PHOSPHODIESTER_BOND_MAX,
     atom_sasa_features,
     dihedral_angles,
@@ -67,8 +68,10 @@ class NucleicFeaturizer:
     - Atom-level graph with token-based features
     """
 
-    def __init__(self, pdb_path: str, chain_id: Optional[str] = None):
+    def __init__(self, pdb_path: str, chain_id: Optional[str] = None,
+                 sasa_points: int = DEFAULT_SASA_POINTS):
         self.pdb_path = pdb_path
+        self.sasa_points = sasa_points
         self.chain_id = chain_id
         self._parser = PDBParser(pdb_path, include_nucleic_acids=True)
         self._residues: Optional[List[Dict]] = None
@@ -501,6 +504,7 @@ class NucleicFeaturizer:
             coords_arr, atom_residue_names, atom_names,
             max_sasa=NUCLEOTIDE_MAX_SASA,
             default_max_sasa=NUCLEOTIDE_MAX_SASA["UNK_NT"],
+            n_points=self.sasa_points,
         )
         is_backbone = np.array(
             [float(name in NUCLEOTIDE_BACKBONE_SET) for name in atom_names],

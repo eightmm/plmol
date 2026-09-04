@@ -116,9 +116,11 @@ def shrake_rupley(
        Everything derived from SASA inherits the behaviour: the residue SASA
        block, ``burial_index`` and ``relative_sasa`` on the atom graph, the
        surface point cloud's burial channel, and the voxel's. Callers who need
-       a tighter answer can raise ``n_points`` here and in
-       :func:`native_structure_result`; the featurizers do not expose it and always sample
-       at the default.
+       a tighter answer raise it once, on the molecule:
+       ``Protein.from_pdb(path, sasa_points=1000)`` and the nucleic equivalent
+       carry it to every one of those. It is fixed per molecule rather than
+       per call, so no cache can serve one count's areas to a request that
+       asked for another.
 
     Each atom's expanded sphere is sampled at ``n_points`` positions; a point is
     accessible unless it falls inside another atom's expanded sphere. The area

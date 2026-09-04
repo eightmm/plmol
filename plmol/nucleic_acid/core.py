@@ -9,6 +9,7 @@ import numpy as np
 from ..base import BaseMolecule
 from ..constants import DNA_RESIDUES, RNA_RESIDUES
 from ..specs import NUCLEIC_ACID_SPEC, is_all_mode, normalize_modes
+from ..utils import DEFAULT_SASA_POINTS
 from .featurizer import NucleicFeaturizer
 from ..errors import InputError
 
@@ -39,11 +40,13 @@ class NucleicAcid(BaseMolecule):
         pdb_path: Optional[str] = None,
         chain_id: Optional[str] = None,
         na_type: Optional[str] = None,
+        sasa_points: int = DEFAULT_SASA_POINTS,
     ):
         super().__init__()
         self._pdb_path = pdb_path
         self._chain_id = chain_id
         self._na_type = na_type  # "DNA", "RNA", or None (auto-detected)
+        self._sasa_points = sasa_points
         self._featurizer: Optional[NucleicFeaturizer] = None
 
     # ------------------------------------------------------------------
@@ -51,9 +54,14 @@ class NucleicAcid(BaseMolecule):
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_pdb(cls, pdb_path: str, chain_id: Optional[str] = None) -> "NucleicAcid":
-        """Load nucleic acid from a PDB file."""
-        obj = cls(pdb_path=pdb_path, chain_id=chain_id)
+    def from_pdb(cls, pdb_path: str, chain_id: Optional[str] = None,
+                 sasa_points: int = DEFAULT_SASA_POINTS) -> "NucleicAcid":
+        """Load nucleic acid from a PDB file.
+
+        *sasa_points* is the Shrake-Rupley sample count behind the atom graph's
+        SASA columns; see :func:`plmol.sasa.shrake_rupley`.
+        """
+        obj = cls(pdb_path=pdb_path, chain_id=chain_id, sasa_points=sasa_points)
         obj.metadata["source"] = pdb_path
         return obj
 
@@ -138,7 +146,9 @@ class NucleicAcid(BaseMolecule):
                 "NucleicAcid has no PDB path. Initialize from PDB first."
             )
         if self._featurizer is None:
-            self._featurizer = NucleicFeaturizer(self._pdb_path, self._chain_id)
+            self._featurizer = NucleicFeaturizer(
+                self._pdb_path, self._chain_id, sasa_points=self._sasa_points
+            )
         return self._featurizer
 
     # ------------------------------------------------------------------

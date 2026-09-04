@@ -197,9 +197,11 @@ Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA,
 > This is the discretisation floor of Shrake–Rupley rather than a defect in this
 > implementation; freesasa, Biopython and MDTraj all default to 100 points too.
 > `burial_index` and `relative_sasa` on the atom graph, the surface burial
-> channel and the voxel's inherit the same behaviour. The featurizers do not
-> expose `n_points`; `plmol.sasa.shrake_rupley` and
-> `plmol.sasa.native_structure_result` do.
+> channel and the voxel's inherit the same behaviour. Raise it once on the
+> molecule — `Protein.from_pdb(path, sasa_points=1000)`, and the same keyword on
+> `from_mmcif`, `from_structure` and `NucleicAcid.from_pdb` — and all four
+> follow. It is fixed per molecule rather than per call, so no cache serves one
+> count's areas to a request that asked for another.
 >
 > Orienting the lattice by a frame taken from the coordinates would make the
 > answer deterministic but no more accurate, and the frame is only as stable as

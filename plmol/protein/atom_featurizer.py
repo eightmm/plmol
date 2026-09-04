@@ -28,6 +28,7 @@ from ..constants import (
     BACKBONE_ATOM_SET,
 )
 from ..utils import (
+    DEFAULT_SASA_POINTS,
     PEPTIDE_BOND_MAX,
     dihedral_angles,
     residue_chain_breaks,
@@ -48,8 +49,15 @@ class AtomFeaturizer:
     Extracts atomic features including tokens, coordinates, and SASA.
     """
 
-    def __init__(self):
-        """Initialize the atom featurizer."""
+    def __init__(self, sasa_points: int = DEFAULT_SASA_POINTS):
+        """Initialize the atom featurizer.
+
+        Args:
+            sasa_points: Shrake-Rupley sample points per atom. Fixed per
+                featurizer, so a cached area is never served to a request that
+                asked for a different count.
+        """
+        self.sasa_points = sasa_points
         self.res_atm_token = RESIDUE_ATOM_TOKEN
         self.res_token = RESIDUE_TOKEN
         self.aa_letter = AMINO_ACID_LETTERS
@@ -135,7 +143,7 @@ class AtomFeaturizer:
                     - 'chain_label': Chain labels
                     - 'radius': Atomic radii
         """
-        structure, result = sasa_structure_result(pdb_file)
+        structure, result = sasa_structure_result(pdb_file, n_points=self.sasa_points)
 
         n_atoms = result.nAtoms()
 
