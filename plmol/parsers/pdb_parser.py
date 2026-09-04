@@ -93,7 +93,10 @@ def is_hydrogen(line: str) -> bool:
     """
     if len(line) < 14:
         return False
-    return element_symbol(line) == 'H'
+    # Deuterium counts. It is an isotope of hydrogen, is_protein_atom already
+    # drops both, and remove_hydrogens=True was leaving D atoms in the file it
+    # wrote while removing the H beside them.
+    return element_symbol(line) in HYDROGEN_ELEMENTS
 
 
 def parse_pdb_line(line: str) -> ParsedAtom:
@@ -172,6 +175,9 @@ def parse_pdb_line(line: str) -> ParsedAtom:
         occupancy=occupancy,
     )
 
+
+#: Hydrogen and its heavy isotope, which a neutron structure writes as D.
+HYDROGEN_ELEMENTS = frozenset({'H', 'D'})
 
 #: Two-letter element symbols that turn up in structure files. Only consulted
 #: for residues that are not standard, where the same two letters are an atom
@@ -305,9 +311,7 @@ def is_protein_atom(atom: ParsedAtom, include_nucleic_acids: bool = False) -> bo
     filter alike -- they used not to, and an mmCIF handed back its zinc and
     its ligand as protein.
     """
-    # Hydrogen and its heavy isotope. Neutron structures write D, which the
-    # mmCIF path dropped and the PDB path kept.
-    if atom.element in ('H', 'D'):
+    if atom.element in HYDROGEN_ELEMENTS:
         return False
 
     if atom.res_name == 'HOH':

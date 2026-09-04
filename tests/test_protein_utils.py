@@ -103,6 +103,61 @@ NO_ELEMENT_COLUMN = [
 ]
 
 
+class TestDeuteriumCountsAsHydrogen:
+    """A neutron structure writes D where an X-ray one writes H.
+
+    is_protein_atom dropped both, is_hydrogen dropped only H, and the
+    standardizer asked is_hydrogen -- so remove_hydrogens=True wrote a file
+    still carrying every deuterium, beside the hydrogens it had removed.
+    """
+
+    @staticmethod
+    def _line(serial, name, res, element, record="ATOM  ", num=1):
+        row = list(" " * 80)
+        row[0:6] = record.ljust(6)
+        row[6:11] = f"{serial:5d}"
+        row[12:16] = (" " + name).ljust(4)[:4]
+        row[17:20] = res.rjust(3)[:3]
+        row[21] = "A"
+        row[22:26] = f"{num:4d}"
+        row[30:38] = f"{serial:8.3f}"
+        row[38:46] = f"{0.0:8.3f}"
+        row[46:54] = f"{0.0:8.3f}"
+        row[54:60] = "  1.00"
+        row[60:66] = "  0.00"
+        row[76:78] = element.rjust(2)
+        return "".join(row).rstrip() + "\n"
+
+    def test_is_hydrogen_says_so(self):
+        assert is_hydrogen(self._line(1, "D1", "LIG", "D"))
+        assert is_hydrogen(self._line(1, "H1", "LIG", "H"))
+        assert not is_hydrogen(self._line(1, "C1", "LIG", "C"))
+
+    def test_removing_hydrogens_removes_deuterium(self, tmp_path):
+        """A ligand is the case that shows it: a standard residue's atom list
+        would have dropped the D whatever the rule said."""
+        from plmol.protein.pdb_standardizer import PDBStandardizer
+
+        text = "".join(self._line(i, n, "ALA", e) for i, (n, e) in
+                       enumerate([("N", "N"), ("CA", "C"), ("C", "C"), ("O", "O")], 1))
+        text += "".join(self._line(10 + i, n, "LIG", e, "HETATM", 900) for i, (n, e) in
+                        enumerate([("C1", "C"), ("O1", "O"), ("H1", "H"), ("D1", "D")], 1))
+        source = tmp_path / "neutron.pdb"
+        source.write_text(text + "END\n")
+
+        stripped = tmp_path / "stripped.pdb"
+        PDBStandardizer(remove_hydrogens=True).standardize(str(source), str(stripped))
+        names = [l[12:16].strip() for l in open(stripped)
+                 if l[:6].strip() in ("ATOM", "HETATM")]
+        assert "H1" not in names and "D1" not in names
+
+        kept = tmp_path / "kept.pdb"
+        PDBStandardizer(remove_hydrogens=False).standardize(str(source), str(kept))
+        names = [l[12:16].strip() for l in open(kept)
+                 if l[:6].strip() in ("ATOM", "HETATM")]
+        assert "H1" in names and "D1" in names, "keeping hydrogens keeps both"
+
+
 class TestElementWithoutTheColumn:
     """Where the element comes from when columns 77-78 are missing.
 
