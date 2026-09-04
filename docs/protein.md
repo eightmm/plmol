@@ -459,9 +459,9 @@ backbone = result["backbone"]
 |-----|-------|------|-------------|
 | `backbone_coords` | `(L, 4, 3)` | `float32` | N, CA, C, O coordinates |
 | `cb_coords` | `(L, 3)` | `float32` | Virtual CB (ProteinMPNN geometry) |
-| `dihedrals` | `(L, 3)` | `float32` | phi, psi, omega (radians, chain-boundary-aware) |
+| `dihedrals` | `(L, 3)` | `float32` | phi, psi, omega in radians. Zero where no peptide bond joins the two residues the angle spans: a chain boundary, or the two sides of a missing loop |
 | `dihedrals_sincos` | `(L, 6)` | `float32` | sin/cos encoding |
-| `dihedrals_mask` | `(L, 3)` | `bool` | True where dihedral is valid |
+| `dihedrals_mask` | `(L, 3)` | `bool` | True where the dihedral is valid — false at a chain end and at both sides of a break |
 | `orientation_frames` | `(L, 3, 3)` | `float32` | N-CA-C local coordinate frames |
 | `residue_types` | `(L,)` | `int64` | Residue type (0-20) |
 | `chain_ids` | `(L,)` | `int64` | Integer chain ID |

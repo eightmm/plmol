@@ -13,6 +13,7 @@ from .geometry import (
     calculate_dihedral,
     calculate_local_frames,
     calculate_virtual_cb,
+    peptide_bonded,
     rbf_encode,
 )
 
@@ -53,7 +54,11 @@ def compute_backbone_dihedrals(
         idx_t = np.array(idx, dtype=INT)
         # Extract N-CA-C for this chain and call vectorized dihedral
         chain_nac = coords[idx_t, :3, :]  # (n, 3, 3)
-        raw = calculate_dihedral(chain_nac)  # (n, 3)
+        # Consecutive within a chain is not the same as bonded: a crystal
+        # structure jumps over a disordered loop and the residues either side
+        # are neighbours in this list without being neighbours in the protein.
+        breaks = ~peptide_bonded(chain_nac[:-1, 2], chain_nac[1:, 0])
+        raw = calculate_dihedral(chain_nac, breaks=breaks)  # (n, 3)
 
         # phi: raw[:, 0] — valid for positions 1..n-1 (first is padding 0)
         dihedrals[idx_t[1:], 0] = raw[1:, 0]
@@ -66,6 +71,14 @@ def compute_backbone_dihedrals(
         # omega: raw[i-1, 2] = omega_i — valid for positions 1..n-1
         dihedrals[idx_t[1:], 2] = raw[:n - 1, 2]
         mask[idx_t[1:], 2] = True
+
+        # An angle read across a break is zero, and the mask says so: psi of
+        # the residue before, phi and omega of the one after.
+        broken = np.flatnonzero(breaks)
+        if broken.size:
+            mask[idx_t[broken], 1] = False
+            mask[idx_t[broken + 1], 0] = False
+            mask[idx_t[broken + 1], 2] = False
 
     return dihedrals, mask
 

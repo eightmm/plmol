@@ -126,3 +126,52 @@ class TestComputeBackboneFeatures:
         assert result["num_residues"] == L
         assert result["num_chains"] == 2
         assert result["k_neighbors"] == 3
+
+
+class TestBackboneDihedralsStopAtAGap:
+    """Consecutive within a chain is not the same as bonded."""
+
+    @staticmethod
+    def _gapped(example_pdb, tmp_path):
+        kept = [
+            line.rstrip("\n")
+            for line in open(example_pdb)
+            if line.startswith(("ATOM  ", "HETATM"))
+            and not (line[21] == "A" and 101 <= int(line[22:26]) <= 110)
+        ]
+        path = tmp_path / "backbone_gap.pdb"
+        path.write_text("\n".join(kept) + "\nEND\n")
+        return str(path)
+
+    def test_a_missing_loop_invalidates_three_angles(self, example_pdb, tmp_path):
+        from plmol import Protein
+        from plmol.parsers.pdb_parser import PDBParser
+
+        PDBParser.clear_cache()
+        intact = Protein.from_pdb(example_pdb, standardize=False).featurize(mode="backbone")["backbone"]
+        gapped_path = self._gapped(example_pdb, tmp_path)
+        gapped = Protein.from_pdb(gapped_path, standardize=False).featurize(mode="backbone")["backbone"]
+
+        atoms = PDBParser(gapped_path).protein_atoms
+        seen, order = set(), []
+        for atom in atoms:
+            key = (atom.chain_id, atom.res_num, atom.insertion_code)
+            if key not in seen:
+                seen.add(key)
+                order.append(key)
+        order.sort()
+        before = order.index(("A", 100, ""))
+        after = order.index(("A", 111, ""))
+        assert after == before + 1
+
+        mask = np.asarray(gapped["dihedrals_mask"])
+        dihedrals = np.asarray(gapped["dihedrals"])
+        # psi of 100, phi and omega of 111 all read across the break.
+        assert not mask[before, 1]
+        assert not mask[after, 0]
+        assert not mask[after, 2]
+        assert dihedrals[before, 1] == 0.0
+        assert dihedrals[after, 0] == 0.0
+        assert dihedrals[after, 2] == 0.0
+        # The intact structure keeps them.
+        assert np.asarray(intact["dihedrals_mask"])[:, 1].sum() > 400
