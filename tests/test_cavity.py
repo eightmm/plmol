@@ -6,6 +6,8 @@ shapes whose cavities are known by construction, then the real structure,
 where the ligand says where the answer has to be.
 """
 
+import math
+
 import numpy as np
 import pytest
 
@@ -163,6 +165,19 @@ class TestContract:
         shell = hollow_sphere(10.0)
         cavity = detect_cavities(shell, uniform(len(shell)), resolution=0.8)[0]
         assert abs(cavity.volume - cavity.num_points * 0.8 ** 3) < 1e-6
+
+    def test_the_centre_is_the_exact_centroid_of_the_points(self):
+        """A float32 sum over thousands of points drifts, and by an amount
+        that depends on the array's memory layout. Compared against a
+        summation that cannot drift: math.fsum, column by column."""
+        shell = hollow_sphere(10.0)
+        cavity = detect_cavities(shell, uniform(len(shell)))[0]
+        exact = np.array(
+            [math.fsum(cavity.points[:, axis].tolist()) / len(cavity.points)
+             for axis in range(3)],
+            dtype=cavity.center.dtype,
+        )
+        assert np.array_equal(cavity.center, exact)
 
     def test_the_record_is_frozen(self):
         shell = hollow_sphere(9.0)

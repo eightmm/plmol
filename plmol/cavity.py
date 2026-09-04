@@ -324,7 +324,12 @@ def _describe(points, indices, enclosed, coords, reach,
     # grows one, this should use it.
     from .spatial import _Grid
 
-    center = points.mean(axis=0).astype(FLOAT)
+    # Accumulated in float64. The points are float32 and a cavity has
+    # thousands of them, so a float32 sum drifts by tens of ULP -- and by a
+    # different amount depending on how the array happens to be laid out in
+    # memory, since that decides whether numpy sums pairwise or straight
+    # through. The centroid is a reported number; it should not depend on that.
+    center = points.mean(axis=0, dtype=np.float64).astype(FLOAT)
     buriedness = float(enclosed[indices[:, 0], indices[:, 1], indices[:, 2]].mean())
 
     # Lining atoms: any atom whose expanded sphere plus a margin reaches a
