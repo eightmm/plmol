@@ -27,6 +27,7 @@ from .utils import (
     PDBParser,
     calculate_sidechain_centroid,
     normalize_residue_name,
+    residue_label_parts,
 )
 
 from ..arrays import FLOAT, INT, one_hot, pairwise_distances, sanitized
@@ -336,25 +337,38 @@ class ResidueFeaturizer:
             _, result = sasa_structure_result(self.pdb_file)
             residue_areas = result.residueAreas()
 
-            sasas = []
-            residue_idx = 0
+            # residueAreas() comes back in the order the file lists residues;
+            # self._residues is sorted by (chain, number, insertion code).
+            # Zipping the two positionally, as this did until 0.4.x, put a
+            # residue's SASA on whichever row happened to sit at the same
+            # index and normalised it by another residue's reference area.
+            # Any file whose chains are not in alphabetical order, or whose
+            # residues are not ascending, was affected.
+            row_of = {
+                (key[0], key[1], key[3]): index
+                for index, key in enumerate(self._residues)
+            }
+            sasa_tensor = np.zeros((num_residues, sasa_dim), dtype=FLOAT)
+            matched = 0
             for chain, residues in residue_areas.items():
-                for residue, values in residues.items():
-                    # Look up per-residue max SASA for normalization
-                    if residue_idx < num_residues:
-                        res_type_int = self._residues[residue_idx][2]
-                        res_name_3 = int_to_3letter.get(res_type_int, 'UNK')
-                        max_sasa = RESIDUE_MAX_SASA.get(res_name_3, 200.0)
-                    else:
-                        max_sasa = 200.0
-                    residue_idx += 1
+                for label, values in residues.items():
+                    res_num, insertion_code = residue_label_parts(label)
+                    index = row_of.get((chain, res_num, insertion_code))
+                    if index is None:
+                        index = row_of.get((chain.strip(), res_num, insertion_code))
+                    if index is None:
+                        continue
+                    matched += 1
+
+                    res_name_3 = int_to_3letter.get(self._residues[index][2], 'UNK')
+                    max_sasa = RESIDUE_MAX_SASA.get(res_name_3, 200.0)
 
                     # relativeTotal is a fraction of the residue's reference
                     # area, not a percentage.
                     burial_index = 1.0 - values.relativeTotal
                     polar_apolar_ratio = values.polar / (values.polar + values.apolar + 1e-8)
 
-                    sasas.append([
+                    sasa_tensor[index] = [
                         values.polar / max_sasa,
                         values.apolar / max_sasa,
                         values.mainChain / max_sasa,
@@ -366,24 +380,15 @@ class ResidueFeaturizer:
                         values.relativeSideChain,
                         burial_index,
                         polar_apolar_ratio,
-                    ])
+                    ]
 
-            sasa_tensor = np.nan_to_num(np.asarray(sasas, dtype=FLOAT))
-
-            # Validate dimensions
-            if sasa_tensor.shape[0] != num_residues:
+            if matched != num_residues:
                 logger.warning(
-                    f"SASA residue count ({sasa_tensor.shape[0]}) != structure residue count ({num_residues}). "
-                    "This means two residues were grouped as one."
+                    f"SASA covered {matched} of {num_residues} residues; the rest "
+                    "keep zeros. This usually means two residues were grouped as one."
                 )
-                # Adjust to match expected dimensions
-                if sasa_tensor.shape[0] > num_residues:
-                    sasa_tensor = sasa_tensor[:num_residues]
-                else:
-                    padding = np.zeros((num_residues - sasa_tensor.shape[0], sasa_dim), dtype=FLOAT)
-                    sasa_tensor = np.concatenate([sasa_tensor, padding], axis=0)
 
-            return sasa_tensor
+            return np.nan_to_num(sasa_tensor)
 
         except Exception as e:
             logger.warning(f"FreeSASA calculation failed: {e}. Returning zeros for SASA features.")

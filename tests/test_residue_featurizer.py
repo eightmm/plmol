@@ -147,3 +147,53 @@ class TestAtomOrderInsideResidue:
             if named is None:
                 continue
             assert np.array_equal(rf.get_residue_coordinates_numpy(residue)[1], named)
+
+
+class TestSasaRowAlignment:
+    """SASA rows belong to the residue they were computed for."""
+
+    @staticmethod
+    def _chains_reversed(source: str, target: str) -> str:
+        head, body, tail, seen = [], [], [], False
+        for line in open(source):
+            line = line.rstrip("\n")
+            if line.startswith(("ATOM  ", "HETATM")):
+                body.append(line)
+                seen = True
+            elif seen:
+                tail.append(line)
+            else:
+                head.append(line)
+
+        by_chain: dict = {}
+        for line in body:
+            by_chain.setdefault(line[21], []).append(line)
+        out = [l for chain in reversed(list(by_chain)) for l in by_chain[chain]]
+        renumbered = [l[:6] + f"{i + 1:5d}" + l[11:] for i, l in enumerate(out)]
+        with open(target, "w") as fh:
+            fh.write("\n".join(head + renumbered + tail) + "\n")
+        return target
+
+    def test_sasa_follows_the_residue_not_the_file_order(self, example_pdb, tmp_path):
+        # residueAreas() is in file order, get_residues() is sorted; a file whose
+        # chains are not alphabetical separates the two.
+        PDBParser.clear_cache()
+        reordered = self._chains_reversed(example_pdb, str(tmp_path / "b_first.pdb"))
+
+        reference = ResidueFeaturizer(example_pdb)
+        moved = ResidueFeaturizer(reordered)
+        assert reference.get_residues() == moved.get_residues()
+        assert np.allclose(reference.calculate_sasa(), moved.calculate_sasa())
+
+    def test_sasa_is_normalised_by_its_own_residue(self, example_pdb):
+        # Column 4 is relativeTotal and column 9 is 1 - relativeTotal; both come
+        # straight from the SASA result. Columns 0..3 divide by RESIDUE_MAX_SASA
+        # for the residue on that row, so they must sum to column 4.
+        from plmol.constants import AMINO_ACID_3_TO_INT
+
+        PDBParser.clear_cache()
+        rf = ResidueFeaturizer(example_pdb)
+        sasa = rf.calculate_sasa()
+        assert np.allclose(sasa[:, 0] + sasa[:, 1], sasa[:, 4], atol=1e-4)
+        assert np.allclose(sasa[:, 2] + sasa[:, 3], sasa[:, 4], atol=1e-4)
+        assert np.allclose(sasa[:, 9], 1.0 - sasa[:, 4], atol=1e-5)

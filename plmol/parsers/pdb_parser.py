@@ -7,6 +7,7 @@ and the PDBParser class (implements StructureParser).
 
 import os
 import logging
+import re
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
 
@@ -237,6 +238,22 @@ def _infer_element(name_field: str, res_name: str = '') -> str:
     if len(element) >= 2 and element[:2].upper() in _TWO_LETTER_ELEMENTS:
         return element[:2].upper()
     return element[0].upper()
+
+
+_RESIDUE_LABEL = re.compile(r'^\s*(-?\d+)\s*(.*?)\s*$')
+
+
+def residue_label_parts(label) -> Tuple[int, str]:
+    """Split a residue label such as "100", "-2" or "100A" into number and code.
+
+    PDB residue labels are not integers: an insertion code rides along in the
+    same field, and a number may be negative. Callers that want to match a
+    label back to a parsed residue need both halves.
+    """
+    match = _RESIDUE_LABEL.match(str(label))
+    if not match:
+        return 0, ''
+    return int(match.group(1)), match.group(2)
 
 
 def normalize_residue_name(res_name: str, atom_name: str = '') -> str:

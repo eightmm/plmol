@@ -6,6 +6,7 @@ from ..parsers.pdb_parser import (
     parse_pdb_line, parse_pdb_atom_line,
     normalize_residue_name,
     calculate_sidechain_centroid,
+    residue_label_parts,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "parse_pdb_line", "parse_pdb_atom_line",
     "normalize_residue_name",
     "calculate_sidechain_centroid",
+    "residue_label_parts",
 ]
