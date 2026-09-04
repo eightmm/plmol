@@ -196,9 +196,32 @@ atom_graph = result["atom_graph"]
 | `residue_atom_indices` | `List[List[int]]` | -- | Atom indices per residue (reverse mapping) |
 | `edge_index` | `(2, E)` | `int64` | Sparse edge pairs (source, target) |
 | `edge_distances` | `(E,)` | `float32` | Euclidean distance (A) for each edge |
+| `sasa` | `(A,)` | `float32` | Per-atom accessible surface area (A^2) |
+| `relative_sasa` | `(A,)` | `float32` | That over `NUCLEOTIDE_MAX_SASA`, in [0, 1] |
+| `burial_index` | `(A,)` | `float32` | `1 - relative_sasa`; 1 is fully buried |
+| `is_polar_sasa` | `(A,)` | `float32` | 1.0 when the element is N, O or S |
+| `is_backbone` | `(A,)` | `float32` | 1.0 for a phosphate or sugar atom, 0.0 for a base atom |
 | `num_atoms` | scalar | `int` | Total atom count (A) |
 
-Edge construction: all atom pairs within `distance_cutoff`.
+Edge construction: all atom pairs within `distance_cutoff`, found on a cell
+grid rather than by comparing every pair.
+
+`as_graph` stacks the five continuous keys into `node_features`, **5-dim**,
+in this order:
+
+| Index | Key |
+|-------|-----|
+| `[0:1]` | `burial_index` |
+| `[1:2]` | `is_backbone` |
+| `[2:3]` | `is_polar_sasa` |
+| `[3:4]` | `relative_sasa` |
+| `[4:5]` | `sasa` |
+
+> Until 0.4.x this graph had no per-atom features at all: `node_features` came
+> out of `as_graph` with a width of zero, while the protein atom graph carried
+> ten columns. `NUCLEOTIDE_MAX_SASA` was imported by the featurizer and never
+> read. The SASA here carries the same orientation dependence described for
+> the protein block in [protein.md](protein.md).
 
 ### Standard Nucleotide Atoms
 

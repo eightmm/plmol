@@ -7,13 +7,15 @@ import numpy as np
 
 from ..parsers.pdb_parser import normalize_nucleotide_name
 from ..protein.utils import PDBParser, ParsedAtom
-from ..utils import dihedral_angles
+from ..spatial import pairs_within
+from ..utils import atom_sasa_features, dihedral_angles
 from .base_pairs import base_pair_arrays, find_base_pairs
 from ..constants import (
     NUCLEOTIDE_TOKEN,
     NUCLEOTIDE_TYPES,
     NUM_NUCLEOTIDE_TYPES,
     STANDARD_NUCLEOTIDE_ATOMS,
+    NUCLEOTIDE_BACKBONE_SET,
     NUCLEOTIDE_MAX_SASA,
     NUCLEOTIDE_PROPERTIES,
     PURINES,
@@ -387,10 +389,19 @@ class NucleicFeaturizer:
         Atom-level graph with token-based features.
 
         Node features:
-          - atom_tokens: (A,) int — (residue_idx * max_atoms + atom_idx_in_residue)
           - residue_token: (A,) int — NUCLEOTIDE_TOKEN for parent residue
           - coords: (A, 3) float
           - atom_to_residue: (A,) int — which residue each atom belongs to
+          - sasa: (A,) float — per-atom accessible area in square Angstrom
+          - relative_sasa: (A,) float — that over NUCLEOTIDE_MAX_SASA
+          - burial_index: (A,) float — 1 - relative_sasa
+          - is_polar_sasa: (A,) float — 1.0 when the element is N, O or S
+          - is_backbone: (A,) float — 1.0 for phosphate and sugar atoms
+
+        The five per-atom features are what the protein atom graph has carried
+        since 0.2.x. This graph had none until 0.4.x, so ``node_features`` came
+        out of ``as_graph`` with a width of zero, and NUCLEOTIDE_MAX_SASA was
+        imported here and never read.
 
         Edge features:
           - edge_index: (2, E) int
@@ -402,6 +413,8 @@ class NucleicFeaturizer:
         residue_tokens: List[int] = []
         atom_to_residue: List[int] = []
         residue_atom_indices: List[List[int]] = []
+        atom_names: List[str] = []
+        atom_residue_names: List[str] = []
 
         atom_idx = 0
         for res_idx, res in enumerate(residues):
@@ -417,6 +430,8 @@ class NucleicFeaturizer:
                 all_coords.append(c)
                 residue_tokens.append(rtok)
                 atom_to_residue.append(res_idx)
+                atom_names.append(aname)
+                atom_residue_names.append(rname)
                 res_atoms.append(atom_idx)
                 atom_idx += 1
 
@@ -424,30 +439,39 @@ class NucleicFeaturizer:
 
         n_atoms = len(all_coords)
         if n_atoms == 0:
+            empty = np.zeros(0, dtype=np.float32)
             return {
                 "coords": np.zeros((0, 3), dtype=np.float32),
                 "residue_token": np.zeros(0, dtype=np.int64),
                 "atom_to_residue": np.zeros(0, dtype=np.int64),
                 "residue_atom_indices": residue_atom_indices,
                 "edge_index": np.zeros((2, 0), dtype=np.int64),
-                "edge_distances": np.zeros(0, dtype=np.float32),
+                "edge_distances": empty,
+                "sasa": empty,
+                "relative_sasa": empty,
+                "burial_index": empty,
+                "is_polar_sasa": empty,
+                "is_backbone": empty,
                 "num_atoms": 0,
             }
 
         coords_arr = np.stack(all_coords, axis=0)
 
-        # Build spatial edges within cutoff
-        src, dst, dists = [], [], []
-        for i in range(n_atoms):
-            for j in range(i + 1, n_atoms):
-                d = float(np.linalg.norm(coords_arr[i] - coords_arr[j]))
-                if d <= distance_cutoff:
-                    src += [i, j]
-                    dst += [j, i]
-                    dists += [d, d]
+        # The cell grid, not a full distance matrix: the double loop this
+        # replaces took 6.4 seconds on 2000 atoms, which a tRNA exceeds.
+        src_idx, dst_idx, edge_distances = pairs_within(coords_arr, distance_cutoff)
+        edge_index = np.stack([src_idx, dst_idx], axis=0).astype(np.int64)
+        edge_distances = edge_distances.astype(np.float32)
 
-        edge_index = np.array([src, dst], dtype=np.int64) if src else np.zeros((2, 0), dtype=np.int64)
-        edge_distances = np.array(dists, dtype=np.float32) if dists else np.zeros(0, dtype=np.float32)
+        sasa = atom_sasa_features(
+            coords_arr, atom_residue_names, atom_names,
+            max_sasa=NUCLEOTIDE_MAX_SASA,
+            default_max_sasa=NUCLEOTIDE_MAX_SASA["UNK_NT"],
+        )
+        is_backbone = np.array(
+            [float(name in NUCLEOTIDE_BACKBONE_SET) for name in atom_names],
+            dtype=np.float32,
+        )
 
         return {
             "coords": coords_arr,
@@ -456,5 +480,10 @@ class NucleicFeaturizer:
             "residue_atom_indices": residue_atom_indices,
             "edge_index": edge_index,
             "edge_distances": edge_distances,
+            "sasa": sasa["sasa"],
+            "relative_sasa": sasa["relative_sasa"],
+            "burial_index": sasa["burial_index"],
+            "is_polar_sasa": sasa["is_polar_sasa"],
+            "is_backbone": is_backbone,
             "num_atoms": n_atoms,
         }

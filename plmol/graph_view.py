@@ -68,6 +68,17 @@ _NA_RESIDUE_NODE_KEYS = (
 _NA_RESIDUE_TOKEN_KEYS = ("nucleotide_type",)
 
 # Nucleic acid atom graph: nodes are token-valued, edges carry a distance.
+# Per-atom continuous keys of the nucleic acid atom graph, in concatenation
+# order. There were none until 0.4.x: node_features came out of this view with
+# a width of zero while the protein atom graph carried ten.
+_NA_ATOM_NODE_KEYS = (
+    "burial_index",
+    "is_backbone",
+    "is_polar_sasa",
+    "relative_sasa",
+    "sasa",
+)
+
 _NA_ATOM_TOKEN_KEYS = ("residue_token",)
 _NA_ATOM_EDGE_KEYS = ("edge_distances",)
 
@@ -249,7 +260,7 @@ def _from_na_atom_graph(view: Dict[str, Any], source: str) -> Dict[str, Any]:
     num_edges = int(edge_index.shape[1])
     num_nodes = int(_array(view["coords"]).shape[0])
     return _pack(
-        node_features=np.zeros((num_nodes, 0), dtype=FLOAT),
+        node_features=_concat_columns(view, _NA_ATOM_NODE_KEYS, num_nodes),
         node_tokens=_concat_tokens(view, _NA_ATOM_TOKEN_KEYS, num_nodes),
         node_vector_features=None,
         edge_index=edge_index,
@@ -379,7 +390,7 @@ FEATURE_DIMS: Dict[str, Dict[str, Dict[str, int]]] = {
     },
     "nucleic_acid": {
         "graph": {"node_features": 23, "node_tokens": 1, "edge_features": 3},
-        "atom_graph": {"node_features": 0, "node_tokens": 1, "edge_features": 1},
+        "atom_graph": {"node_features": 5, "node_tokens": 1, "edge_features": 1},
     },
     "protein": {
         "graph": {

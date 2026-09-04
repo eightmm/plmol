@@ -22,30 +22,57 @@ def sasa_structure_result(pdb_file: str):
     return native_structure_result(pdb_file)
 
 
+def atom_sasa_features(
+    atom_positions: np.ndarray,
+    res_names: list,
+    atom_names: list,
+    max_sasa: Optional[dict] = None,
+    default_max_sasa: float = 200.0,
+) -> dict:
+    """Per-atom SASA, its relative form, burial index and polarity.
+
+    The element comes from the leading letters of the PDB atom name, the same
+    rule the parser uses. *max_sasa* is the per-residue reference the relative
+    form divides by -- ``RESIDUE_MAX_SASA`` for a protein, ``NUCLEOTIDE_MAX_SASA``
+    for a nucleic acid -- so both molecule types get the same four quantities
+    from one computation rather than two.
+
+    Returns:
+        ``sasa`` (A^2), ``relative_sasa`` and ``burial_index`` in [0, 1], and
+        ``is_polar_sasa``, 1.0 where the element is N, O or S.
+    """
+    from .constants import RESIDUE_MAX_SASA
+    from .sasa import element_radius, is_polar_element, shrake_rupley
+
+    if max_sasa is None:
+        max_sasa = RESIDUE_MAX_SASA
+    n_atoms = len(atom_names)
+    elements = [_element_from_atom_name(name) for name in atom_names]
+    radii = np.array([element_radius(e) for e in elements], dtype=np.float32)
+    areas = shrake_rupley(np.asarray(atom_positions, dtype=np.float32), radii)
+    reference = np.array(
+        [max_sasa.get(res_names[i], default_max_sasa) or default_max_sasa
+         for i in range(n_atoms)],
+        dtype=np.float64,
+    )
+    relative = np.clip(areas / reference, 0.0, 1.0)
+    return {
+        "sasa": areas.astype(np.float32),
+        "relative_sasa": relative.astype(np.float32),
+        "burial_index": (1.0 - relative).astype(np.float32),
+        "is_polar_sasa": np.array([float(is_polar_element(e)) for e in elements],
+                                  dtype=np.float32),
+    }
+
+
 def _burial_index_native(
     atom_positions: np.ndarray,
     res_names: list,
     atom_names: list,
     n_atoms: int,
 ) -> np.ndarray:
-    """Burial index from Shrake-Rupley over the coordinates given.
-
-    The element comes from the leading letters of the PDB atom name, the same
-    rule the parser uses.
-    """
-    from .constants import RESIDUE_MAX_SASA
-    from .sasa import element_radius, shrake_rupley
-
-    radii = np.array(
-        [element_radius(_element_from_atom_name(atom_names[i])) for i in range(n_atoms)],
-        dtype=np.float32,
-    )
-    areas = shrake_rupley(np.asarray(atom_positions, dtype=np.float32), radii)
-    max_sasa = np.array(
-        [RESIDUE_MAX_SASA.get(res_names[i], 200.0) or 200.0 for i in range(n_atoms)],
-        dtype=np.float64,
-    )
-    return np.clip(1.0 - areas / max_sasa, 0.0, 1.0).astype(np.float32)
+    """Burial index from Shrake-Rupley over the coordinates given."""
+    return atom_sasa_features(atom_positions, res_names, atom_names)["burial_index"]
 
 
 def _element_from_atom_name(atom_name: str) -> str:

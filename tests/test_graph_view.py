@@ -432,10 +432,33 @@ class TestNucleicAcidViews:
         assert g["edge_features"].shape[-1] == dims["edge_features"]
         assert g["node_tokens"].shape[-1] == dims["node_tokens"]
 
-    def test_atom_graph_nodes_are_purely_token_valued(self, na_views):
-        g = as_graph(na_views["atom_graph"])
-        assert g["node_features"].shape[1] == 0
+    def test_atom_graph_nodes_carry_the_sasa_family(self, na_views):
+        """It used to be token-valued and nothing else -- node_features came
+        out zero wide while the protein atom graph carried ten columns."""
+        from plmol.graph_view import _NA_ATOM_NODE_KEYS
+
+        raw = na_views["atom_graph"]
+        g = as_graph(raw)
+        assert g["node_features"].shape[1] == 5
         assert g["node_tokens"] is not None
+        column = 0
+        for key in _NA_ATOM_NODE_KEYS:
+            block = np.asarray(raw[key])
+            assert np.allclose(
+                g["node_features"][:, column],
+                block.astype(g["node_features"].dtype),
+            ), f"{key} is not at column {column}"
+            column += 1
+
+    def test_the_atom_sasa_is_real(self, na_views):
+        raw = na_views["atom_graph"]
+        sasa = np.asarray(raw["sasa"])
+        assert sasa.min() >= 0.0 and sasa.max() > 1.0, "not all zero"
+        assert np.allclose(np.asarray(raw["burial_index"]),
+                           1.0 - np.asarray(raw["relative_sasa"]), atol=1e-6)
+        assert set(np.unique(np.asarray(raw["is_polar_sasa"]))) <= {0.0, 1.0}
+        backbone = np.asarray(raw["is_backbone"])
+        assert 0.0 < backbone.mean() < 1.0, "a nucleotide is part backbone, part base"
 
     def test_sources_are_distinguishable(self, na_views):
         assert as_graph(na_views["graph"])["source"] == "nucleic_residue_graph"
