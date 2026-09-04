@@ -15,11 +15,17 @@ authors = [
   { name = "Jaemin Sim" }
 ]
 keywords = [
-  "protein-ligand",
+  "protein",
   "ligand",
+  "protein-ligand",
+  "nucleic-acid",
+  "rna",
+  "dna",
   "pdb",
+  "mmcif",
   "smiles",
   "feature-extraction",
+  "structural-biology",
   "bioinformatics",
   "chemistry",
   "machine-learning",

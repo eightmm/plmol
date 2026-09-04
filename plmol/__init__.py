@@ -1,4 +1,4 @@
-"""plmol - Unified protein-ligand feature extraction toolkit."""
+"""plmol - Unified feature extraction for proteins, ligands, nucleic acids, and complexes."""
 
 # --- Protein ---
 from .protein.core import Protein
