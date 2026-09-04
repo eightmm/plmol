@@ -195,6 +195,14 @@ def mol_from_component_bonds(mol: Chem.Mol, bonds: dict) -> "tuple[Optional[Chem
     :meth:`plmol.parsers.mmcif_parser.MMCIFParser.get_component_bonds` returns
     for this component.
 
+    A component whose aromatic ring will not kekulize without knowing where its
+    hydrogens sit is left to the caller's fallback rather than repaired. Setting
+    each heavy atom's hydrogen count from the table was measured on 56 ligands
+    and made things worse, 50 usable to 45: the component's protonation is not
+    always the deposited one. Adding a hydrogen to an aromatic nitrogen until it
+    kekulizes recovered one more but returned a molecule whose ring was no
+    longer aromatic, which is a wrong answer that parses.
+
     Returns:
         ``(molecule, report)``. The molecule is ``None`` when the result will
         not sanitize, so the caller can fall back. The report counts
@@ -246,7 +254,24 @@ def mol_from_component_bonds(mol: Chem.Mol, bonds: dict) -> "tuple[Optional[Chem
     try:
         Chem.SanitizeMol(result)
     except Exception:
-        return None, report
+        # A nitrogen with four bonds and no charge is a quaternary ammonium the
+        # file did not mark; the component tables here carry no charge column.
+        # Charging it is the one repair worth trying, and only that.
+        repaired = Chem.RWMol(result)
+        charged = False
+        for atom in repaired.GetAtoms():
+            if (atom.GetSymbol() == "N" and atom.GetFormalCharge() == 0
+                    and atom.GetExplicitValence() == 4):
+                atom.SetFormalCharge(1)
+                charged = True
+        if not charged:
+            return None, report
+        result = repaired.GetMol()
+        try:
+            Chem.SanitizeMol(result)
+        except Exception:
+            return None, report
+        report["nitrogens_charged"] = True
     # The table carries no stereochemistry and the atoms arrive without bonds,
     # so nothing has assigned any. The coordinates have it: without this the
     # rebuilt ligand came back flat where the deposited SDF has four centres.

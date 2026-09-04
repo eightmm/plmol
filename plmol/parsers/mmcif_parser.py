@@ -327,6 +327,18 @@ class MMCIFParser(StructureParser):
                     break
         return result
 
+    def _cif_block(self):
+        """The file's sole CIF block, read once, or None if it cannot be read."""
+        if self._cif_document is None:
+            try:
+                self._cif_document = gemmi.cif.read(self.mmcif_path)
+            except Exception:
+                return None
+        try:
+            return self._cif_document.sole_block()
+        except Exception:
+            return None
+
     def get_component_bonds(self) -> Dict[str, Dict[frozenset, str]]:
         """Bond orders per chemical component, from the file's own table.
 
@@ -345,14 +357,8 @@ class MMCIFParser(StructureParser):
         _ORDER = {"sing": "SINGLE", "doub": "DOUBLE", "trip": "TRIPLE",
                   "arom": "AROMATIC", "quad": "QUADRUPLE"}
         bonds: Dict[str, Dict[frozenset, str]] = {}
-        if self._cif_document is None:
-            try:
-                self._cif_document = gemmi.cif.read(self.mmcif_path)
-            except Exception:
-                return bonds
-        try:
-            block = self._cif_document.sole_block()
-        except Exception:
+        block = self._cif_block()
+        if block is None:
             return bonds
         rows = block.find("_chem_comp_bond.", [
             "comp_id", "atom_id_1", "atom_id_2", "value_order",

@@ -622,3 +622,79 @@ class TestALenientReadForAnAwkwardStructure:
             assert len(substructure_matches(strict, pattern)) == len(
                 substructure_matches(through, pattern)
             )
+
+
+class TestAQuaternaryNitrogenIsCharged:
+    """The component tables carry no charge column."""
+
+    CIF = """data_TEST
+#
+loop_
+_chem_comp_bond.comp_id
+_chem_comp_bond.atom_id_1
+_chem_comp_bond.atom_id_2
+_chem_comp_bond.value_order
+_chem_comp_bond.pdbx_aromatic_flag
+_chem_comp_bond.pdbx_stereo_config
+_chem_comp_bond.pdbx_ordinal
+QNT N1 C1 sing N N 1
+QNT N1 C2 sing N N 2
+QNT N1 C3 sing N N 3
+QNT N1 C4 sing N N 4
+QNT C4 C5 sing N N 5
+QNT C5 C6 sing N N 6
+QNT C6 C7 sing N N 7
+QNT C7 C8 sing N N 8
+#
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_alt_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_entity_id
+_atom_site.label_seq_id
+_atom_site.pdbx_PDB_ins_code
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.occupancy
+_atom_site.B_iso_or_equiv
+_atom_site.pdbx_formal_charge
+_atom_site.auth_seq_id
+_atom_site.auth_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_atom_id
+_atom_site.pdbx_PDB_model_num
+ATOM 1 N N . GLY A 1 1 ? 0.000 0.000 0.000 1.00 20.00 ? 1 GLY A N 1
+ATOM 2 C CA . GLY A 1 1 ? 1.450 0.000 0.000 1.00 20.00 ? 1 GLY A CA 1
+ATOM 3 C C . GLY A 1 1 ? 2.400 1.000 0.000 1.00 20.00 ? 1 GLY A C 1
+ATOM 4 O O . GLY A 1 1 ? 2.400 2.200 0.000 1.00 20.00 ? 1 GLY A O 1
+HETATM 5 N N1 . QNT A 1 101 ? 10.000 0.000 0.000 1.00 20.00 ? 101 QNT A N1 1
+HETATM 6 C C1 . QNT A 1 101 ? 11.500 0.000 0.000 1.00 20.00 ? 101 QNT A C1 1
+HETATM 7 C C2 . QNT A 1 101 ? 9.500 1.400 0.000 1.00 20.00 ? 101 QNT A C2 1
+HETATM 8 C C3 . QNT A 1 101 ? 9.500 -0.700 1.200 1.00 20.00 ? 101 QNT A C3 1
+HETATM 9 C C4 . QNT A 1 101 ? 9.500 -0.700 -1.200 1.00 20.00 ? 101 QNT A C4 1
+HETATM 10 C C5 . QNT A 1 101 ? 10.000 -2.100 -1.400 1.00 20.00 ? 101 QNT A C5 1
+HETATM 11 C C6 . QNT A 1 101 ? 9.500 -2.800 -2.600 1.00 20.00 ? 101 QNT A C6 1
+HETATM 12 C C7 . QNT A 1 101 ? 10.000 -4.200 -2.800 1.00 20.00 ? 101 QNT A C7 1
+HETATM 13 C C8 . QNT A 1 101 ? 9.500 -4.900 -4.000 1.00 20.00 ? 101 QNT A C8 1
+#
+"""
+
+    def test_the_nitrogen_gets_its_charge(self, tmp_path):
+        # Four bonds on a neutral nitrogen fails to sanitize, and the file has no
+        # charge column to say otherwise. Charging it is the one repair tried.
+        from rdkit import Chem
+        from plmol.complex import MolecularComplex
+
+        path = tmp_path / "quaternary.cif"
+        path.write_text(self.CIF)
+        ligand = MolecularComplex.from_mmcif(str(path), standardize=False).molecules["ligand"]
+
+        assert ligand.metadata["bond_orders_from_file"] is True
+        assert ligand.metadata["component_bond_report"].get("nitrogens_charged") is True
+        assert sum(a.GetFormalCharge() for a in ligand._rdmol.GetAtoms()) == 1
+        assert Chem.MolToSmiles(ligand._rdmol) == "CCCCC[N+](C)(C)C"

@@ -44,6 +44,16 @@ the protein, ligand and interaction blocks from a single file.
 > the protonation state the component definition specifies, and all four hemes of
 > 4HHB come out identical.
 >
+> A component whose ring will not kekulize is left to the distance fallback
+> rather than repaired: forcing each atom's hydrogen count from the table was
+> measured on 56 ligands and made things worse (50 usable to 45, because the
+> component's protonation is not always the deposited one), and adding hydrogens
+> to aromatic nitrogens until a ring kekulizes recovered one more but returned it
+> with the ring no longer aromatic. A neutral nitrogen with four bonds is the one
+> thing repaired — the tables carry no charge column, so it is charged.
+> On a sample of 60 affinity-annotated entries, 52 of the 58 with a drug-like
+> ligand build from the table.
+>
 > `ligand.metadata["bond_orders_from_file"]` reports whether the table was there;
 > `["component_bond_report"]` counts the bonds applied, the table entries whose
 > atoms the model lacks (every hydrogen, when hydrogens were dropped), and any
