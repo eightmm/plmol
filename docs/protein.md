@@ -177,20 +177,38 @@ Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA,
 
 > **The SASA columns depend on how the structure is oriented.** plmol samples
 > each atom's sphere on a lattice fixed in space rather than one carried with
-> the molecule, so rotating a structure moves them. Measured over four
-> orientations of the example protein at the default 100 sample points: per-atom
-> areas have a mean spread of 43% of the atom's own area, and 362 of 3260 atoms
-> come out as exactly zero in one orientation and non-zero in another. In the
-> residue block the relative columns `[63:68]` move by up to 0.14, and
-> `polar_apolar_ratio` `[68]` swings the whole 0–1 range on 10 of 416 residues —
-> those are residues with no measurable surface, where the ratio is `0/1e-8`
-> when nothing survives the occlusion test and `1.0` when one polar sample point
-> does. Translating a structure changes nothing.
+> the molecule, so rotating a structure moves them. How far it moves them is
+> one sample point: at the default 100 points a point is worth about 1.2 A², and
+> over eight random rotations of the example protein the per-atom range averages
+> 1.41 A² (median 1.21, worst 8.45) while the total moves by 0.95%. At 1000
+> points the per-atom range averages 0.27 A² and the total moves by 0.14%.
+> Translating a structure changes nothing.
 >
-> Raising `n_points` helps and does not cure it: ten times the samples brings
-> the mean spread to 18% and still leaves 133 atoms flipping. `burial_index` and
-> `relative_sasa` on the atom graph, the surface burial channel and the voxel's
-> inherit the same behaviour.
+> Relative figures overstate this, because the atoms with the largest ratios are
+> the ones with almost no surface. 493 of 3260 atoms come out exactly zero in one
+> orientation and non-zero in another, and the largest area any of them reaches
+> is 4.8 A². Among genuinely exposed atoms — mean area above 10 A² — the spread
+> is 18% at 100 points and 3% at 1000. In the residue block the relative columns
+> `[63:68]` move by up to 0.14, and `polar_apolar_ratio` `[68]` swings the whole
+> 0–1 range on 10 of 416 residues — again residues with no measurable surface,
+> where the ratio is `0/1e-8` when nothing survives the occlusion test and `1.0`
+> when one polar sample point does.
+>
+> This is the discretisation floor of Shrake–Rupley rather than a defect in this
+> implementation; freesasa, Biopython and MDTraj all default to 100 points too.
+> `burial_index` and `relative_sasa` on the atom graph, the surface burial
+> channel and the voxel's inherit the same behaviour. The featurizers do not
+> expose `n_points`; `plmol.sasa.shrake_rupley` and
+> `plmol.sasa.native_structure_result` do.
+>
+> Orienting the lattice by a frame taken from the coordinates would make the
+> answer deterministic but no more accurate, and the frame is only as stable as
+> the gap between the inertia eigenvalues — small for a globular protein, zero
+> for a symmetric oligomer — so it would trade orientation dependence for a
+> worse perturbation dependence. What would cure it is an analytic area, the
+> exact area of a sphere outside the union of its neighbours by Gauss–Bonnet,
+> which is both rotation-invariant and exact and which would change every SASA
+> value plmol reports.
 >
 > A guard on the ratio does not cure it either, and this was measured rather
 > than assumed. Refusing to divide until the residue has at least *k* sample
@@ -198,8 +216,7 @@ Edge construction: all residue pairs (i, j) where any of the 4 distances (CA-CA,
 > swing; at k=20 — which zeroes the ratio for 156 of the 416 residues — one
 > still swings the full range and six swing more than half. The count is not
 > even monotone in *k*, because the threshold becomes a boundary of its own that
-> the rotation crosses, trading one discontinuity for another. The cure is a
-> lattice oriented by the molecule, not a floor on the denominator.
+> the rotation crosses, trading one discontinuity for another.
 >
 > Sub-precision movement is not the cause: shifting every atom by 0.0004 Å,
 > which re-rounds all three decimals a PDB file stores, changes none of these

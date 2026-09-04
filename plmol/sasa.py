@@ -78,24 +78,47 @@ def shrake_rupley(
 
        The sample directions are fixed in space, not carried with the
        molecule, so this answer depends on how the structure is oriented.
-       Rotating the example protein and measuring per-atom areas over four
-       orientations: the mean spread is 43% of the atom's own area at the
-       default 100 points, the worst atom varies by four times its mean, and
-       362 of 3260 atoms come out as exactly zero in one orientation and
-       non-zero in another. Raising ``n_points`` to 1000 -- ten times the work
-       -- brings the mean spread to 18% and still leaves 133 such atoms.
+       The size of that dependence is the sampling quantum: one point is worth
+       ``4 pi r^2 / n_points``, about 1.2 A^2 at the default 100 points, and
+       the movement is roughly one such point. Over eight random rotations of
+       the example protein the per-atom range averages 1.41 A^2 (median 1.21,
+       worst 8.45) and the total moves by 0.95%. At 1000 points -- ten times
+       the work -- the per-atom range averages 0.27 A^2 and the total moves by
+       0.14%.
+
+       Read the relative figures with that in mind. Quoted against each atom's
+       own area the spread looks alarming, but the atoms that produce the large
+       ratios are the ones with almost no surface to begin with: 493 of 3260
+       come out exactly zero in one orientation and non-zero in another, and
+       the largest area any of them ever reaches is 4.8 A^2. Among atoms that
+       are actually exposed -- mean area above 10 A^2 -- the spread is 18% at
+       100 points and 3% at 1000.
 
        Translating a structure changes nothing at all; this is rotation alone.
 
-       Everything plmol derives from SASA inherits it: the residue SASA block,
-       ``burial_index`` and ``relative_sasa`` on the atom graph, the surface
-       point cloud's burial channel, and the voxel's. It is a property of
-       point-sampled SASA rather than of this implementation, and the cure is
-       a lattice oriented by the molecule rather than by the axes. A floor on
-       the denominator of ``polar_apolar_ratio`` was tried and measured
-       instead: for every threshold from one sample point to twenty it leaves
-       residues swinging the whole range, because the threshold becomes a
-       boundary of its own that the rotation crosses.
+       This is the discretisation floor of Shrake-Rupley, not a defect in this
+       implementation, and freesasa, Biopython and MDTraj all sample 100 points
+       by default as well. Two things do not fix it. Orienting the lattice by
+       a frame derived from the coordinates makes the answer a deterministic
+       function of the molecule but no closer to the true area, and the frame
+       itself is only as stable as the gap between the inertia eigenvalues --
+       for a globular protein that gap is small and for a symmetric oligomer it
+       is zero, so the orientation dependence would be traded for a
+       perturbation dependence that is worse. A floor on the denominator of
+       ``polar_apolar_ratio`` was tried and measured: for every threshold from
+       one sample point to twenty it leaves residues swinging the whole range,
+       because the threshold becomes a boundary of its own that the rotation
+       crosses. What would fix it is an analytic area -- the exact area of a
+       sphere outside the union of its neighbours, by Gauss-Bonnet -- which is
+       both rotation-invariant and exact, and which would change every SASA
+       value plmol reports.
+
+       Everything derived from SASA inherits the behaviour: the residue SASA
+       block, ``burial_index`` and ``relative_sasa`` on the atom graph, the
+       surface point cloud's burial channel, and the voxel's. Callers who need
+       a tighter answer can raise ``n_points`` here and in
+       :func:`native_structure_result`; the featurizers do not expose it and always sample
+       at the default.
 
     Each atom's expanded sphere is sampled at ``n_points`` positions; a point is
     accessible unless it falls inside another atom's expanded sphere. The area
